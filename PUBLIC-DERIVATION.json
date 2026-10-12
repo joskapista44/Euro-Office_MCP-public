@@ -1,11 +1,11 @@
 {
   "PRODUCT": "Euro-Office_MCP",
-  "SOURCE_COMMIT": "8288132521ee103d863daa251b073703df536fa7",
+  "SOURCE_COMMIT": "17286d960e61224ba60b9efe9e4f573ea28a7a7c",
   "POLICY": "release/public/policy.json",
   "POLICY_SHA256": "43f6536d4c21c1e7f0349a3e6ddf227b6fbd3307f05d3322260a7d0b47a6617f",
-  "PUBLIC_TREE_SHA256": "4ed80bb228820f576fd9b38a2662c39c40e92193af2d8ab5b356daca33becca0",
+  "PUBLIC_TREE_SHA256": "6b73c8a5b1ca58ae623f1ff2af9893f48165359c4a4670b10aa886d597e20fae",
   "FILES": 348,
-  "EXCLUDED_SOURCE_FILES": 1249,
+  "EXCLUDED_SOURCE_FILES": 1254,
   "GATES": {
     "FORBIDDEN": "PASS",
     "SECRET": "PASS",
@@ -46,7 +46,7 @@
     {
       "path": ".github/workflows/ci.yml",
       "mode": "644",
-      "sha256": "d320ad96a114fefaa849836b357c29ffc225994e68daef7d7decc5b8ff8c433c",
+      "sha256": "8c6a08812b88a161eb969637e50d4f71397689c028dc3d9db8f02875e46b4c57",
       "source": "release/public/root/.github/workflows/ci.yml",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -54,7 +54,7 @@
     {
       "path": "CHANGELOG.md",
       "mode": "644",
-      "sha256": "39a139e9a1dced29d775a8e0e91d2fafc72e504b591afc140e517172f7aeb452",
+      "sha256": "e57cc8c9262af4fd1d665146bc62135ac9cb5a0837a3078ae65775fa6ba614ca",
       "source": "release/public/root/CHANGELOG.md",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -582,7 +582,7 @@
     {
       "path": "package-lock.json",
       "mode": "644",
-      "sha256": "299ef0844b70103ed6232cf82bf553e6fd8e828af90c676051d0d4fb987f3ee3",
+      "sha256": "f93b29fe1f45ce35f073e14394630f0b31c59ce2c162881dffab145c1c87f8d0",
       "source": "package-lock.json",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -590,7 +590,7 @@
     {
       "path": "package.json",
       "mode": "644",
-      "sha256": "ed12e1291e98d2122bc5bdcbf7bc0c75eeda8344cb5db8c3daa4d6cd2f19742d",
+      "sha256": "629a9be20193ebe6effabdfe15b58403335b07468628554455877febb7c7b7c6",
       "source": "package.json",
       "transformed": false,
       "licence": "Apache-2.0"

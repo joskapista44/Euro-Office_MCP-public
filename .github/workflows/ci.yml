@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
       # the checkout must be exactly the gated derivation recorded in PUBLIC-DERIVATION.json; no symlink, no secret shape
       - run: node scripts/public-tree-check.cjs
   test:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm test
   reproducible-build:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
       - run: node scripts/build-artifact.cjs --rc "$GITHUB_SHA" --out "$RUNNER_TEMP/a"
       - run: node scripts/build-artifact.cjs --rc "$GITHUB_SHA" --out "$RUNNER_TEMP/b"
       - name: the two builds are byte-identical

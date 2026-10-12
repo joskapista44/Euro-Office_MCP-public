@@ -2,6 +2,12 @@
 
 This project follows [Semantic Versioning](https://semver.org/). Versions before 1.0.0 were internal.
 
+## 1.0.1
+
+- CI runs on Node.js 22 (the runtime the release is accepted on). On Node.js 20 the test script's glob
+  (`node --test "test/**/*.test.cjs"`) is not expanded, so the 1.0.0 CI test job failed before running any test;
+  the suite itself passes on Node.js 20 when the files are listed explicitly. No runtime or product change.
+
 ## 1.0.0
 
 First public release.
