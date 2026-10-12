@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/joskapista44/Euro-Office_MCP/config/euro-office-mcp.schema.json",
+  "title": "Euro-Office_MCP product config (schemaVersion 2)",
+  "description": "No secret value and no credential reference may appear here (M11.2): the broker uses the REQUESTER's own Nextcloud credential; the config only routes to the broker. Secret-shaped keys and the superseded `credential` key are refused at startup (src/server/config.cjs). Production path: /etc/euro-office-mcp/config.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "nextcloud"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "nextcloud": { "type": "object", "additionalProperties": false, "required": ["url"],
+      "properties": { "url": { "type": "string", "pattern": "^https://" } } },
+    "documentServer": { "type": "object", "additionalProperties": false,
+      "properties": { "expectedUrl": { "type": "string", "pattern": "^https://" } } },
+    "broker": { "type": "object", "additionalProperties": false, "required": ["url"],
+      "description": "Absent: the config is valid, every editor operation is refused (fail-closed). Non-secret route only.",
+      "properties": {
+        "url": { "type": "string", "pattern": "^https?://(127\\.0\\.0\\.1|localhost)(:[0-9]+)?/", "description": "the loopback broker route, e.g. http://127.0.0.1:3420/api/euro-broker" },
+        "instance": { "type": "string", "pattern": "^[a-z0-9_-]{1,32}$" },
+        "timeoutMs": { "type": "integer", "minimum": 1 } } },
+    "timeouts": { "type": "object", "additionalProperties": false,
+      "properties": { "openMs": { "type": "integer", "minimum": 1 }, "commandMs": { "type": "integer", "minimum": 1 } } },
+    "playwright": { "type": "object", "additionalProperties": false, "properties": { "path": { "type": "string" } } },
+    "log": { "type": "object", "additionalProperties": false, "properties": { "level": { "enum": ["error", "warn", "info", "debug"] } } }
+  }
+}

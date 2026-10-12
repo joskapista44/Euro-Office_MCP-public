@@ -1,0 +1,267 @@
+{
+  "source": "joskapista44/euro-mcp",
+  "commit": "f8c6d6cfeb82ab220697ca7450cdd88d7edad9a5",
+  "registryFile": "docx-agent-capabilities.cjs",
+  "registrySha256": "02a7c7a5d2d1e9106b53faf35ad200a33e931bc6e0d8c48b90c596680f238693",
+  "explicitlyUnsupported": [],
+  "count": 28,
+  "intents": [
+    {
+      "intent": "rewrite_paragraph",
+      "primitive": "replace",
+      "action": null,
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "format_text",
+      "primitive": "format",
+      "action": null,
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "insert_paragraph_before",
+      "primitive": "paragraph",
+      "action": "insert_before",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "insert_paragraph_after",
+      "primitive": "paragraph",
+      "action": "insert_after",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "delete_paragraph",
+      "primitive": "paragraph",
+      "action": "delete",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "move_paragraph_before",
+      "primitive": "paragraph",
+      "action": "move_before",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "move_paragraph_after",
+      "primitive": "paragraph",
+      "action": "move_after",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "apply_list",
+      "primitive": "list",
+      "action": "apply",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "set_list_level",
+      "primitive": "list",
+      "action": "set_level",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight",
+        "live_before_observation"
+      ]
+    },
+    {
+      "intent": "indent_list_item",
+      "primitive": "list",
+      "action": "indent",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight",
+        "live_before_observation"
+      ]
+    },
+    {
+      "intent": "outdent_list_item",
+      "primitive": "list",
+      "action": "outdent",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight",
+        "live_before_observation"
+      ]
+    },
+    {
+      "intent": "set_list_type",
+      "primitive": "list",
+      "action": "set_type",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight",
+        "live_before_observation"
+      ]
+    },
+    {
+      "intent": "remove_list",
+      "primitive": "list",
+      "action": "remove",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight",
+        "live_before_observation"
+      ]
+    },
+    {
+      "intent": "replace_table_cell",
+      "primitive": "table",
+      "action": "set_cell_text",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "insert_table_row_before",
+      "primitive": "table",
+      "action": "add_row_before",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "insert_table_row_after",
+      "primitive": "table",
+      "action": "add_row_after",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "delete_table_row",
+      "primitive": "table",
+      "action": "delete_row",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "insert_table_column_before",
+      "primitive": "table",
+      "action": "add_column_before",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "insert_table_column_after",
+      "primitive": "table",
+      "action": "add_column_after",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "delete_table_column",
+      "primitive": "table",
+      "action": "delete_column",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "merge_table_cells",
+      "primitive": "table",
+      "action": "merge_cells",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "split_table_cell",
+      "primitive": "table",
+      "action": "split_cell",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "add_bookmark",
+      "primitive": "rich_structure",
+      "action": "add_bookmark",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "add_link",
+      "primitive": "rich_structure",
+      "action": "add_hyperlink",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "add_footnote",
+      "primitive": "rich_structure",
+      "action": "add_footnote",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "add_endnote",
+      "primitive": "rich_structure",
+      "action": "add_endnote",
+      "requires": [
+        "stable_target",
+        "fresh_live_preflight"
+      ]
+    },
+    {
+      "intent": "edit_header",
+      "primitive": "rich_structure",
+      "action": "set_header",
+      "requires": [
+        "fresh_live_preflight",
+        "single_section"
+      ]
+    },
+    {
+      "intent": "edit_footer",
+      "primitive": "rich_structure",
+      "action": "set_footer",
+      "requires": [
+        "fresh_live_preflight",
+        "single_section"
+      ]
+    }
+  ]
+}

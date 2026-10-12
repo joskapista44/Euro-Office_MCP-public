@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 2,
+  "nextcloud": { "url": "https://nextcloud.example.org" },
+  "documentServer": { "expectedUrl": "https://eurooffice.example.org/" },
+  "broker": { "url": "http://127.0.0.1:3420/api/euro-broker", "instance": "production", "timeoutMs": 30000 },
+  "timeouts": { "openMs": 90000, "commandMs": 15000 },
+  "playwright": { "path": "/opt/euro-office-mcp/playwright" },
+  "log": { "level": "info" }
+}

@@ -1,0 +1,37 @@
+{
+  "_comment": "Fresh install on an UNPATCHED Euro-Office Document Server 9.3.4.60 bundle (M12). Each block is inserted right before its anchor (its own, else the target's); blocks sharing an anchor in this order. The chart read layer sits at the end of the cell builder scope, after ApiChart.prototype is replaced and GetSeries is assigned. cell = own chart read layer + DS Bridge /8 = the production cell bundle since 2026-10-12 (f3d7d8e0; it replaced 73c9211d, whose base was the private historical chart patch); word = DS Bridge /3, byte-identical to the production-accepted bundle.",
+  "cell": {
+    "file": "sdkjs/cell/sdk-all.js",
+    "input_sha256": "2e5059f40b8e4c669b1c24d1724423aa8de68a957181a71cd616bb9bf742cbce",
+    "anchor": "Api.GetSheets=function(){",
+    "blocks": [
+      {
+        "file": "euro-office-chart-read-v1/chart-read-block.js",
+        "sha256": "8a2e2dfb8ed2a520fe52bcd3e4d0e00c9ba1a7c5b9ae46b8a307e40c95e21ed6",
+        "layer": "euro-office-chart-read-v1/9.3.4.60/1",
+        "anchor": "AscBuilder.Cell.init=function("
+      },
+      {
+        "file": "euro-office-bridge-v1/rev8-candidate/bridge-block.js",
+        "sha256": "9f285b897f58a751c3164791b2416e085d627a1bd10419261622349806a96be7",
+        "layer": "euro-office-bridge-v1/9.3.4.60/8"
+      }
+    ],
+    "output_sha256": "f3d7d8e06e6349291e9c648e17d74a837264acfc01f78544c43e9f4d4b8c4993",
+    "patchVersion": "euro-office-bridge-v1/9.3.4.60/8"
+  },
+  "word": {
+    "file": "sdkjs/word/sdk-all.js",
+    "input_sha256": "f293db632c599a9ace68c765feea751be12a2b500408d7a997e20e6dea6e65c8",
+    "anchor": "Api.attachEvent=function(eventName,callback){",
+    "blocks": [
+      {
+        "file": "euro-office-bridge-word-v1/rev3-candidate/bridge-block.js",
+        "sha256": "c55d465bd7821ce661082008c5289e53727d977a5adb2a3c18ffa1bdf23d734a",
+        "layer": "euro-office-bridge-word-v1/9.3.4.60/3"
+      }
+    ],
+    "output_sha256": "7aeb04e9b602691c64cbbf0cf665c32b064a75565684ae3be930d53b5fa82a09",
+    "patchVersion": "euro-office-bridge-word-v1/9.3.4.60/3"
+  }
+}

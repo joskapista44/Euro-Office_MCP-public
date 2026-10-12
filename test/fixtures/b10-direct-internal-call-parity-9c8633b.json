@@ -1,0 +1,259 @@
+{
+ "_NOTE": "B10 direct-internal call sequences of the PRE-cutover product (print.cjs lower() at 9c8633b, the last source with the direct-internal path), recorded by running each lowered body against a recording fake model. The /7 Bridge WRITE must make exactly these calls (M11.5b.1 PARITY, kept after the M11.5b.4 cutover removed that path).",
+ "source": "9c8633b920f3b2799418109d586cea475971559e",
+ "calls": {
+  "{\"intent\":\"set_print_fit\",\"fitToWidth\":1,\"fitToHeight\":2}": [
+   [
+    "ps",
+    "asc_setFitToWidth",
+    1
+   ],
+   [
+    "ps",
+    "asc_setFitToHeight",
+    2
+   ],
+   [
+    "m",
+    "setFitToPage",
+    true
+   ]
+  ],
+  "{\"intent\":\"set_print_fit\",\"fitToWidth\":0,\"fitToHeight\":0}": [
+   [
+    "ps",
+    "asc_setFitToWidth",
+    0
+   ],
+   [
+    "ps",
+    "asc_setFitToHeight",
+    0
+   ],
+   [
+    "m",
+    "setFitToPage",
+    false
+   ],
+   [
+    "ps",
+    "asc_setScale",
+    100
+   ]
+  ],
+  "{\"intent\":\"set_print_scale\",\"scale\":75}": [
+   [
+    "ps",
+    "asc_setFitToWidth",
+    0
+   ],
+   [
+    "ps",
+    "asc_setFitToHeight",
+    0
+   ],
+   [
+    "m",
+    "setFitToPage",
+    false
+   ],
+   [
+    "ps",
+    "asc_setScale",
+    75
+   ]
+  ],
+  "{\"intent\":\"set_paper_size\",\"paper\":\"A4\"}": [
+   [
+    "ps",
+    "asc_setWidth",
+    210
+   ],
+   [
+    "ps",
+    "asc_setHeight",
+    297
+   ]
+  ],
+  "{\"intent\":\"set_paper_size\",\"paper\":\"US Letter\"}": [
+   [
+    "ps",
+    "asc_setWidth",
+    215.9
+   ],
+   [
+    "ps",
+    "asc_setHeight",
+    279.4
+   ]
+  ],
+  "{\"intent\":\"set_first_page_number\",\"value\":3}": [
+   [
+    "ps",
+    "asc_setFirstPageNumber",
+    3
+   ]
+  ],
+  "{\"intent\":\"set_first_page_number\",\"value\":null}": [
+   [
+    "ps",
+    "asc_setFirstPageNumber",
+    null
+   ]
+  ],
+  "{\"intent\":\"set_print_centering\",\"horizontal\":true}": [
+   [
+    "ppo",
+    "asc_setHorizontalCentered",
+    true
+   ]
+  ],
+  "{\"intent\":\"set_print_centering\",\"vertical\":false}": [
+   [
+    "ppo",
+    "asc_setVerticalCentered",
+    false
+   ]
+  ],
+  "{\"intent\":\"set_header_footer\",\"slot\":\"oddHeader\",\"value\":\"&CTitle\"}": [
+   [
+    "H",
+    "Create_NewPoint"
+   ],
+   [
+    "H",
+    "StartTransaction"
+   ],
+   [
+    "hf",
+    "setOddHeader",
+    "&CTitle"
+   ],
+   [
+    "H",
+    "EndTransaction"
+   ]
+  ],
+  "{\"intent\":\"set_header_footer\",\"slot\":\"evenFooter\",\"value\":null}": [
+   [
+    "H",
+    "Create_NewPoint"
+   ],
+   [
+    "H",
+    "StartTransaction"
+   ],
+   [
+    "hf",
+    "setEvenFooter",
+    null
+   ],
+   [
+    "H",
+    "EndTransaction"
+   ]
+  ],
+  "{\"intent\":\"set_header_footer_flag\",\"flag\":\"differentFirst\",\"value\":true}": [
+   [
+    "H",
+    "Create_NewPoint"
+   ],
+   [
+    "H",
+    "StartTransaction"
+   ],
+   [
+    "hf",
+    "setDifferentFirst",
+    true
+   ],
+   [
+    "H",
+    "EndTransaction"
+   ]
+  ],
+  "{\"intent\":\"set_header_footer_flag\",\"flag\":\"differentOddEven\",\"value\":false}": [
+   [
+    "H",
+    "Create_NewPoint"
+   ],
+   [
+    "H",
+    "StartTransaction"
+   ],
+   [
+    "hf",
+    "setDifferentOddEven",
+    false
+   ],
+   [
+    "H",
+    "EndTransaction"
+   ]
+  ],
+  "{\"intent\":\"set_page_break\",\"axis\":\"row\",\"at\":11}": [
+   [
+    "m",
+    "changeRowColBreaks",
+    null,
+    10,
+    {
+     "printArea": [
+      10,
+      null
+     ]
+    },
+    false,
+    true
+   ]
+  ],
+  "{\"intent\":\"set_page_break\",\"axis\":\"row\",\"at\":11,\"remove\":true}": [
+   [
+    "m",
+    "changeRowColBreaks",
+    10,
+    null,
+    {
+     "printArea": [
+      10,
+      null
+     ]
+    },
+    false,
+    true
+   ]
+  ],
+  "{\"intent\":\"set_page_break\",\"axis\":\"column\",\"at\":\"E\"}": [
+   [
+    "m",
+    "changeRowColBreaks",
+    null,
+    4,
+    {
+     "printArea": [
+      null,
+      4
+     ]
+    },
+    true,
+    true
+   ]
+  ],
+  "{\"intent\":\"set_page_break\",\"axis\":\"column\",\"at\":\"E\",\"remove\":true}": [
+   [
+    "m",
+    "changeRowColBreaks",
+    4,
+    null,
+    {
+     "printArea": [
+      null,
+      4
+     ]
+    },
+    true,
+    true
+   ]
+  ]
+ }
+}

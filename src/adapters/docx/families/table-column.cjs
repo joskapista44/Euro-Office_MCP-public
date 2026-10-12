@@ -1,0 +1,379 @@
+'use strict';
+
+const { norm, textUnits } = require('../inventory.cjs');
+const { UNRESOLVED } = require('./text.cjs');
+const { tableRead, cellSelector, scopeOf, CELL_KEYS } = require('./table.cjs');
+
+/**
+ * DOCX `table-column` family (M4 Wave 4c): insert_table_column_before, insert_table_column_after,
+ * delete_table_column -- all P1, PRIMITIVE_INTEGRAL (owner brief W4c, owner channel, 31 points).
+ *
+ * Source oracle (joskapista44/euro-mcp f8c6d6cf, read-only; audit: tracker
+ * m4-w4c-table-column-20260924 #ref):
+ *   planner     docx-agent-planner.cjs:60 (terminalColumnCount required; delete: terminalTableAnchor)
+ *   target      docx-tables.cjs:23-31 (a GLOBAL cell text; the HTML projection's PHYSICAL index)
+ *   lower       docx-session-tables.cjs:37-39 (frame.evaluate addColumnLeft / addColumnRight /
+ *               remColumn on the outer editor -- the backdoor)
+ *   L1          docx-tables.cjs:531-760 (every row's physical cell count +-1, original texts shifted)
+ *   retry / L2  docx-agent-idempotency.cjs:155-162, docx-agent-whole-verify.cjs:74 (the physical
+ *               width; a table whose rows differ in cell count -> fail closed)
+ *
+ * Measured live (test/live/docx-column-probe.live.cjs, column probe 1, 2026-09-24):
+ *   - public ApiTable.AddColumn(cell, isBefore) inside callCommand puts ONE empty column directly
+ *     before/after the target's column -- first, middle and last alike; RemoveColumn(cell) removes
+ *     exactly it and RETURNS false even then (the fresh read decides, never the callback);
+ *   - colspan (a 3-wide merge): an insert on the span's EDGE or outside it keeps the span and its
+ *     content; an insert INSIDE the span put the merged row's new cell before the span, so the merge
+ *     then covered other columns (semantic drift); a delete of a column the span covers LOST the
+ *     merged content; a merged cell as the target of a delete removed all its columns;
+ *   - the public Split does not make a ragged grid: the other rows' cells get colspan (the same rule);
+ *   - a vertical merge: refused by `tableRead` for every table family (the W4b guard, unchanged).
+ *
+ * Contract (owner brief W4c points 3-4, 6-9, 11-12, 19, 23-26):
+ *   identity     TABLE identity + CELL identity (the W4a `cellSelector`); the target's LOGICAL column
+ *                comes from the fresh HTML grid (colspan), never from its physical index. A target
+ *                cell spanning several columns has no single logical column -> FAIL_CLOSED.
+ *   shape        before dispatch: rows of unequal logical width, an insert boundary strictly inside
+ *                any colspan, a delete of a column any colspan covers -> FAIL_CLOSED_UNSUPPORTED_SHAPE.
+ *   terminal     `terminalColumnCount` (the target table's LOGICAL width after THIS operation) is
+ *                carried by the operation; delete REQUIRES a table anchor outside the deleted column.
+ *   task         two or more column operations in one task each carry a table anchor; the group's
+ *                LAST terminal width is the final projected state (successor-aware L2, W2.1).
+ *   insert       SATISFIED only when the target is present and the declared-side logical column is
+ *                empty (every row's cell there empty, span 1) at the terminal width.
+ *   delete       SATISFIED only when the target is absent from the anchor table at the terminal width.
+ *   L1           every row: its cells in order, one new EMPTY cell at the declared boundary (insert)
+ *                or the target column's cell gone (delete); rows unchanged; the logical width terminal.
+ *   L3           every preserved cell (text, paragraphs, content shape, first-paragraph properties,
+ *                colspan) at its mapped place; every other table unchanged; text outside unchanged.
+ *                (A new cell wider than span 1 already fails the L1 terminal width.)
+ */
+
+const INTENTS = Object.freeze({
+  insert_table_column_before: { action: 'add', before: true },
+  insert_table_column_after: { action: 'add', before: false },
+  delete_table_column: { action: 'remove', before: null },
+});
+
+function plan(step, index) {
+  const kind = INTENTS[step.intent];
+  if (!kind) return { ok: false, detail: `step ${index}: ${step.intent} is not a table-column intent` };
+  const sel = cellSelector(step.selector);
+  if (!sel || !norm(sel.text)) return { ok: false, detail: `step ${index}: a ${step.intent} selector is { text }, { tableCell: { text [, tableAnchor] } } or the combined form with the same non-empty text` };
+  if (step.terminalTableAnchor !== undefined && typeof step.terminalTableAnchor !== 'string') return { ok: false, detail: `step ${index}: terminalTableAnchor must be a string` };
+  const fromStep = typeof step.terminalTableAnchor === 'string' ? norm(step.terminalTableAnchor) : null;
+  const fromSel = sel.tableAnchor === null ? null : norm(sel.tableAnchor);
+  if (fromStep !== null && fromSel !== null && fromStep !== fromSel) return { ok: false, detail: `step ${index}: tableCell.tableAnchor and terminalTableAnchor name different cells` };
+  const tableAnchor = fromSel !== null ? fromSel : fromStep;
+  if (tableAnchor !== null && (!tableAnchor || tableAnchor === norm(sel.text))) return { ok: false, detail: `step ${index}: a table anchor must be a non-empty cell text other than the target cell's` };
+  if (kind.action === 'remove' && tableAnchor === null) return { ok: false, detail: `step ${index}: delete_table_column requires a surviving table anchor (tableCell.tableAnchor or terminalTableAnchor)` };
+  if (!Number.isInteger(step.terminalColumnCount) || step.terminalColumnCount < (kind.action === 'add' ? 2 : 1)) return { ok: false, detail: `step ${index}: ${step.intent} requires terminalColumnCount, the target table's column count after this operation` };
+  return { ok: true, operation: { id: step.id || `s${index}`, intent: step.intent, selector: step.selector, targetText: norm(sel.text), tableAnchor, terminalColumnCount: step.terminalColumnCount, preservationMode: 'PRIMITIVE_INTEGRAL', ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) } };
+}
+
+/** Task level (pure), the table-row rule for columns: grouped by table anchor, the group's final width. */
+function annotateTask(operations) {
+  const cols = operations.filter(op => INTENTS[op.intent]);
+  if (cols.length < 2) return operations;
+  const ungroupable = cols.some(op => op.tableAnchor === null);
+  const finalOf = new Map();
+  for (const op of cols) if (op.tableAnchor !== null) finalOf.set(op.tableAnchor, op.terminalColumnCount);
+  return operations.map((op, i) => {
+    if (!INTENTS[op.intent]) return op;
+    if (ungroupable) return { ...op, columnGroup: Object.freeze({ ungroupable: true }) };
+    const later = operations.slice(i + 1).filter(b => INTENTS[b.intent] && b.tableAnchor === op.tableAnchor);
+    return { ...op, columnGroup: Object.freeze({ finalColumnCount: finalOf.get(op.tableAnchor), later: Object.freeze(later.map(b => b.id)),
+      laterOps: Object.freeze(later.map(b => Object.freeze({ intent: b.intent, targetText: b.targetText, tableAnchor: b.tableAnchor }))) }) };
+  });
+}
+
+// ---- the observation ----------------------------------------------------------------------------
+
+const cellKey = c => JSON.stringify([c.text, c.paragraphs, c.simple, CELL_KEYS.filter(k => c.format[k] !== undefined).map(k => [k, c.format[k]])]);
+
+/**
+ * M5 (owner decision A after owner channel, known-limits row 14): the column family's table read
+ * on tables with a grid GAP (w:gridAfter). The projection adds a trailing EMPTY cell marked
+ * `placeholder` that the driver read does not have (gridAfter probe, run ...fcd2df). Reconciled per
+ * row from the fresh read: the placeholders are the row's trailing gap, each span 1 and empty, and the
+ * projected cells before them match the driver row one to one. Anything else -> not reconciled
+ * (refused). A table set without any placeholder takes the unchanged `tableRead` path.
+ */
+function columnRead(primary) {
+  const html0 = ((primary && primary.blocks) || []).filter(b => b.kind === 'table');
+  if (!html0.some(t => (t.rows || []).some(r => r.some(c => c.placeholder)))) {
+    const read = tableRead(primary);
+    return read.ok ? { ...read, gaps: read.html.map(t => (t.rows || []).map(() => 0)) } : read;
+  }
+  const d = primary && primary.document;
+  const tables = d ? d.tables : null;
+  if (!Array.isArray(tables)) return { ok: false, reason: 'tables-unreadable' };
+  if (html0.some(t => (t.rows || []).some(r => r.some(c => c.rowspan > 1)))) return { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:vertical-merge' };
+  if (tables.length !== html0.length) return { ok: false, reason: 'table-read-shape-mismatch' };
+  // the refusal names the failed check and what it saw (the first LIVE run refused every case with no
+  // way to tell which condition fired, run ...ab094e)
+  const unreconciled = (table, row, check) => ({ ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:grid-gap-unreconciled',
+    detail: { table, row, check, projected: (html0[table].rows[row] || []).map(c => ({ placeholder: c.placeholder === true, span: c.span, text: c.placeholder ? JSON.stringify(c.text).slice(0, 24) : undefined })), driverCells: ((tables[table].rows || [])[row] || []).length } });
+  const html = [];
+  const gaps = [];
+  for (let ti = 0; ti < html0.length; ti += 1) {
+    const hrows = html0[ti].rows || [];
+    if (hrows.length !== tables[ti].rows.length) return unreconciled(ti, 0, 'row-count');
+    const real = [];
+    const gap = [];
+    for (let r = 0; r < hrows.length; r += 1) {
+      const first = hrows[r].findIndex(c => c.placeholder);
+      const cells = first < 0 ? hrows[r] : hrows[r].slice(0, first);
+      const pad = first < 0 ? [] : hrows[r].slice(first);
+      // a placeholder may carry whitespace only (the projection's &nbsp; paragraph) -- a gap holds no text
+      if (pad.some(c => !c.placeholder || c.span !== 1 || c.text.replace(/\s/g, '') !== '')) return unreconciled(ti, r, 'gap-shape');
+      if (cells.length !== tables[ti].rows[r].length) return unreconciled(ti, r, 'cell-count');
+      real.push(cells);
+      gap.push(pad.length);
+    }
+    html.push({ ...html0[ti], rows: real });
+    gaps.push(gap);
+  }
+  const cells = [];
+  tables.forEach((t, ti) => t.rows.forEach((row, ri) => row.forEach((cell, ci) => cells.push({ at: `${ti}:${ri}:${ci}`, cell }))));
+  return { ok: true, tables, html, cells, gaps };
+}
+
+/** The logical grid of one table from its HTML projection: per row, each physical cell's start and colspan; a row's grid gap counts toward its width. */
+function gridOf(html, gaps = []) {
+  const rows = (html.rows || []).map(r => { let at = 0; return r.map(c => { const g = { start: at, span: c.span || 1 }; at += g.span; return g; }); });
+  const widths = new Set(rows.map((r, i) => r.reduce((n, g) => n + g.span, 0) + (gaps[i] || 0)));
+  return widths.size === 1 ? { ok: true, rows, width: [...widths][0] } : { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:uneven-logical-width' };
+}
+
+/** The target table, its grid and the target's logical column, from ONE fresh read. */
+function locate(primary, op) {
+  const read = columnRead(primary);
+  if (!read.ok) return read;
+  const scope = scopeOf(read, op.tableAnchor);
+  if (!scope.ok) return scope;
+  const hits = scope.cells.filter(c => c.cell.text === op.targetText);
+  if (hits.length > 1) return { ok: false, reason: 'table-column-target-ambiguous', candidates: hits.length };
+  let ti = scope.prefix;
+  let ri = null;
+  let ci = null;
+  if (hits.length === 1) [ti, ri, ci] = hits[0].at.split(':').map(Number);
+  if (ti === null) return { ok: false, reason: 'table-column-target-not-found' };
+  ti = Number(ti);
+  const table = read.tables[ti];
+  const grid = gridOf(read.html[ti], read.gaps[ti]);
+  if (!grid.ok) return grid;
+  let col = null;
+  if (ri !== null) {
+    const g = grid.rows[ri][ci];
+    if (g.span !== 1) return { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:target-spans-columns' };
+    col = g.start;
+    if (op.tableAnchor !== null && INTENTS[op.intent].action === 'remove' && table.rows.some((row, r) => row.some((c, k) => c.text === op.tableAnchor && grid.rows[r][k].start <= col && col < grid.rows[r][k].start + grid.rows[r][k].span))) {
+      return { ok: false, reason: 'table-anchor-in-target-column' };
+    }
+  }
+  return { ok: true, read, ti, ri, ci, col, table, html: read.html[ti], grid, width: grid.width, gaps: read.gaps[ti] };
+}
+
+const boundaryOf = (op, col) => (INTENTS[op.intent].before ? col : col + 1);
+
+/** The shape guard (column probe 1): measured unsafe colspan cases, refused before dispatch. */
+function shapeGuard(loc, op) {
+  const cells = loc.grid.rows.flat();
+  // M5 row 14: a table with a grid gap -- only the measured primitives (gridAfter probe ...fcd2df):
+  // an insert at a boundary no further right than the gap rows' real cells (the new cell lands at the
+  // boundary in every row, the gap stays trailing); a delete of a column that is a REAL cell in every
+  // gap row (DEL_S_a1: the gap kept); a delete of a ONE-column gap's own column, right after the row's
+  // real cells (DEL_S_anchor: the gap is consumed; source differential ...ff8ea3 deletes the same way).
+  // A wider gap, a boundary inside the gap and a gap next to a colspan are refused.
+  if (loc.gaps.some(n => n > 0)) {
+    if (cells.some(g => g.span > 1)) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:grid-gap-with-colspan';
+    const realWidth = r => loc.grid.rows[r].reduce((n, g) => n + g.span, 0);
+    if (INTENTS[op.intent].action !== 'add') {
+      if (loc.grid.rows.some((row, r) => loc.gaps[r] > 0 && loc.col >= realWidth(r) && !(loc.col === realWidth(r) && loc.gaps[r] === 1))) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:grid-gap-column-delete';
+    } else {
+      const b = boundaryOf(op, loc.col);
+      if (loc.grid.rows.some((row, r) => loc.gaps[r] > 0 && b > realWidth(r))) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:insert-boundary-inside-a-grid-gap';
+    }
+  }
+  if (INTENTS[op.intent].action === 'add') {
+    const b = boundaryOf(op, loc.col);
+    if (cells.some(g => g.start < b && b < g.start + g.span)) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:colspan-straddles-insert-boundary';
+  } else if (cells.some(g => g.span > 1 && g.start <= loc.col && loc.col < g.start + g.span)) {
+    return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:colspan-covers-deleted-column';
+  }
+  return null;
+}
+
+/** The local terminal claim of THIS operation, in a located state. */
+function localClaim(loc, op) {
+  const kind = INTENTS[op.intent];
+  if (kind.action === 'remove') return loc.ri === null;
+  if (loc.ri === null) return false;
+  const n = kind.before ? loc.col - 1 : loc.col + 1;
+  if (n < 0 || n >= loc.width) return false;
+  return loc.grid.rows.every((row, r) => {
+    const k = row.findIndex(g => g.start <= n && n < g.start + g.span);
+    return k >= 0 && row[k].span === 1 && loc.table.rows[r][k].text === '';
+  });
+}
+
+// ---- classify / resolve -------------------------------------------------------------------------
+
+function classify(primary, op) {
+  if (op.columnGroup && op.columnGroup.ungroupable) return { state: 'FAIL_CLOSED', evidence: { reason: 'column-operations-without-table-anchor-cannot-be-grouped' } };
+  const loc = locate(primary, op);
+  if (!loc.ok) return { state: 'FAIL_CLOSED', evidence: { reason: loc.reason, candidates: loc.candidates, detail: loc.detail } };
+  const kind = INTENTS[op.intent];
+  const later = op.columnGroup && op.columnGroup.later.length > 0;
+  const groupFinal = op.columnGroup ? op.columnGroup.finalColumnCount : op.terminalColumnCount;
+  const before = kind.action === 'add' ? op.terminalColumnCount - 1 : op.terminalColumnCount + 1;
+  const claim = localClaim(loc, op);
+  const terminalCount = loc.width === op.terminalColumnCount || (later && loc.width === groupFinal);
+  const evidence = { columns: loc.width, terminalColumnCount: op.terminalColumnCount, groupFinalColumnCount: groupFinal, targetColumn: loc.col };
+  const satisfied = () => (op.recovery === UNRESOLVED
+    ? { state: 'FAIL_CLOSED', evidence: { reason: 'preservation-baseline-unavailable', ...evidence } }
+    : { state: 'SATISFIED', evidence: { ...evidence, proof: kind.action === 'add' ? 'fresh-live-empty-column-on-the-declared-side-and-terminal-column-count' : 'fresh-live-target-absent-in-the-anchor-table-and-terminal-column-count' } });
+  if (loc.width === before && loc.ri !== null) {
+    if (later && loc.width === groupFinal) {
+      if (claim) return satisfied();
+      const laterAll = op.columnGroup.laterOps.every(o => { const l = locate(primary, o); return l.ok && localClaim(l, o); });
+      if (laterAll) return { state: 'FAIL_CLOSED', evidence: { reason: 'group-final-state-without-this-operation-claim', ...evidence } };
+    }
+    const unsafe = shapeGuard(loc, op);
+    if (unsafe) return { state: 'FAIL_CLOSED', evidence: { reason: unsafe, ...evidence } };
+    return { state: 'APPLY', evidence: { ...evidence, targetColumnTexts: loc.table.rows.map((row, r) => { const k = loc.grid.rows[r].findIndex(g => g.start <= loc.col && loc.col < g.start + g.span); return k < 0 ? null : row[k].text; }) } };
+  }
+  if (terminalCount && claim) return satisfied();
+  if (kind.action === 'add' && loc.ri === null) return { state: 'FAIL_CLOSED', evidence: { reason: 'table-column-target-not-found', ...evidence } };
+  if (kind.action === 'remove' && loc.ri !== null) return { state: 'FAIL_CLOSED', evidence: { reason: 'delete-target-present-but-column-count-not-terminal-plus-one', ...evidence } };
+  return { state: 'FAIL_CLOSED', evidence: { reason: 'table-column-terminal-unprovable', ...evidence } };
+}
+
+function resolve(primary, selector, ctx = {}) {
+  const op = ctx.operation;
+  const loc = op ? locate(primary, op) : { ok: false, reason: 'no-operation' };
+  if (!loc.ok || loc.ri === null) return { ok: false, target: null, selector, ambiguity: loc.ok ? 'NOT_FOUND' : loc.reason.toUpperCase().replace(/[-:]/g, '_') };
+  return { ok: true, target: { kind: 'table_column', text: op.targetText, tableAnchor: op.tableAnchor, at: `${loc.ti}:${loc.ri}:${loc.ci}`, column: loc.col }, selector, ambiguity: null };
+}
+
+function preDispatchCheck(op, target) {
+  return target && target.kind === 'table_column' && target.text === op.targetText && target.tableAnchor === op.tableAnchor ? { ok: true } : { ok: false, dispatched: false, detail: 'table-column-target-unresolved' };
+}
+
+// ---- lower --------------------------------------------------------------------------------------
+
+function lower(op, target) {
+  const kind = INTENTS[op.intent];
+  const meta = Object.freeze({ family: 'table', action: 'column', columnAction: kind.action, before: kind.before, targetText: target.text, tableAnchor: target.tableAnchor });
+  return { kind: 'callCommand', body: commandBody(meta), meta };
+}
+
+/**
+ * One callCommand (column probe 1): the table by its anchor cell (or every table), the target cell
+ * by its FULL normalized text, unique in scope -- never Search; then the public ApiTable.AddColumn /
+ * RemoveColumn. The shape guard ran on the fresh read before dispatch. The return value is not
+ * trusted (RemoveColumn answers false on success): the fresh read decides.
+ */
+function commandBody(meta) {
+  return `
+try {
+  const m = ${JSON.stringify(meta)};
+  const textOpts = { Numbering: false };
+  const norm = s => String(s || '').replace(/\\s+/g, ' ').trim();
+  const doc = Api.GetDocument();
+  const cellsOf = t => { const out = []; for (let r = 0; r < t.GetRowsCount(); r += 1) { const row = t.GetRow(r); for (let c = 0; c < row.GetCellsCount(); c += 1) out.push(row.GetCell(c)); } return out; };
+  const textOf = cell => norm(cell.GetContent().GetText(textOpts));
+  let tables = doc.GetAllTables() || [];
+  if (m.tableAnchor !== null) {
+    tables = tables.filter(t => cellsOf(t).some(cell => textOf(cell) === m.tableAnchor));
+    if (tables.length !== 1) return;
+  }
+  const hits = [];
+  for (const t of tables) for (const cell of cellsOf(t)) if (textOf(cell) === m.targetText) hits.push({ t, cell });
+  if (hits.length !== 1) return;
+  if (m.columnAction === 'add') hits[0].t.AddColumn(hits[0].cell, m.before === true);
+  else hits[0].t.RemoveColumn(hits[0].cell);
+} catch (_) {}
+`;
+}
+
+// ---- verify -------------------------------------------------------------------------------------
+
+/** The expected rows after the operation: per row, indices into the BEFORE row's cells (null = the new cell). */
+function expectedRows(op, loc) {
+  return loc.grid.rows.map(row => {
+    const idx = row.map((_, k) => k);
+    if (INTENTS[op.intent].action === 'remove') return idx.filter(k => row[k].start !== loc.col);
+    const b = boundaryOf(op, loc.col);
+    const at = row.findIndex(g => g.start >= b);
+    const p = at < 0 ? row.length : at;
+    return [...idx.slice(0, p), null, ...idx.slice(p)];
+  });
+}
+
+/** The gaps after the operation: unchanged, except a delete of a one-column gap's own column consumes that row's gap. */
+function expectedGaps(op, loc) {
+  if (INTENTS[op.intent].action !== 'remove') return loc.gaps;
+  return loc.gaps.map((g, r) => (g > 0 && loc.col >= loc.grid.rows[r].reduce((n, x) => n + x.span, 0) ? g - 1 : g));
+}
+
+/** L1: rows unchanged; per row the original texts in order with one new EMPTY cell at the boundary (or the target's gone); width terminal. */
+function verifyPrimitive(op, before, after) {
+  const b = locate(before && before.primary, op);
+  if (!b.ok || b.ri === null) return { ok: false, evidence: { reason: b.ok ? 'before-target-not-found' : `before-${b.reason}` } };
+  const a = locate(after.primary, op);
+  if (!a.ok) return { ok: false, evidence: { reason: `after-${a.reason}` } };
+  const want = expectedRows(op, b);
+  const rowsOk = a.table.rows.length === b.table.rows.length;
+  const widthOk = a.width === op.terminalColumnCount;
+  const gapsOk = JSON.stringify(a.gaps) === JSON.stringify(expectedGaps(op, b));
+  const mismatches = [];
+  if (rowsOk) want.forEach((seq, r) => {
+    const got = a.table.rows[r].map(c => c.text);
+    const exp = seq.map(k => (k === null ? '' : b.table.rows[r][k].text));
+    if (JSON.stringify(got) !== JSON.stringify(exp)) mismatches.push({ row: r, expected: exp, actual: got });
+  });
+  const ok = rowsOk && widthOk && gapsOk && mismatches.length === 0;
+  return { ok, evidence: { rows: [b.table.rows.length, a.table.rows.length], gapsBefore: b.gaps, gapsAfter: a.gaps, columnsBefore: b.width, columnsAfter: a.width, terminalColumnCount: op.terminalColumnCount, targetColumnBefore: b.col, targetColumnAfter: a.col, mismatches: mismatches.slice(0, 10) } };
+}
+
+/** L3, PRIMITIVE_INTEGRAL: every preserved cell and its colspan at the mapped place; other tables and outside text unchanged. */
+function verifyPreservation(op, before, after) {
+  const b = locate(before && before.primary, op);
+  if (!b.ok || b.ri === null) return { ok: false, evidence: { reason: b.ok ? 'before-target-not-found' : `before-${b.reason}` } };
+  const a = locate(after.primary, op);
+  if (!a.ok) return { ok: false, evidence: { reason: `after-${a.reason}` } };
+  const want = expectedRows(op, b);
+  if (a.table.rows.length !== want.length || want.some((seq, r) => a.table.rows[r].length !== seq.length)) return { ok: false, evidence: { reason: 'table-shape-not-as-expected' } };
+  const span = c => [c.span, c.rowspan];
+  const changed = [];
+  want.forEach((seq, r) => seq.forEach((k, i) => {
+    const got = a.table.rows[r][i];
+    if (k === null) return; // the new cell: empty (L1), span 1 (the L1 terminal width)
+    const cells = cellKey(got) === cellKey(b.table.rows[r][k]);
+    const spans = JSON.stringify(span(a.html.rows[r][i])) === JSON.stringify(span(b.html.rows[r][k]));
+    if (!cells || !spans) changed.push({ row: r, cell: i, from: k, cells, spans });
+  }));
+  const others = (r, ti) => r.tables.map((t, i) => (i === ti ? null : JSON.stringify([t.rows.map(row => row.map(cellKey)), r.html[i].rows.map(row => row.map(span)), r.gaps[i]]))).filter(x => x !== null);
+  const otherTables = JSON.stringify(others(a.read, a.ti)) === JSON.stringify(others(b.read, b.ti));
+  const units = p => textUnits(p).map(u => norm(u.text));
+  const outside = JSON.stringify(units(after.primary)) === JSON.stringify(units(before.primary));
+  const gapsKept = JSON.stringify(a.gaps) === JSON.stringify(expectedGaps(op, b));
+  const ok = changed.length === 0 && otherTables && outside && gapsKept;
+  return { ok, evidence: { changedCells: changed.slice(0, 10), gridGapsKept: gapsKept, otherTablesUnchanged: otherTables, textUnitsOutsideTablesUnchanged: outside, expectationSource: 'derived-from-fresh-pre-mutation-observation' } };
+}
+
+/** L2: the group's final projected width, and this operation's local terminal claim. */
+function wholeTaskChecks(op, finalObservation) {
+  const loc = locate(finalObservation.primary, op);
+  const groupFinal = op.columnGroup && !op.columnGroup.ungroupable ? op.columnGroup.finalColumnCount : op.terminalColumnCount;
+  return [{ name: `${op.id}: ${op.intent} "${op.targetText}" -- table columns ${groupFinal} (the task's final projection) and the operation's terminal claim`, ok: loc.ok && loc.width === groupFinal && localClaim(loc, op) }];
+}
+
+// refs: none -- a column is not a text unit a later step can name
+function producedText() {
+  return null;
+}
+
+module.exports = { plan, annotateTask, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation, wholeTaskChecks, producedText, locate, gridOf, shapeGuard, columnRead, INTENTS };

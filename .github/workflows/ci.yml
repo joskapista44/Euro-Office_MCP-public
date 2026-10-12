@@ -1,0 +1,41 @@
+# Public-repository CI (owner decision D6): tree gate, full test suite, two byte-identical artifact builds.
+# Actions are pinned by commit SHA (the tag in the comment is informational).
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tree-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      # the checkout must be exactly the gated derivation recorded in PUBLIC-DERIVATION.json; no symlink, no secret shape
+      - run: node scripts/public-tree-check.cjs
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+  reproducible-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+      - run: node scripts/build-artifact.cjs --rc "$GITHUB_SHA" --out "$RUNNER_TEMP/a"
+      - run: node scripts/build-artifact.cjs --rc "$GITHUB_SHA" --out "$RUNNER_TEMP/b"
+      - name: the two builds are byte-identical
+        run: |
+          cd "$RUNNER_TEMP"
+          for f in a/*.tgz; do cmp "$f" "b/$(basename "$f")"; done
+          cat a/*.tgz.sha256

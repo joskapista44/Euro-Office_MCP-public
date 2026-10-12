@@ -1,0 +1,14 @@
+{
+  "listen": { "host": "127.0.0.1", "port": 3421 },
+  "path": "/api/euro-broker",
+  "instances": { "production": { "nextcloudUrl": "https://nextcloud.example.org" } },
+  "requesters": [
+    {
+      "id": "alice",
+      "tokenSha256": "<sha256 hex of alice's bearer token>",
+      "nextcloudUser": "alice",
+      "appPasswordFile": "/etc/euro-office-broker/alice.app-password"
+    }
+  ],
+  "timeoutMs": 30000
+}

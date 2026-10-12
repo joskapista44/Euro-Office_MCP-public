@@ -1,0 +1,22 @@
+{
+  "name": "euro-office-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "One Office execution framework; format-specific semantic adapters.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.cjs\"",
+    "test:core": "node --test \"test/core/**/*.test.cjs\"",
+    "test:acceptance": "node --test \"test/acceptance/**/*.test.cjs\"",
+    "test:static": "node --test \"test/static/**/*.test.cjs\""
+  },
+  "license": "Apache-2.0",
+  "bin": {
+    "euro-office-mcp": "bin/euro-office-mcp.cjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.62.1"
+  }
+}
