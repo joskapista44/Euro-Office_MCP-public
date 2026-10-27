@@ -52,13 +52,17 @@ function uncertainWrites(execution) {
  *
  *   verified  uncertain   barrier   best outcome (M7 save contract, owner GO owner channel)
  *   false     false       no        NOT_REQUIRED
- *   false     true        NO        UNCERTAIN_NOT_PERSISTED
+ *   false     true        NO        UNCERTAIN_MAY_PERSIST (the edit may become durable on the server's own; re-read)
  *   true      either      yes       FORCESAVE_CONFIRMED -- only with the driver's own paired confirmation, still
  *                                   standing at the verified close; otherwise EDITOR_CLEAN (no confirmed save)
  *
- * Mutation uncertainty stays orthogonal (FinalTaskResult.mutationCertainty). Row two is a SAFETY POLICY, not a runtime
- * assumption: the framework never forceSaves solely for a mutation whose correctness is unproven. W3.0 measured that
- * such a mutation did not reach the durable state in 5/5 short runs, but the policy does not depend on that holding.
+ * Mutation uncertainty stays orthogonal (FinalTaskResult.mutationCertainty). Row two is a SAFETY POLICY: the framework never forceSaves solely for a
+ * mutation whose correctness is unproven. The state it ends in is UNCERTAIN_MAY_PERSIST, NOT "not persisted": the policy decides what the framework DOES,
+ * it says nothing about what the Document Server does with the unsaved edit afterwards. MEASURED (guncprobe, zero, 2026-10-19, DS 9.3.5, controls valid,
+ * the probe of docs/GH236-UNCERTAIN-DISPATCH-PERSISTENCE-PROBE.md): the unsaved edit of a DISPATCHED_OUTCOME_UNKNOWN step became durable by ITSELF within
+ * ~9 s with no editor attached (S1 A_PASSIVE), and another editor's forcesave saved it too (S2 B_FORCESAVE). The earlier "5/5 did not persist" (W3.0,
+ * docs/evidence/W3-UNCERTAIN-MUTATION-PERSISTENCE.md) was a ~0-1 s close on another driver and does NOT hold for this driver's close on 9.3.5. A caller must
+ * therefore re-read the document before it decides anything after such a receipt.
  * The barrier saves the WHOLE editor state, so a verified prefix cannot be saved without whatever an uncertain
  * operation left behind.
  *
@@ -71,14 +75,14 @@ function decidePersistence(execution) {
   const uncertain = hasUncertainWrites(execution);
   let onSuccess;
   if (!verified && !uncertain) onSuccess = PERSISTENCE_STATE.NOT_REQUIRED;
-  else if (!verified) onSuccess = PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED;
+  else if (!verified) onSuccess = PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST;
   else onSuccess = PERSISTENCE_STATE.FORCESAVE_CONFIRMED;
   return Object.freeze({ verified, uncertain, barrierRequired: verified, onSuccess });
 }
 
 const PERSISTENCE_STATE = Object.freeze({
   NOT_REQUIRED: 'NOT_REQUIRED',
-  UNCERTAIN_NOT_PERSISTED: 'UNCERTAIN_NOT_PERSISTED',
+  UNCERTAIN_MAY_PERSIST: 'UNCERTAIN_MAY_PERSIST',
   EDITOR_CLEAN: 'EDITOR_CLEAN',
   FORCESAVE_CONFIRMED: 'FORCESAVE_CONFIRMED',
   FAILED: 'FAILED',

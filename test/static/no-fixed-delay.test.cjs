@@ -33,6 +33,13 @@ const ALLOWED = Object.freeze([
   // session's own close(). The happy path exits on the close event; the timer fires only for a session that never
   // closes, and the result is reported TIMEOUT -- never a correctness wait.
   { file: 'server/session-gate.cjs', fn: 'shutdown', reason: 'bounds the wait for the active driver close(); exits on the event' },
+  // GH #100 U2: the SAME bounded shutdown for the held warm session (session-registry.cjs). The idle timeout is a policy timer
+  // through the injected `setTimer` seam (no direct call), not a correctness wait: a held session is closed or served by RULE.
+  { file: 'server/session-registry.cjs', fn: 'shutdown', reason: 'bounds the wait for the held driver close(); exits on the event' },
+  // GH #76 MODEL 1 (owner decision 2026-10-18): the optional verifyStoredContent's bounded poll for a document-key
+  // rotation away from the writer's own key (15000ms/500ms) -- the SAME rule the release gate's own key-barrier
+  // uses, over the product's own config source instead of the gate's HTTP transport (two transports, one rule).
+  { file: 'server/write-tools.cjs', fn: 'awaitKeyRotation', reason: 'bounds the wait for a document-key rotation after a confirmed save; exits on the rotation' },
 ]);
 
 const TIMER_PATTERN = /\b(setTimeout|setInterval|sleep|delay|setImmediate)\s*\(/g;

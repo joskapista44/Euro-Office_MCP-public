@@ -125,11 +125,17 @@ test("unique's duplicate variant is refused at plan time (measured unidentifiabl
 // ---- X-O01 full implementation: colorScale/databar/iconSet add/delete succeed DEFAULT-ONLY (the
 // loop above); any appearance field is refused at PLAN time (the criteria/enum shapes are NEM-MERT) --
 
-test('databar/iconSet/colorScale: any appearance field is refused at plan time (unmeasured shape)', () => {
-  for (const [type, field] of [['databar', { barColor: '#00FF00' }], ['iconSet', { iconSet: 'xl3TrafficLights1' }], ['colorScale', { n: 2 }]]) {
-    const p = planOperations(add({ type, ...field }));
-    assert.equal(p.ok, false, type);
-    assert.match(p.detail, /a .* rule is \{ type:/, type);
+test('databar/iconSet/colorScale: the MEASURED appearance keys plan (X-O01); every unmeasured shape is refused at plan time', () => {
+  for (const ok of [{ type: 'databar', barColor: '#00FF00', barFillType: 'solid', direction: 'rightToLeft', showValue: false, axisPosition: 'none' },
+    { type: 'iconSet', iconSet: 'xl4Arrows', reverseOrder: true, showIconOnly: true }, { type: 'colorScale', colors: ['#0000FF', '#FFFFFF', '#FF0000'] }]) {
+    assert.equal(planOperations(add(ok)).ok, true, JSON.stringify(ok));
+  }
+  for (const [rule, re] of [[{ type: 'databar', direction: 'leftToRight' }, /leftToRight is not measured/], [{ type: 'databar', axisPosition: 'midpoint' }, /midpoint is not measured/],
+    [{ type: 'iconSet', iconSet: 'xl3Arrows' }, /xl3TrafficLights2/], [{ type: 'colorScale', n: 2 }, /a colorScale rule is \{ type:/], [{ type: 'colorScale', colors: ['#000000', '#FFFFFF'] }, /three/],
+    [{ type: 'databar', barColor: 'red' }, /#RRGGBB/], [{ type: 'iconSet', criteria: [] }, /criteria thresholds are not supported/]]) {
+    const p = planOperations(add(rule));
+    assert.equal(p.ok, false, JSON.stringify(rule));
+    assert.match(p.detail, re, JSON.stringify(rule));
   }
 });
 
@@ -165,9 +171,11 @@ test('driver cfReads: the six new-reader types never call GetOperator/GetFormula
     xlAboveAverageCondition: [condItem('xlAboveAverageCondition', { GetAboveBelow: () => true, GetNumStdDev: () => 1 }), { type: 'xlAboveAverageCondition', appliesTo: 'A1:A3', aboveBelow: true, numStdDev: 1 }],
     xlTop10: [condItem('xlTop10', { GetRank: () => 5, GetPercent: () => false, GetTopBottom: () => 'xlTop10Top' }), { type: 'xlTop10', appliesTo: 'A1:A3', rank: 5, percent: false, topBottom: 'xlTop10Top' }],
     xlUniqueValues: [condItem('xlUniqueValues', { GetDupeUnique: () => 'xlUnique' }), { type: 'xlUniqueValues', appliesTo: 'A1:A3', dupeUnique: 'xlUnique' }],
-    xlDatabar: [condItem('xlDatabar', { GetBarColor: () => ({ GetRGB: () => 65280 }) }), { type: 'xlDatabar', appliesTo: 'A1:A3', barColor: 65280 }],
-    xlIconSets: [condItem('xlIconSets', { GetIconSet: () => 'xl3TrafficLights1', GetShowIconOnly: () => false }), { type: 'xlIconSets', appliesTo: 'A1:A3', iconSet: 'xl3TrafficLights1', showIconOnly: false }],
-    xlColorScale: [condItem('xlColorScale', {}), { type: 'xlColorScale', appliesTo: 'A1:A3' }],
+    // X-O01: + the measured appearance getters (all PUBLIC; still none of the four rule-formula getters)
+    xlDatabar: [condItem('xlDatabar', { GetBarColor: () => ({ GetRGB: () => 65280 }), GetBarFillType: () => 'xlDataBarFillSolid', GetDirection: () => 'xlRTL', GetShowValue: () => false, GetAxisPosition: () => 'xlDataBarAxisNone' }),
+      { type: 'xlDatabar', appliesTo: 'A1:A3', barColor: 65280, barFillType: 'xlDataBarFillSolid', direction: 'xlRTL', showValue: false, axisPosition: 'xlDataBarAxisNone' }],
+    xlIconSets: [condItem('xlIconSets', { GetIconSet: () => 'xl3TrafficLights1', GetShowIconOnly: () => false, GetReverseOrder: () => true }), { type: 'xlIconSets', appliesTo: 'A1:A3', iconSet: 'xl3TrafficLights1', showIconOnly: false, reverseOrder: true }],
+    xlColorScale: [condItem('xlColorScale', { GetColorScaleCriteria: () => [{ GetColor: () => ({ GetRGB: () => 255 }) }, { GetColor: () => ({ GetRGB: () => 16777215 }) }, { GetColor: () => null }] }), { type: 'xlColorScale', appliesTo: 'A1:A3', stopColors: '[255,16777215,null]' }],
   };
   for (const [type, [item, want]] of Object.entries(CASES)) assert.deepEqual(cfReadsFor(item), [want], type);
 });
@@ -185,4 +193,42 @@ test('driver cfReads: an empty type makes the WHOLE axis a reason string, not an
 
 test('driver cfReads: a MISSING measured getter on an otherwise-recognized type degrades to UNOBSERVABLE, not a throw escaping the script', () => {
   assert.equal(cfReadsFor(condItem('xlUniqueValues', {})), 'UNOBSERVABLE:TypeError: x[getter] is not a function');
+});
+
+// ---- X-O01 appearance (LIVE phase 1 + 2 measured; docs/evidence/xo01-cf-appearance-probe-phase*-20261012.json) ----
+
+const DATABAR = { type: 'databar', barColor: '#123456', barFillType: 'solid', direction: 'rightToLeft', showValue: false, axisPosition: 'none' };
+
+test('X-O01: a databar WITH appearance: APPLIED (L1 proves every asked key), the retry SATISFIED 0 dispatch, delete by the same identity', async () => {
+  const store = createStore(book());
+  const a = await run(store, add(DATABAR));
+  assert.equal(a.result.ok, true, JSON.stringify(a.result.execution.appliedOperations[0].evidence));
+  const r = rules(store)[0];
+  assert.deepEqual([r.barColor, r.barFillType, r.direction, r.showValue, r.axisPosition], [0x123456, 'xlDataBarFillSolid', 'xlRTL', false, 'xlDataBarAxisNone']);
+  const again = await run(store, add(DATABAR));
+  assert.deepEqual([again.result.ok, again.result.execution.appliedOperations[0].status, again.driver.calls.dispatch], [true, 'SATISFIED', 0]);
+  const d = await run(store, del(DATABAR));
+  assert.equal(d.result.ok, true);
+  assert.equal(rules(store).length, 0);
+});
+
+test('X-O01: an icon set and a colour scale WITH appearance round-trip; a DIFFERENT appearance on the same range is another rule', async () => {
+  const store = createStore(book());
+  assert.equal((await run(store, add({ type: 'iconSet', iconSet: 'xl4Arrows', reverseOrder: true, showIconOnly: true }))).result.ok, true);
+  assert.equal((await run(store, add({ type: 'colorScale', colors: ['#0000FF', '#FFFFFF', '#FF0000'] }))).result.ok, true);
+  const [is, cs] = rules(store);
+  assert.deepEqual([is.iconSet, is.reverseOrder, is.showIconOnly], ['xl4Arrows', true, true]);
+  assert.equal(cs.stopColors, JSON.stringify([255, 16777215, 16711680]));
+  const other = await run(store, add({ type: 'iconSet', iconSet: 'xl5Boxes' }));
+  assert.equal(other.result.ok, true);
+  assert.equal(rules(store).length, 3);
+});
+
+test('X-O01 RED: the editor stores ONE asked appearance key wrong -> L1 FAILS on that key (each key is part of the proof)', async () => {
+  for (const key of ['barColor', 'barFillType', 'direction', 'showValue', 'axisPosition']) {
+    const store = createStore(book());
+    const a = await run(store, add(DATABAR), { fault: 'cf-wrong-one-field', cfWrongField: key });
+    assert.equal(a.result.ok, false, key);
+    assert.equal(a.result.execution.primitiveVerification[0].verdict === 'PASS', false, key);
+  }
 });

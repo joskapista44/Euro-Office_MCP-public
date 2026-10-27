@@ -23,7 +23,11 @@ const { installBridge, BRIDGE_RUNTIME_ID } = require('../fakes/ds-bridge-runtime
 
 const KEY_A = '9.3.4-9475e9f12a1905e2ada1fbc4bb87d01b';
 const KEY_B = '9.3.4-94bc577ecccd9583be1b130bd5a6b407';
-const ACCEPTED = 'euro-office-bridge-v1/9.3.4.60/5';
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): the served bridge block (installBridge,
+// test/fakes/ds-bridge-runtime.cjs) now self-reports the accepted 9.3.5 runtime -- ACCEPTED is repointed to
+// the single accepted patch (9.3.5.0/16). UNKNOWN (historical 9.3.4.60/2) stays off-list: with the served
+// manifest's documentServerVersion now 9.3.5, it refuses at the PATCH level (same reason the test already asserts).
+const ACCEPTED = 'euro-office-bridge-v1/9.3.5.0/16';
 const UNKNOWN = 'euro-office-bridge-v1/9.3.4.60/2';
 const CONFIG = { documentServerUrl: 'https://ds.example/', document: { key: 'KEY1' } };
 
@@ -91,14 +95,14 @@ async function liveRead(env) {
 }
 
 test('the served bridge manifest is the accepted runtime (the precondition of the positive control)', () => {
-  assert.equal(BRIDGE_RUNTIME_ID, `9.3.4|${ACCEPTED}`);
+  assert.equal(BRIDGE_RUNTIME_ID, `9.3.5|${ACCEPTED}`);
 });
 
 for (const cacheKey of [KEY_A, KEY_B]) {
   test(`the ACCEPTED runtime (positive control, cache key ${cacheKey.slice(6, 14)}): readLive runs getWorksheet before the drawing read and getDocContent for the text; GetContent never`, async () => {
     const { r, log, shape } = await liveRead({ cacheKey, patchVersion: ACCEPTED });
     assert.equal(r.ok, true);
-    assert.equal(r.payload.runtime.identity, `9.3.4|${ACCEPTED}`);
+    assert.equal(r.payload.runtime.identity, `9.3.5|${ACCEPTED}`);
     assert.equal(r.payload.runtime.cacheKey, cacheKey, 'the cache key is recorded -- for diagnostics only');
     assert.deepEqual(log, ['getWorksheet(0)', 'getDocContent']);
     assert.equal(shape.text, '', 'the measured null: no text body');

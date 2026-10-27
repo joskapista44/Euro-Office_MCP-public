@@ -92,6 +92,10 @@ test('M5 gate 6 NEGATIVE: an existing part whose formatting the replacement woul
     [one({ bold: true }), `${L}run-bold`], [one({ italic: true }), `${L}run-italic`],
     [one({ underline: true }), `${L}run-underline`], [one({ strike: true }), `${L}run-strike`],
     [one({ fontFamily: 'Courier New' }), `${L}run-font-family`], [one({ fontSize: 28 }), `${L}run-font-size`],
+    // GH #289 (LIVE probe 2): a PAGE field / an image reads as runs with no text -- the run classes alone said "plain"
+    [one({}, { inline: ['pgNum'] }), `${L}inline:pgNum`, 'a PAGE field in an otherwise plain one-paragraph part'],
+    [one({}, { inline: ['image', 'paraDrawing'] }), `${L}inline:image,paraDrawing`, 'an image in an otherwise plain one-paragraph part'],
+    [one({}, { inline: null }), 'header-footer-inline-content-unreadable', 'the inline-content read failed -> refused, never assumed plain'],
   ];
   for (const [p, want, why] of cases) {
     const s = store([section(p)]);
@@ -158,7 +162,7 @@ test('negatives before dispatch -> FAIL_CLOSED or plan-failed, 0 dispatch, nothi
     [task(eh('x', 0, 2)), [section(part('H'))], 'FAIL_CLOSED:section-descriptor-mismatch'],
     [task(eh('x', 0, 1)), two(), 'FAIL_CLOSED:section-descriptor-mismatch'],
     // section 0 written while section 1 has no header of its own: section 1 would change too
-    [task(eh('x', 0, 2)), [section(part('HA'), part('FA')), section(null, part('FB'))], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:later-section-inherits-this-part'],
+    [task(eh('x', 0, 2)), [section(part('HA'), part('FA')), section(null, part('FB'))], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:later-section-inherits-this-part:1'],
     // section 1 has no footer of its own: creating one breaks the link to section 0's
     [task(ef('x', 1, 2)), [section(part('HA'), part('FA')), section(part('HB'), null)], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:linked-to-previous'],
     [task(eh('x')), [section({ ...part('H'), nonPlain: true })], 'header-footer-not-plain-paragraphs-of-runs'],
@@ -226,7 +230,8 @@ test('lowering: public section API only (no frame.evaluate / internal / cursor c
   assert.deepEqual([low.meta.sectionIndex, low.meta.sectionCount, low.meta.part, low.meta.variant, low.meta.create, low.meta.text], [0, 2, 'header', 'default', false, 'H']);
   assert.match(low.body, /secs\.length !== m\.sectionCount/);
   assert.match(low.body, /!!existing === m\.create/);
-  assert.match(low.body, /if \(!get\(secs\[j\], false\)\) return/);
+  // GH #289 H-07a: the inheriting sections re-read and compared with the named set (was: any later section without a part refused)
+  assert.match(low.body, /JSON\.stringify\(aff\) !== JSON\.stringify\(m\.inheritedBy\)/);
   assert.match(low.body, /hf\.RemoveAllElements\(\)/);
   assert.doesNotMatch(low.body, /evaluate|asc_|private_|Set_CurHdrFtr|Create_SectionHdrFtr|SetDocPosType|MoveCursor|\.Document\b|\.Search\(/);
   assert.equal(op.preservationMode, 'PRIMITIVE_INTEGRAL');

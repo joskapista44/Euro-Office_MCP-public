@@ -64,6 +64,9 @@ const LEVEL_FORMAT_TYPE = Object.freeze({ 5: 'bullet', 13: 'numbered', 46: 'numb
 const LEVEL_MOVES = Object.freeze(['set_list_level', 'indent_list_item', 'outdent_list_item']);
 
 const LIST_TYPES = Object.freeze(['bullet', 'numbered']);
+// GH #236b: the caller's POLICY for a numbering level other items sit on -- 'propagate' (the default, the Wave 2 behaviour: L3 then fails and the DS persists the write anyway) or 'refuse'
+// (the product: classify stops BEFORE any dispatch). The same count and the same policy name as set_numbering (GH #248).
+const SHARED_POLICIES = Object.freeze(['propagate', 'refuse']);
 const TEXT_KINDS = Object.freeze(['paragraph', 'heading']);
 
 const validLevel = l => Number.isInteger(l) && l >= 0 && l <= 8;
@@ -89,7 +92,8 @@ function plan(step, index) {
   }
   if (step.intent === 'set_list_type') {
     if (!LIST_TYPES.includes(step.type)) return { ok: false, detail: `step ${index}: set_list_type requires type bullet|numbered` };
-    return { ok: true, operation: { ...op, type: step.type } };
+    if (step.sharedDefinition !== undefined && !SHARED_POLICIES.includes(step.sharedDefinition)) return { ok: false, detail: `step ${index}: set_list_type sharedDefinition must be one of ${SHARED_POLICIES.join(', ')}` };
+    return { ok: true, operation: { ...op, type: step.type, ...(step.sharedDefinition === 'refuse' ? { sharedDefinition: 'refuse' } : {}) } };
   }
   if (['indent_list_item', 'outdent_list_item', 'remove_list'].includes(step.intent)) return { ok: true, operation: op };
   return { ok: false, detail: `step ${index}: ${step.intent} is not a list intent` };
@@ -186,7 +190,7 @@ function listState(primary, text) {
   const n = h.numbering;
   if (!n || n.present !== true || !validLevel(n.level)) return { ok: false, reason: 'list-state-unreadable' };
   const type = h.block.ordered ? 'numbered' : 'bullet';
-  return { ok: true, kind: 'list_item', text: h.item.text, type, level: n.level, numId: n.numId || null, block: h.block, node: h.item, numberingRemoveBridge, levels: gatedLevelsOf(primary, n, type) };
+  return { ok: true, kind: 'list_item', text: h.item.text, type, level: n.level, numId: n.numId || null, abstractId: typeof n.abstractId === 'string' ? n.abstractId : null, block: h.block, node: h.item, numberingRemoveBridge, levels: gatedLevelsOf(primary, n, type) };
 }
 
 /** M8 runtime gate (owner decision A; identity = core/runtime-identity.cjs since decision (B)): is THIS session's runtime verified for the internal dependency? (absent -> no) */
@@ -293,7 +297,109 @@ function classify(primary, op) {
   if (!expected) return { state: 'FAIL_CLOSED', evidence: { reason: 'list-precondition-not-met', text: s.text, observed: { type: s.type, level: s.level } } };
   const removal = removalRefusal(s, op);
   if (removal) return { state: 'FAIL_CLOSED', evidence: { reason: removal, text: s.text, dependency: `BRIDGE_WRITE: ${NUMBERING_REMOVE_WRITE_ID}` } };
+  if (op.intent === 'set_list_type' && op.sharedDefinition === 'refuse') {
+    // no numId read = sharing cannot be observed: refuse rather than assume the level is the target's alone
+    if (s.numId === null || s.numId === undefined) return { state: 'FAIL_CLOSED', evidence: { reason: 'list-numid-unreadable', text: s.text } };
+    // GH #293 L7: the co-members come from the editor's own numbering collection (the inventory misses a table-cell item); not provable -> refuse
+    const mem = listMembersOf(primary, s, keyText(op));
+    if (!mem.ok) return { state: 'FAIL_CLOSED', evidence: { reason: `list-members-unprovable:${mem.reason}`, text: s.text } };
+    const others = [...new Set([...sharedWith(primary, s), ...mem.coMembers])];
+    if (others.length) return { state: 'FAIL_CLOSED', evidence: { reason: `list-shared-definition:${s.numId}:level${s.level}:${others.length}`, text: s.text, numId: s.numId, level: s.level, coMembers: others } };
+    const inventoryLists = sharedAbstractWith(primary, s);
+    if (inventoryLists === null) return { state: 'FAIL_CLOSED', evidence: { reason: 'list-abstract-definition-unreadable', text: s.text } };
+    const otherLists = [...new Set([...inventoryLists, ...mem.otherLists])];
+    if (otherLists.length) return { state: 'FAIL_CLOSED', evidence: { reason: `list-shared-abstract-definition:${s.abstractId}:${otherLists.length}`, text: s.text, numId: s.numId, abstractId: s.abstractId, otherListItems: otherLists } };
+    const quoting = [...new Set([...levelReferencedBy(primary, s), ...mem.quoting])];
+    if (quoting.length) return { state: 'FAIL_CLOSED', evidence: { reason: `list-level-referenced-by-other-levels:${s.numId}:level${s.level}:${quoting.length}`, text: s.text, numId: s.numId, level: s.level, referencedBy: quoting } };
+  }
   return { state: 'APPLY', evidence: { text: s.text, observed: { type: s.type, level: s.level }, expected } };
+}
+
+/** GH #236b: the OTHER list items that sit on the target's numbering AT THE TARGET'S LEVEL -- the level's type is per numbering and level, so a type change re-templates them too. */
+/**
+ * GH #293 L7 (LIVE, docs/evidence/gh293-l7-internals-probe-run2-released-table-cell-comember-20261022.json): the inventory is blind to a
+ * list item inside a table cell, and a set_numbering on a one-item list changed such a co-member silently (decimal -> lowerLetter, saved).
+ * The word /5 Bridge read (docx.numbering.listMembers.read/v1, document.numberingMembers[<target text>]) is the WHOLE affected set,
+ * document-wide. This reads it for a listed target `state`, by the text the step asked for (`key`, the observation request's own key):
+ *   { ok: false, reason }  the set is not provable: unread (off /5, a failed read), or the target is not exactly once in it
+ *   { ok: true, members, coMembers, otherLists, quoting, value }
+ *     members     every item of the target's numbering, { text (normalized), level }, document order
+ *     coMembers   the OTHER members at the target's level (a level write changes them too)
+ *     otherLists  the items of every OTHER w:num on the same definition (a definition write changes them too)
+ *     quoting     the members on a DEEPER level whose label quotes the target level (their own w:num's level text, read by the
+ *                 editor; an unreadable level text counts as quoting -- the reference cannot be ruled out)
+ * The ids in `value` are session-local: compare them within one observation, never across sessions.
+ */
+function listMembersOf(primary, state, key = state.text) {
+  const all = primary && primary.document ? primary.document.numberingMembers : undefined;
+  const v = all && Object.prototype.hasOwnProperty.call(all, key) ? all[key] : undefined;
+  if (!v || typeof v !== 'object') return { ok: false, reason: 'not-requested' };
+  if (typeof v.unread === 'string') return { ok: false, reason: v.unread };
+  if (v.present !== true || !Array.isArray(v.members) || !Array.isArray(v.others) || !Array.isArray(v.sig) || v.level !== state.level) return { ok: false, reason: 'unexpected-shape' };
+  const members = v.members.map(m => ({ text: norm(m.text), level: m.level }));
+  const want = norm(state.text);
+  if (members.filter(m => m.text === want && m.level === state.level).length !== 1) return { ok: false, reason: 'target-not-unique-in-members' };
+  const coMembers = members.filter(m => m.level === state.level && m.text !== want).map(m => m.text);
+  const otherLists = v.others.flatMap(o => (Array.isArray(o.members) ? o.members.map(m => norm(m.text)) : ['UNREADABLE']));
+  const ref = `2:${state.level}`;
+  const quotes = l => { const sg = v.sig[l]; return !Array.isArray(sg) || typeof sg[1] !== 'string' || sg[1].split('|').includes(ref); };
+  const quoting = members.filter(m => Number(m.level) > Number(state.level) && quotes(m.level)).map(m => m.text);
+  return { ok: true, members, coMembers, otherLists, quoting, value: v };
+}
+
+/**
+ * GH #293 N6 (LIVE, docs/evidence/gh293-cross-level-label-probe-GAP-20261022.json): an item on a DEEPER level of the same numId whose
+ * label quotes the target level (`%<level+1>` in its lvlText, e.g. "%1.%2") renders the target level's counter in the target
+ * level's format -- a write to the target level's format changes that item's label too ("1.1" -> "a.1", measured). The items
+ * whose lvlText cannot be read count as referencing (fail closed: the reference cannot be ruled out).
+ */
+function levelReferencedBy(primary, state) {
+  const want = norm(state.text);
+  const ref = `%${Number(state.level) + 1}`;
+  const out = [];
+  for (const b of (primary && primary.blocks) || []) {
+    if (b.kind !== 'list') continue;
+    for (const item of b.items || []) {
+      const n = item.numbering;
+      // only a DEEPER level's label quotes this level's counter (a label quotes its ancestor levels)
+      if (!n || !n.present || !n.numId || n.numId !== state.numId || !(Number(n.level) > Number(state.level)) || norm(item.text) === want) continue;
+      const lvlText = n.format && typeof n.format.lvlText === 'string' ? n.format.lvlText : null;
+      if (lvlText === null || lvlText.indexOf(ref) >= 0) out.push(norm(item.text));
+    }
+  }
+  return out;
+}
+
+/**
+ * GH #293 N5 (LIVE, docs/evidence/gh293-n5-word-shared-abstractnum-sole-member-B-changed-20261022.json): a list with ANOTHER numId on the
+ * SAME abstractNum (Word's shared definition) -- a level-format write through the target changed that list too (decimal -> lowerLetter,
+ * saved), while the numId-only co-member count saw nothing. The other-numId items on the target's abstractId; `null` = the target's
+ * abstractId was not read (the sharing cannot be observed -> the caller refuses).
+ */
+function sharedAbstractWith(primary, state) {
+  if (typeof state.abstractId !== 'string') return null;
+  const out = [];
+  for (const b of (primary && primary.blocks) || []) {
+    if (b.kind !== 'list') continue;
+    for (const item of b.items || []) {
+      const n = item.numbering;
+      if (n && n.present && n.numId && n.numId !== state.numId && n.abstractId === state.abstractId) out.push(norm(item.text));
+    }
+  }
+  return out;
+}
+
+function sharedWith(primary, state) {
+  const want = norm(state.text);
+  const out = [];
+  for (const b of (primary && primary.blocks) || []) {
+    if (b.kind !== 'list') continue;
+    for (const item of b.items || []) {
+      const n = item.numbering;
+      if (n && n.present && n.numId && n.numId === state.numId && n.level === state.level && norm(item.text) !== want) out.push(norm(item.text));
+    }
+  }
+  return out;
 }
 
 function resolve(primary, selector, ctx = {}) {
@@ -501,5 +607,5 @@ module.exports = {
   // W2.1: a list step turns a paragraph into a list item -- a declared representation transform.
   transformsRepresentation: true,
   plan, annotateTask, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation,
-  wholeTaskChecks, producedText, listState, stepExpected, project, levelsOf, LEVEL_FORMAT_TYPE,
+  wholeTaskChecks, producedText, listState, stepExpected, project, levelsOf, LEVEL_FORMAT_TYPE, levelReferencedBy, sharedAbstractWith, listMembersOf,
 };

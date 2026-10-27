@@ -7,7 +7,8 @@ place for [rollback](ROLLBACK.md).
    release requires.
 2. **Document Server first, if the release changes a block.** The order is always compatibility-first: the served
    Document Server blocks must be the ones the new release accepts BEFORE the new release serves, and the running
-   release must accept them too. A release never requires an outage window.
+   release must accept them too. A release needs no outage window unless its CHANGELOG entry names one (1.0.x ->
+   1.1.0 does: it changes the Document Server version).
 3. Build and verify the new artifact ([INSTALL.md](INSTALL.md) §2) and unpack it into
    `/opt/euro-office-mcp/releases/<new ARTIFACT_VERSION>` with its `artifact.json` (§3) -- without touching `current`.
 4. Check it in place: `releases/<new>/bin/euro-office-mcp.cjs --check-config` and `--identity`.

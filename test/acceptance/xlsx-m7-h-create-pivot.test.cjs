@@ -24,7 +24,7 @@ const book = (rows = DATA) => [
   { name: 'Host', cells: { A1: { v: 'keep' } } },
   { name: 'Other', cells: { A1: { v: 'x' } } },
 ];
-const STEP = { intent: 'create_pivot', name: 'PE', sheet: 'Src', range: 'A1:C7', rows: 'reg', columns: 'prod', sum: 'amt', host: 'Host', at: 'H3' };
+const STEP = { intent: 'create_pivot', name: 'PE', sheet: 'Src', range: 'A1:C7', rows: 'reg', columns: 'prod', sum: 'amt', pivotSheet: 'Host', at: 'H3' };
 const one = (over = {}) => ({ id: 'm7-p1', steps: [{ ...STEP, ...over }] });
 
 async function run(store, t, script = {}) {
@@ -80,7 +80,7 @@ test('refused before the write: a non-empty destination (P-A3: the insert overwr
   const full = book();
   full[1].cells.J6 = { v: 'busy' };
   await refused(createStore(full), one(), 'xlsx-pivot-destination-not-empty');
-  await refused(createStore(book()), one({ host: 'Src', at: 'B2' }), 'xlsx-pivot-destination-overlaps-source');
+  await refused(createStore(book()), one({ pivotSheet: 'Src', at: 'B2' }), 'xlsx-pivot-destination-overlaps-source');
   const taken = book();
   taken[2].objects = { charts: [], pivots: [{ name: 'PE', source: 'Other!$A$1:$C$7', table: 'H3:K7', layout: { rows: ['reg'], cols: ['prod'], data: ['Sum of amt'] } }], names: [] };
   await refused(createStore(taken), one(), 'xlsx-pivot-exists-with-another-identity');
@@ -104,7 +104,7 @@ test('refused before the write: an unmeasured source shape', async () => {
 
 test('planning: only the measured shapes', () => {
   const bad = (over, re) => { const p = planOperations(one(over)); assert.equal(p.ok, false, JSON.stringify(over)); assert.match(p.detail, re); };
-  bad({ host: 'My host' }, /need no quoting/);
+  bad({ pivotSheet: 'My host' }, /need no quoting/);
   bad({ name: '1x' }, /pivot name/);
   bad({ columns: 'reg' }, /three different header names/);
   bad({ range: 'A1:C1' }, /data rows/);
@@ -112,6 +112,7 @@ test('planning: only the measured shapes', () => {
   bad({ range: 'A1:B7' }, /three columns/);
   bad({ at: 'H3:H4' }, /one cell/);
   bad({ data: 'Count' }, /does not support field/);
+  bad({ host: 'Other' }, /does not support field/); // the pre-rename name does not silently keep working
   assert.equal(planOperations({ id: 'x', steps: [STEP, { ...STEP, at: 'Q3' }] }).ok, false, 'two steps on one pivot name clash');
 });
 

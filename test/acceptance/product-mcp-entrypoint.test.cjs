@@ -83,7 +83,7 @@ test('B-D) clean stdio startup, initialize, tools/list: exactly product_status +
   assert.equal(init.id, 1);
   assert.equal(init.result.protocolVersion, '2025-06-18');
   assert.equal(init.result.serverInfo.name, 'euro-office-product');
-  assert.deepEqual(list.result.tools.map(t => t.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task']);
+  assert.deepEqual(list.result.tools.map(t => t.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
   assert.match(r.err, /"msg":"starting"/, 'the log goes to stderr');
 });
 
@@ -107,8 +107,8 @@ test('E) product_status: identity, artifact, config schema, DS, exposure gate, d
   assert.equal(s.config.brokerRoute, 'CONFIGURED');
   assert.equal(s.ds.status, 'FAIL_CLOSED');
   assert.equal(s.exposureGate.state, 'CAPABILITIES_RELEASED');
-  assert.deepEqual(s.tools.exposed, ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task']);
-  assert.deepEqual(s.tools.withheld, ['docx_execute_task']);
+  assert.deepEqual(s.tools.exposed, ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(s.tools.withheld, []);
   assert.equal(s.exposureGate.writeReleaseGate, 'PASS');
   assert.ok(s.dependencies.node && s.dependencies.playwright);
   const text = JSON.stringify(res);
@@ -159,11 +159,14 @@ test('G) missing broker route -> startup ok, every editor operation refused (DS 
 });
 
 test('H) DS handshake mismatch -> FAIL_CLOSED through the one canonical classifier; a matching manifest -> PASS', async () => {
-  const manifest = (over = {}) => ({ ok: true, manifest: { bridgeVersion: '1.0.0', documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-v1/9.3.4.60/5', capabilities: [{ id: 'textStyle.bold.read/v1', version: 1, kind: 'READ', mutation: 'NO' }], ...over } });
+  // DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): the default manifest now carries the
+  // ACCEPTED 9.3.5.0/16 identity -- the historical 9.3.4.60/5 baseline is retired.
+  const manifest = (over = {}) => ({ ok: true, manifest: { bridgeVersion: '1.0.0', documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/16', capabilities: [{ id: 'textStyle.bold.read/v1', version: 1, kind: 'READ', mutation: 'NO' }], ...over } });
   const probe = h => () => ({ handshake: h });
   const cases = [
     [manifest({ patchVersion: 'euro-office-bridge-v1/9.3.4.60/2' }), 'PATCH_VERSION_MISMATCH'],
-    [manifest({ documentServerVersion: '9.3.5' }), 'RUNTIME_VERSION_MISMATCH'],
+    // an engine version nobody has ever accepted (9.3.6) keeps testing the RUNTIME_VERSION_MISMATCH path.
+    [manifest({ documentServerVersion: '9.3.6' }), 'RUNTIME_VERSION_MISMATCH'],
     [manifest({ bridgeVersion: '2.0.0' }), 'BRIDGE_VERSION_MISMATCH'],
     [{ ok: true, manifest: { bridgeVersion: '1.0.0' } }, 'MANIFEST_MALFORMED'],
     [{ ok: false, reason: 'MANIFEST_MISSING' }, 'MANIFEST_MISSING'],
@@ -176,7 +179,7 @@ test('H) DS handshake mismatch -> FAIL_CLOSED through the one canonical classifi
   }
   const ok = await productStatus({ config: GOOD, configIdentity: 'x', dsProbe: probe(manifest()) });
   assert.equal(ok.ds.status, 'PASS');
-  assert.equal(ok.ds.runtimeId, '9.3.4|euro-office-bridge-v1/9.3.4.60/5');
+  assert.equal(ok.ds.runtimeId, '9.3.5|euro-office-bridge-v1/9.3.5.0/16');
   assert.deepEqual(ok.ds.capabilities, ['textStyle.bold.read/v1@1']);
   const threw = await productStatus({ config: GOOD, configIdentity: 'x', dsProbe: () => { throw new Error('boom'); } });
   assert.deepEqual([threw.ds.status, threw.ds.reason], ['FAIL_CLOSED', 'PROBE_THREW'], 'a throwing probe never becomes PASS');
@@ -241,14 +244,20 @@ test('logging: secret-shaped keys and credential-shaped strings are redacted, lo
   assert.ok(r.big.length < 400);
 });
 
-test('tool inventory: derived from the adapters; product_status + the two READ tools + xlsx_execute_task exposed; no routed capability released', () => {
+test('tool inventory: derived from the adapters; product_status + the two READ tools + the two WRITE tools exposed (GH #228 proposed state); only the accepted DOCX intents are released routed capabilities', () => {
   const caps = capabilityInventory();
-  assert.equal(caps.filter(r => r.FORMAT === 'DOCX').length, 28);
-  assert.equal(caps.filter(r => r.FORMAT === 'XLSX').length, 48);
-  assert.ok(caps.every(r => r.EXPOSE_IN_PRODUCT_MCP === 'NO'));
+  assert.equal(caps.filter(r => r.FORMAT === 'DOCX').length, 38); // GH #268c: + set_image_size, set_image_wrap (routed + coded, NOT released); // GH #262: capabilityInventory() now also covers the 5 NEW_INTENTS (was 28, M4-migrated only -- a pre-existing gap this unit's own set_page_setup release exposed)
+  assert.equal(caps.filter(r => r.FORMAT === 'XLSX').length, 49);
+  assert.deepEqual(caps.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'NO').map(r => r.TOOL).sort(), ['docx:add_bookmark', 'docx:add_comment_on_match', 'docx:add_endnote', 'docx:add_footnote', 'docx:add_link', 'docx:apply_list', 'docx:define_style', 'docx:delete_paragraph', 'docx:delete_table_column', 'docx:delete_table_row', 'docx:edit_footer', 'docx:edit_header', 'docx:format_table', 'docx:format_text', 'docx:indent_list_item', 'docx:insert_paragraph_after', 'docx:insert_paragraph_before', 'docx:insert_table_column_after', 'docx:insert_table_column_before', 'docx:insert_table_row_after', 'docx:insert_table_row_before', 'docx:merge_table_cells', 'docx:modify_style', 'docx:move_paragraph_after', 'docx:move_paragraph_before', 'docx:outdent_list_item', 'docx:remove_list', 'docx:replace_table_cell', 'docx:reply_comment', 'docx:resolve_comment', 'docx:rewrite_paragraph', 'docx:set_list_level', 'docx:set_list_type', 'docx:set_numbering', 'docx:set_page_setup', 'docx:split_table_cell', 'docx:set_image_size', 'docx:set_image_wrap'].sort());
+  assert.deepEqual(caps.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'NO').map(r => r.TOOL).sort(), ['docx:add_bookmark', 'docx:add_comment_on_match', 'docx:add_endnote', 'docx:add_footnote', 'docx:add_link', 'docx:apply_list', 'docx:define_style', 'docx:delete_paragraph', 'docx:delete_table_column', 'docx:delete_table_row', 'docx:edit_footer', 'docx:edit_header', 'docx:format_table', 'docx:format_text', 'docx:indent_list_item', 'docx:insert_paragraph_after', 'docx:insert_paragraph_before', 'docx:insert_table_column_after', 'docx:insert_table_column_before', 'docx:insert_table_row_after', 'docx:insert_table_row_before', 'docx:merge_table_cells', 'docx:modify_style', 'docx:move_paragraph_after', 'docx:move_paragraph_before', 'docx:outdent_list_item', 'docx:remove_list', 'docx:replace_table_cell', 'docx:reply_comment', 'docx:resolve_comment', 'docx:rewrite_paragraph', 'docx:set_list_level', 'docx:set_list_type', 'docx:set_numbering', 'docx:set_page_setup', 'docx:split_table_cell', 'docx:set_image_size', 'docx:set_image_wrap'].sort());
+  assert.deepEqual(caps.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'NO').map(r => r.TOOL).sort(), ['docx:add_bookmark', 'docx:add_comment_on_match', 'docx:add_endnote', 'docx:add_footnote', 'docx:add_link', 'docx:apply_list', 'docx:define_style', 'docx:delete_paragraph', 'docx:delete_table_column', 'docx:delete_table_row', 'docx:edit_footer', 'docx:edit_header', 'docx:format_table', 'docx:format_text', 'docx:indent_list_item', 'docx:insert_paragraph_after', 'docx:insert_paragraph_before', 'docx:insert_table_column_after', 'docx:insert_table_column_before', 'docx:insert_table_row_after', 'docx:insert_table_row_before', 'docx:merge_table_cells', 'docx:modify_style', 'docx:move_paragraph_after', 'docx:move_paragraph_before', 'docx:outdent_list_item', 'docx:remove_list', 'docx:replace_table_cell', 'docx:reply_comment', 'docx:resolve_comment', 'docx:rewrite_paragraph', 'docx:set_list_level', 'docx:set_list_type', 'docx:set_numbering', 'docx:set_page_setup', 'docx:split_table_cell', 'docx:set_image_size', 'docx:set_image_wrap'].sort());
+  assert.deepEqual(caps.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'NO').map(r => r.TOOL).sort(), ['docx:add_bookmark', 'docx:add_comment_on_match', 'docx:add_endnote', 'docx:add_footnote', 'docx:add_link', 'docx:apply_list', 'docx:define_style', 'docx:delete_paragraph', 'docx:delete_table_column', 'docx:delete_table_row', 'docx:edit_footer', 'docx:edit_header', 'docx:format_table', 'docx:format_text', 'docx:indent_list_item', 'docx:insert_paragraph_after', 'docx:insert_paragraph_before', 'docx:insert_table_column_after', 'docx:insert_table_column_before', 'docx:insert_table_row_after', 'docx:insert_table_row_before', 'docx:merge_table_cells', 'docx:modify_style', 'docx:move_paragraph_after', 'docx:move_paragraph_before', 'docx:outdent_list_item', 'docx:remove_list', 'docx:replace_table_cell', 'docx:reply_comment', 'docx:resolve_comment', 'docx:rewrite_paragraph', 'docx:set_list_level', 'docx:set_list_type', 'docx:set_numbering', 'docx:set_page_setup', 'docx:split_table_cell', 'docx:set_image_size', 'docx:set_image_wrap'].sort());
+  assert.deepEqual(caps.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'NO').map(r => r.TOOL).sort(), ['docx:add_bookmark', 'docx:add_comment_on_match', 'docx:add_endnote', 'docx:add_footnote', 'docx:add_link', 'docx:apply_list', 'docx:define_style', 'docx:delete_paragraph', 'docx:delete_table_column', 'docx:delete_table_row', 'docx:edit_footer', 'docx:edit_header', 'docx:format_table', 'docx:format_text', 'docx:indent_list_item', 'docx:insert_paragraph_after', 'docx:insert_paragraph_before', 'docx:insert_table_column_after', 'docx:insert_table_column_before', 'docx:insert_table_row_after', 'docx:insert_table_row_before', 'docx:merge_table_cells', 'docx:modify_style', 'docx:move_paragraph_after', 'docx:move_paragraph_before', 'docx:outdent_list_item', 'docx:remove_list', 'docx:replace_table_cell', 'docx:reply_comment', 'docx:resolve_comment', 'docx:rewrite_paragraph', 'docx:set_list_level', 'docx:set_list_type', 'docx:set_numbering', 'docx:set_page_setup', 'docx:split_table_cell', 'docx:set_image_size', 'docx:set_image_wrap'].sort());
+  assert.deepEqual(caps.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'NO').map(r => r.TOOL).sort(), ['docx:add_bookmark', 'docx:add_comment_on_match', 'docx:add_endnote', 'docx:add_footnote', 'docx:add_link', 'docx:apply_list', 'docx:define_style', 'docx:delete_paragraph', 'docx:delete_table_column', 'docx:delete_table_row', 'docx:edit_footer', 'docx:edit_header', 'docx:format_table', 'docx:format_text', 'docx:indent_list_item', 'docx:insert_paragraph_after', 'docx:insert_paragraph_before', 'docx:insert_table_column_after', 'docx:insert_table_column_before', 'docx:insert_table_row_after', 'docx:insert_table_row_before', 'docx:merge_table_cells', 'docx:modify_style', 'docx:move_paragraph_after', 'docx:move_paragraph_before', 'docx:outdent_list_item', 'docx:remove_list', 'docx:replace_table_cell', 'docx:reply_comment', 'docx:resolve_comment', 'docx:rewrite_paragraph', 'docx:set_list_level', 'docx:set_list_type', 'docx:set_numbering', 'docx:set_page_setup', 'docx:split_table_cell', 'docx:set_image_size', 'docx:set_image_wrap'].sort());
+  assert.deepEqual(caps.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'NO').map(r => r.TOOL).sort(), ['docx:add_bookmark', 'docx:add_comment_on_match', 'docx:add_endnote', 'docx:add_footnote', 'docx:add_link', 'docx:apply_list', 'docx:define_style', 'docx:delete_paragraph', 'docx:delete_table_column', 'docx:delete_table_row', 'docx:edit_footer', 'docx:edit_header', 'docx:format_table', 'docx:format_text', 'docx:indent_list_item', 'docx:insert_paragraph_after', 'docx:insert_paragraph_before', 'docx:insert_table_column_after', 'docx:insert_table_column_before', 'docx:insert_table_row_after', 'docx:insert_table_row_before', 'docx:merge_table_cells', 'docx:modify_style', 'docx:move_paragraph_after', 'docx:move_paragraph_before', 'docx:outdent_list_item', 'docx:remove_list', 'docx:replace_table_cell', 'docx:reply_comment', 'docx:resolve_comment', 'docx:rewrite_paragraph', 'docx:set_list_level', 'docx:set_list_type', 'docx:set_numbering', 'docx:set_page_setup', 'docx:split_table_cell', 'docx:set_image_size', 'docx:set_image_wrap'].sort());
   for (const r of [...TOOL_ROWS, ...caps]) for (const k of ['TOOL', 'SOURCE_MODULE', 'FORMAT', 'READ_WRITE', 'AUTH_REQUIRED', 'CONFIG_REQUIRED', 'CURRENT_ACCEPTANCE', 'EXPOSE_IN_PRODUCT_MCP', 'REASON']) assert.ok(r[k], `${r.TOOL}.${k}`);
-  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task']);
-  assert.deepEqual(exposureGate().releasedCapabilityTools, ['xlsx_read', 'docx_read', 'xlsx_execute_task']);
+  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(exposureGate().releasedCapabilityTools, ['xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
   assert.deepEqual(exposureGate().writeReleasePreconditions, { 'M11.4a.1': 'CLOSED', 'M11.4a.2': 'CLOSED', 'M11.4a.3': 'CLOSED' });
   assert.deepEqual(exposureGate().releasePreconditions, { REQUESTER_AUTHORIZATION: 'PASS', CREDENTIAL_PATH: 'PASS' });
   // NEG: an intent the adapter does not route never appears

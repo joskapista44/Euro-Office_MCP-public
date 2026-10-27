@@ -166,7 +166,7 @@ test('J. dispatch throws -> uncertain, and the document shows why it must not be
   const e = r.exec.appliedOperations[0];
   assert.equal(e.status, OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN);
   assert.equal(e.uncertainty.reason, UNCERTAINTY_REASON.DISPATCH_THREW);
-  assert.equal(r.result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+  assert.equal(r.result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
   assert.equal(r.driver.calls.forceSave, 0);
   assert.deepEqual(snapshot(r.doc), ['u1=A', 'u2=two', 'u3=three'], 'the editor DID change');
   // And a throw before the editor applied it looks identical to the caller -- hence UNKNOWN.
@@ -245,7 +245,7 @@ test('N. batch partial failure: one op in a group fails L1 -> others verified, l
   // A whole-batch throw makes every operation of the round uncertain.
   const t = await runTask({ operations: ops.slice(0, 3).map(o => ({ ...o, forceVerifyFail: false })), strategy: 'batch', driverScript: { faults: { 1: 'throw-after-apply' } } });
   assert.deepEqual(t.exec.appliedOperations.map(e => e.status), Array(3).fill(OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN));
-  assert.equal(t.result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+  assert.equal(t.result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
 });
 
 function scale(n) {
@@ -438,7 +438,7 @@ test('R1-HOOK. a batch hook that dispatches more than once breaks the contract -
   assert.equal(r.metrics.commands, 1, 'commands is the true physical count');
   assert.deepEqual(r.execution.appliedOperations.map(e => e.status), Array(3).fill(OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN));
   assert.equal(r.execution.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.BATCH_HOOK_CONTRACT_VIOLATION);
-  assert.equal(r.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+  assert.equal(r.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
 
   // A hook that reports success WITHOUT dispatching is a violation too -- and certain: nothing reached the editor.
   const silent = createDocumentAdapter();

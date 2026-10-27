@@ -2,7 +2,9 @@
 
 const { XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS } = require('../runtime.cjs');
 const { isBlank, key } = require('../inventory.cjs');
+const { refOnTarget } = require('../dependencies.cjs');
 const formula = require('../formula.cjs');
+const { sheetNameProblem } = require('../sheet-name.cjs');
 const { copyMatches, objectsComplete, brokenNames, refKept, objectDiffs } = require('../sheet-copy.cjs');
 const drawings = require('../drawings.cjs');
 
@@ -20,9 +22,10 @@ const drawings = require('../drawings.cjs');
  *   - Move(before, undefined) / Move(undefined, after): both directions work.
  *
  * Contract, where it differs from the source (audit rows B-S05..B-S09, B-S26, B-S27):
- *   - sheet names are limited to the class the formula identity was MEASURED on (a bare name that
- *     needs no quotes: letters, digits, underscore, not cell- or R1C1-shaped, at most 31 characters);
- *     the source left name validity to the runtime (NOT_MEASURED there, silently wrong here);
+ *   - sheet names are limited to the class the formula identity was MEASURED on (L-21/2, sheet-name.cjs: letters incl.
+ *     accents, digits, underscore, words joined by single spaces, not cell- or R1C1-shaped, at most 31 characters; an
+ *     apostrophe is refused by name -- the engine mishandles it); the source left name validity to the runtime
+ *     (NOT_MEASURED there, silently wrong here);
  *   - uniqueness is case-insensitive (a formula naming a sheet with a case-only difference is silently
  *     dropped by the editor -- W2 probe set b);
  *   - create is SATISFIED only by an EMPTY sheet of that exact name (the source accepted any sheet);
@@ -45,7 +48,7 @@ const INTENTS = Object.freeze(['create_sheet', 'rename_sheet', 'delete_sheet', '
 
 /**
  * M11.5c.4 (owner: M11.5 continuous mandate, internal tracker): copy_sheet writes ONLY through the DS Bridge WRITE
- * worksheet.copy/v1, which exists only on /8 (the driver keeps the same list as its second line; a static test compares
+ * worksheet.copy/v1, whose runtime list is /8 .. /12 (L-05; the driver keeps the same list as its second line; a static test compares
  * them). The former EO_INTERNAL_COPY_RUNTIMES direct-internal path is gone; any other runtime refuses before the write.
  */
 const B03_BRIDGE_WRITE_RUNTIMES = XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS;
@@ -56,20 +59,9 @@ const FIELDS = Object.freeze({
   move_sheet: ['intent', 'id', 'sheet', 'before', 'after'],
   copy_sheet: ['intent', 'id', 'sheet', 'name'],
 });
-const MAX_NAME = 31;
 
-/** null when the name is inside the measured class, otherwise why not. */
-function nameProblem(n) {
-  if (typeof n !== 'string' || n === '') return 'a sheet name must be a non-empty string';
-  if (n.length > MAX_NAME) return `longer than ${MAX_NAME} characters (the editor silently renames it)`;
-  // M7 R26c (tier D probe): a name with single inner spaces, letters (accents too), digits and underscore is
-  // measured (quoted in a formula, the rename followed, session = reopen); an accented name WITHOUT a space is not
-  if (/^[\p{L}_][\p{L}\p{N}_]*( [\p{L}\p{N}_]+)+$/u.test(n)) return null;
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n)) return 'letters, digits and underscore, not starting with a digit (the no-quote class), or words of letters / digits / underscore joined by single spaces (the measured quoted class)';
-  if (/^[A-Za-z]{1,3}\d+$/.test(n) || /^([RrCc]\d*|[Rr]\d*[Cc]\d*)$/.test(n)) return 'shaped like a cell reference';
-  if (/^(history|true|false)$/i.test(n)) return 'a reserved word';
-  return null;
-}
+/** null when the name is inside the released (measured) class, otherwise why not -- the ONE rule, adapters/xlsx/sheet-name.cjs (L-21/2). */
+const nameProblem = sheetNameProblem;
 
 /** Per intent: the selector from a step, or why it is refused (names checked by nameProblem). */
 const SELECTORS = {
@@ -195,6 +187,8 @@ function deleteBlocked(primary, n) {
   if (indirect.length) return fail('xlsx-delete-indirect-reference-unresolvable', { sheet: n, cells: indirect.slice(0, 20) });
   const d = primary.dependencies;
   if (!d || !d.complete) return fail('xlsx-delete-dependency-observation-incomplete', { sheet: n, unobservable: d ? d.unobservable.slice(0, 20) : ['dependencies not read'], count: d ? d.unobservable.length : null });
+  const ref = refOnTarget(d, [n]);
+  if (ref) return fail(ref.reason, { sheet: n, ...ref });
   // a dependent hosted ON the deleted sheet goes with it -- except a sheet-scoped name (unmeasured: refused)
   const same = x => x && x.toLowerCase() === n.toLowerCase();
   const deps = d.refs.filter(r => !(r.kind !== 'name' && same(r.host)) && r.sheets.some(same));
@@ -211,6 +205,8 @@ function deleteBlocked(primary, n) {
 function renameBlocked(primary, s) {
   const d = primary.dependencies;
   if (!d || !d.complete) return fail('xlsx-rename-dependency-observation-incomplete', { sheet: s.sheet, unobservable: d ? d.unobservable.slice(0, 20) : ['dependencies not read'], count: d ? d.unobservable.length : null });
+  const ref = refOnTarget(d, [s.sheet]);
+  if (ref) return fail(ref.reason, { sheet: s.sheet, ...ref });
   const same = x => x && x.toLowerCase() === s.sheet.toLowerCase();
   const cf = d.refs.filter(r => r.kind === 'conditional' && r.sheets.some(same));
   if (cf.length) return fail('xlsx-rename-conditional-format-reference-not-followed', { sheet: s.sheet, rules: cf.slice(0, 20), count: cf.length });
@@ -250,6 +246,9 @@ function copyBlocked(primary, s, available) {
   const l3Axis = a => a === 'defined-names' || a === 'data-validation' || /^(objects|charts|pivots|names|conditional-formatting):/.test(a);
   const gap = !d ? ['dependencies not read'] : d.unobservable.filter(u => l3Axis(u.axis) || (u.host && u.host.toLowerCase() === s.sheet.toLowerCase()));
   if (gap.length) return fail('xlsx-copy-source-dependency-unobservable', { unobservable: gap.slice(0, 20) });
+  // the copied sheet carries the source's texts: a #REF! there is copied in an unmeasured way
+  const ref = d ? refOnTarget(d, [s.sheet]) : null;
+  if (ref) return fail(ref.reason, { sheet: s.sheet, ...ref });
   const broken = brokenNames(primary, s.sheet);
   return broken.length ? fail('xlsx-copy-source-carries-broken-name', { names: broken }) : null;
 }

@@ -3,10 +3,21 @@
 const { normalizeInventory, norm } = require('./inventory.cjs');
 const { resolveStableTarget } = require('./resolver.cjs');
 const { INTENTS, STATUS } = require('./intents.cjs');
+// W11 (option b): post-M7 capabilities with no source intent live in their OWN, disjoint
+// list (capabilities.cjs's NEW_INTENTS) -- NOT in intents.cjs's INTENTS, so the 28/28 migration
+// accounting gate (test/static/docx-intent-accounting.test.cjs) stays untouched. familyOf() below
+// looks a row up across BOTH lists; the merged BY_INTENT is the only change to this file's own
+// routing logic.
+const { NEW_INTENTS } = require('./capabilities.cjs');
 const text = require('./families/text.cjs');
 const formatting = require('./families/formatting.cjs');
 const paragraph = require('./families/paragraph.cjs');
 const list = require('./families/list.cjs');
+// W-07 (M7 backlog, numbering pattern/start): placed next to `list` (its closest
+// sibling, importing list.cjs's own listState -- list.cjs itself untouched), deliberately NOT
+// next to `pageSetup` below, where the concurrent W-04 table-format work is expected to insert
+// its own new require/FAMILIES entry (the reviewer's own merge-collision warning).
+const numbering = require('./families/numbering.cjs');
 const rich = require('./families/rich.cjs');
 const notes = require('./families/notes.cjs');
 const table = require('./families/table.cjs');
@@ -14,6 +25,17 @@ const tableRow = require('./families/table-row.cjs');
 const tableColumn = require('./families/table-column.cjs');
 const tableMergeSplit = require('./families/table-merge-split.cjs');
 const headerFooter = require('./families/header-footer.cjs');
+const pageSetup = require('./families/page-setup.cjs');
+const tableFormat = require('./families/table-format.cjs');
+// W-10  -- placed AFTER
+// page-setup, not next to list/table, to avoid a concurrent-edit collision on those lines.
+const styleDefinition = require('./families/style-definition.cjs');
+// GH #268c: placed AFTER style-definition, deliberately NOT next to header-footer/page-setup, to
+// avoid a concurrent-edit collision on those lines (same reviewer note as numbering's own placement above).
+const image = require('./families/image.cjs');
+// GH #269c: a new family, placed after style-definition for the same merge-collision reason.
+const comments = require('./families/comments.cjs');
+const commentWrite = require('./families/comment-write.cjs'); // GH #269d
 const fieldContract = require('./field-contract.cjs');
 const constraints = require('./constraints.cjs');
 
@@ -30,12 +52,16 @@ const constraints = require('./constraints.cjs');
  * Wave 1 `formatting` (format_text) and `paragraph-structure` (insert/delete/move), in Wave 2 `list`, in
  * Wave 3 `rich-inline` (add_bookmark, add_link) and `notes` (add_footnote, add_endnote), in Wave 4a
  * `table-cell` (replace_table_cell), in Wave 4b `table-row` (insert before/after, delete), in Wave 4c
- * `table-column` (insert before/after, delete), in Wave 4d `table-merge-split` (merge, split), in Wave 5 `header-footer` (edit_header, edit_footer). Every other
+ * `table-column` (insert before/after, delete), in Wave 4d `table-merge-split` (merge, split), in Wave 5 `header-footer` (edit_header, edit_footer). GH #268c adds
+ * `image` (set_image_size, set_image_wrap), a NEW_CAPABILITY family (no source intent, like page-setup/table-format/style-definition above it). Every other
  * registered intent is refused at PLANNING with an explicit reason, before any dispatch.
  */
 
-const FAMILIES = Object.freeze({ text, formatting, 'paragraph-structure': paragraph, list, 'rich-inline': rich, notes, 'table-cell': table, 'table-row': tableRow, 'table-column': tableColumn, 'table-merge-split': tableMergeSplit, 'header-footer': headerFooter });
-const BY_INTENT = new Map(INTENTS.map(i => [i.intent, i]));
+const FAMILIES = Object.freeze({ text, formatting, 'paragraph-structure': paragraph, list, numbering, 'rich-inline': rich, notes, 'table-cell': table, 'table-row': tableRow, 'table-column': tableColumn, 'table-merge-split': tableMergeSplit, 'header-footer': headerFooter, 'page-setup': pageSetup, 'table-format': tableFormat, 'style-definition': styleDefinition, image, comments, 'comment-write': commentWrite });
+// Merged from the 28/28 migration inventory AND the disjoint new-capability list -- see the
+// comment above the capabilities.cjs import. duplicates: [] is asserted by
+// test/static/docx-new-capabilities.test.cjs (the two lists are disjoint by construction and by gate).
+const BY_INTENT = new Map([...INTENTS, ...NEW_INTENTS].map(i => [i.intent, i]));
 
 function familyOf(intent) {
   const row = BY_INTENT.get(intent);
@@ -100,7 +126,8 @@ function planOperations(task) {
       const pre = constraints.validatePrecondition(step.selector.precondition, index);
       if (!pre.ok) return { ok: false, operations: [], detail: pre.detail, index };
       precondition = pre.precondition;
-      const { precondition: _p, ...rest } = step.selector;
+      const rest = { ...step.selector };
+      delete rest.precondition;
       familyStep = { ...step, selector: rest };
     }
     const p = f.family.plan(familyStep, index);
@@ -173,7 +200,10 @@ function attachSuccessors(operations) {
   });
 }
 
-const TABLE_FAMILIES = Object.freeze(['table-cell', 'table-row', 'table-column', 'table-merge-split']);
+// W04 (table-format, read while studying this registration path, not previously named in v1/v2 of
+// the design): 'table-format' writes a table by construction, so a task's doNotTouchTables
+// constraint must refuse it too -- the same reason the other 4 table families are here.
+const TABLE_FAMILIES = Object.freeze(['table-cell', 'table-row', 'table-column', 'table-merge-split', 'table-format']);
 // The steps that change how many paragraph blocks a section holds (or which ones). An ordinal names a
 // position counted on the state it is resolved against; with such a step ANYWHERE in the same task the
 // count differs between the first run and a reopened retry (a LATER step has already run then), so the
@@ -236,6 +266,29 @@ const docxAdapter = {
 
   planOperations,
 
+  /**
+   * W-10-8: the executor's OPTIONAL hook (src/core/execution/executor.cjs) --
+   * derives the task's own observation request, so a caller does not need to know that
+   * style-definition's targeted read exists at all (a caller-side `options.observation` still
+   * overrides this entirely, for the rare case that needs to). Only `define_style`/`modify_style`
+   * steps contribute style names (`styleNamesOf`, families/style-definition.cjs); every other
+   * task shape returns `{}`, the exact same request every other family already got before this
+   * hook existed.
+   */
+  // W-10-10: format_text{style} needs the SAME targeted-read coverage
+  // define_style/modify_style already get (W10-8) -- doc.GetAllStyles() does not see ANY custom
+  // style, not only a freshly-created one (measured, LIVE regression against the W10-9 fix) --
+  // so this family's own requested style names are merged in too, from the SAME task.
+  observationRequestFor(task) {
+    const names = [...new Set([...styleDefinition.styleNamesOf(task), ...formatting.styleNamesOf(task)])];
+    // W-07: a set_numbering step needs the PUBLIC per-level numbering format read (opt-in; every other read stays
+    // Bridge-only and byte-identical).
+    // GH #293 L7: set_numbering / set_list_type also ask for the word /5 Bridge's whole affected set of their target item
+    const members = numberingMembersWanted(task);
+    const live = { ...(names.length ? { styleNames: names } : {}), ...(numberingFormatWanted(task) ? { numberingFormat: true } : {}), ...(members.length ? { numberingMembers: members } : {}), ...(commentsWanted(task) ? { includeComments: true } : {}) };
+    return Object.keys(live).length ? { live } : {};
+  },
+
   classifyOperation(primary, op) {
     return familyFor(op).classify(primary, op);
   },
@@ -271,7 +324,7 @@ const docxAdapter = {
       if (op.selector && op.selector.ref !== undefined) ownTarget = op.refText;
       else {
         let r = null;
-        try { r = family.resolve(before.primary, op.selector, { operation: op }); } catch (_e) { r = null; }
+        try { r = family.resolve(before.primary, op.selector, { operation: op }); } catch { r = null; }
         ownTarget = r && r.ok ? constraints.targetText(r.target) : null;
       }
     }
@@ -294,5 +347,26 @@ const docxAdapter = {
 
   terminalContract: null,
 };
+
+/** W-07: set_numbering asks for the PUBLIC per-level numbering format read (`request.numberingFormat`); GH #293 N6: set_list_type
+ * too -- its shared-level guard reads the deeper levels' lvlText (does a label quote the target level?). */
+function numberingFormatWanted(task) {
+  const steps = task && Array.isArray(task.steps) ? task.steps : [];
+  return steps.some(st => st && (st.intent === 'set_numbering' || st.intent === 'set_list_type'));
+}
+
+/** GH #293 L7: the target texts of the set_numbering / set_list_type steps (a ref selector by the text the plan resolved for it); a task
+ * that does not plan asks for none -- it fails at planning anyway. */
+function numberingMembersWanted(task) {
+  const planned = planOperations(task);
+  if (!planned.ok) return [];
+  return [...new Set(planned.operations.filter(op => op.intent === 'set_numbering' || op.intent === 'set_list_type').map(op => numbering.keyTextOf(op)).filter(t => typeof t === 'string' && t))];
+}
+
+/** GH #269c/#269d: only the comment intents ask for the main document's comments (`request.includeComments`, GH #269b). */
+function commentsWanted(task) {
+  const steps = task && Array.isArray(task.steps) ? task.steps : [];
+  return steps.some(st => st && ['resolve_comment', 'reply_comment', 'add_comment_on_match'].includes(st.intent));
+}
 
 module.exports = { docxAdapter, planOperations };

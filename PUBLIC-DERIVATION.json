@@ -1,11 +1,11 @@
 {
   "PRODUCT": "Euro-Office_MCP",
-  "SOURCE_COMMIT": "17286d960e61224ba60b9efe9e4f573ea28a7a7c",
+  "SOURCE_COMMIT": "385c3caa62d620ba129c1bdd3881976adfeaf73a",
   "POLICY": "release/public/policy.json",
-  "POLICY_SHA256": "43f6536d4c21c1e7f0349a3e6ddf227b6fbd3307f05d3322260a7d0b47a6617f",
-  "PUBLIC_TREE_SHA256": "6b73c8a5b1ca58ae623f1ff2af9893f48165359c4a4670b10aa886d597e20fae",
-  "FILES": 348,
-  "EXCLUDED_SOURCE_FILES": 1254,
+  "POLICY_SHA256": "56bc1c262f8449b6be1461dd62b67aa0fd56320cc073085a8bfb617b78e8a1e8",
+  "PUBLIC_TREE_SHA256": "b61e4cba28dd7f0d0831316e5dde4a465d0a3985e800de990f8f631dbae3ae65",
+  "FILES": 688,
+  "EXCLUDED_SOURCE_FILES": 2362,
   "GATES": {
     "FORBIDDEN": "PASS",
     "SECRET": "PASS",
@@ -16,30 +16,31 @@
     "RUNTIME_VERBATIM": "PASS",
     "FORBIDDEN_FILE": "PASS"
   },
-  "TRANSFORMED_FILES": 116,
+  "TRANSFORMED_FILES": 192,
   "RULE_HITS": {
-    "paren-agent-comment-ref": 25,
-    "paren-lead-agent-comment-ref": 23,
+    "paren-agent-comment-ref": 43,
+    "paren-lead-agent-comment-ref": 39,
     "agent-review-ref": 6,
-    "inline-agent-comment-ref": 35,
-    "paren-comment-id": 3,
-    "tracker-card-ref": 35,
-    "tracker-kanban-ref": 20,
-    "tracker-word": 3,
-    "talk-room-ref": 105,
+    "inline-agent-comment-ref": 70,
+    "paren-comment-id": 30,
+    "tracker-card-ref": 30,
+    "tracker-kanban-ref": 30,
+    "tracker-word": 4,
+    "talk-room-ref": 113,
     "talk-room-token": 2,
-    "owner-name": 19,
-    "agent-branch": 12,
-    "internal-gate-name": 3,
+    "owner-name": 31,
+    "internal-share-folder": 2,
+    "agent-branch": 28,
+    "internal-gate-name": 13,
     "internal-ds-host": 5,
-    "internal-host-short": 5,
-    "pa-name": 2,
-    "agent-zero-possessive": 30,
-    "agent-zero-by": 2,
-    "agent-zero-role": 12,
-    "agent-zero-paren-lead": 1,
-    "agent-name": 31,
-    "comment-id": 54
+    "internal-host-short": 12,
+    "pa-name": 14,
+    "agent-zero-possessive": 87,
+    "agent-zero-by": 6,
+    "agent-zero-role": 14,
+    "agent-zero-paren-lead": 8,
+    "agent-name": 46,
+    "comment-id": 146
   },
   "DEAD_RULES": [],
   "ENTRIES": [
@@ -52,9 +53,17 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "CAPABILITIES.md",
+      "mode": "644",
+      "sha256": "c748fd57f996003084e65baeec88e5f06b3d7c6fdf58fdc430b225400ca77b6d",
+      "source": "release/public/root/CAPABILITIES.md",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "CHANGELOG.md",
       "mode": "644",
-      "sha256": "e57cc8c9262af4fd1d665146bc62135ac9cb5a0837a3078ae65775fa6ba614ca",
+      "sha256": "4485d4b1e4ba8236d4fc35fa45aca567463641a5afa1bed5b1a53bf75e9e3ff2",
       "source": "release/public/root/CHANGELOG.md",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -62,7 +71,7 @@
     {
       "path": "INSTALL.md",
       "mode": "644",
-      "sha256": "bb20941649a9770ff41a3c0b62691d88d520b12f32e2cb131ba734d0d80c8c06",
+      "sha256": "c2380f89b09c461721e55adf2d7eccbc479dc05f23e0d90f4b92aa457c508848",
       "source": "release/public/root/INSTALL.md",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -86,7 +95,7 @@
     {
       "path": "README.md",
       "mode": "644",
-      "sha256": "3e2bb30497d01a97ea8391bf784f86839d0fe269134e89a453f4c6328ce37ac4",
+      "sha256": "65636e8544d0c66a936afedf87fe6864bebf6e4727a02150e4ce5cd2bfabfbd7",
       "source": "release/public/root/README.md",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -110,7 +119,7 @@
     {
       "path": "UPDATE.md",
       "mode": "644",
-      "sha256": "f392ebb389a82aab52f74e4f07d569ecd0ef1677513706e74633e492033abc5e",
+      "sha256": "1e422d0c36f3a060c08267e02bb487870e3f2f04fa526519e35dafa09c27f107",
       "source": "release/public/root/UPDATE.md",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -118,7 +127,7 @@
     {
       "path": "bin/euro-office-mcp.cjs",
       "mode": "755",
-      "sha256": "e4c1a40eb6946fb0adf5308d26ae61767b49bb396a03186e5d66f018a287b25b",
+      "sha256": "b2cc8a763bcb030b38936f95cf97176cc981e13d10c06e03abf48c615005ce63",
       "source": "bin/euro-office-mcp.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -150,7 +159,7 @@
     {
       "path": "docs/PRODUCT-MCP-TOOL-INVENTORY-20261008.md",
       "mode": "644",
-      "sha256": "191410e1aec39931eff6e32fc8267305e3a0bf1358534de6bb6ca7163f0e52b3",
+      "sha256": "5e188aa6c28286cb3cac0e41cef603f2fe5776c2d8ecef3ef548664f0023d12b",
       "source": "docs/PRODUCT-MCP-TOOL-INVENTORY-20261008.md",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -158,7 +167,7 @@
     {
       "path": "docs/evidence/m11-4a0/census.json",
       "mode": "644",
-      "sha256": "ccf8ee02841d538b9359c499fb83383c163c2fa4585e5aca56c4a25153a43483",
+      "sha256": "56b9791d247d7de8ac958084ff7c0dc79c83bca8b1e53634967c9a61e5946cc1",
       "source": "docs/evidence/m11-4a0/census.json",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -166,7 +175,7 @@
     {
       "path": "docs/evidence/m7-b-probe1-20261003.json",
       "mode": "644",
-      "sha256": "19b0e6331af437d18225a386a4345af0dcd1af90b7186c3e3d8a2f85f05da47e",
+      "sha256": "20e6e8a6b0788816978a094d5a7e2e105bb4f2a26b3e78245e7961fa81861f83",
       "source": "docs/evidence/m7-b-probe1-20261003.json",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -174,7 +183,7 @@
     {
       "path": "docs/evidence/m7-s4-probe2-20261003.json",
       "mode": "644",
-      "sha256": "08276aad344a299cb56ff5e10fed9a4f049cb992278cfd2cbc0409f6cb97d24d",
+      "sha256": "670744a06d287684f192b0ba05ae5c83e19810757497ac62e774872850c7130e",
       "source": "docs/evidence/m7-s4-probe2-20261003.json",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -206,7 +215,7 @@
     {
       "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/manifest.json",
       "mode": "644",
-      "sha256": "3f7931206acbfdb0feb24f82a6034a0fe7cc219d4e57599802bdbc83f52cf538",
+      "sha256": "f74b00d0931c507a62bb13f6a15d4806a1d9b33e888dd881c40e34caba0260cc",
       "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/manifest.json",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -224,6 +233,294 @@
       "mode": "644",
       "sha256": "59acfec08274c424e6636b5ba02b78b2723d0e7b14721851049aea093b8d20c3",
       "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/README.md",
+      "mode": "644",
+      "sha256": "3232d4a722b4a01ca4fffa26c633e15d7ea3bdd075123b34cf08a3bbc10232ef",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/README.md",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "16ad3780e9ba99eb029ea8573cabdf8ff1e41cc7341eaba8cb15e2ad65e169ed",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/build-rev10.py",
+      "mode": "644",
+      "sha256": "d980124fd086f188803820d73b6b168fb645ac46d629281fa95cffef541697b5",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/build-rev10.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "c86bcb413166ac15b6988a626ff19315549b80ca6d9ddde58bc63ee53896218d",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/manifest-mechanism-proof.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/new.txt",
+      "mode": "644",
+      "sha256": "16ad3780e9ba99eb029ea8573cabdf8ff1e41cc7341eaba8cb15e2ad65e169ed",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/old.txt",
+      "mode": "644",
+      "sha256": "fdc0724d1300360607b6a83059430a3cc3977e629dec0b6f272ade0266943e0c",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev10-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "3325bf94a80f677d8b0c97d9acf7c8df446c67a6266d87d93253f9ea3017b216",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/build-rev11.py",
+      "mode": "644",
+      "sha256": "931cec39dbcacb8e44d694598f7b80d4e2340c71c1ea6da38780a84aa5d0d1d5",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/build-rev11.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "1687e8ab6387b30c01a2edef9813b04e6852e6e0337ef64e4fc6eb4cb4bfecec",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/manifest-mechanism-proof.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/new.txt",
+      "mode": "644",
+      "sha256": "3325bf94a80f677d8b0c97d9acf7c8df446c67a6266d87d93253f9ea3017b216",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/old.txt",
+      "mode": "644",
+      "sha256": "16ad3780e9ba99eb029ea8573cabdf8ff1e41cc7341eaba8cb15e2ad65e169ed",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev11-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "ffdfe0a168296c1ec56a9856673d0ed3b5b4a94d124aba7eae7ed2cba258d884",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/build-rev12.py",
+      "mode": "644",
+      "sha256": "f2de03a311964796111dc0ab2fb034d7c5783f3eb7c810c3f2afcc969d31dff5",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/build-rev12.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "cee4f3365fedf847cb3abc8bebf03f393ef33cef716d068e71d29f88aa48ec92",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/manifest-mechanism-proof.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/new.txt",
+      "mode": "644",
+      "sha256": "ffdfe0a168296c1ec56a9856673d0ed3b5b4a94d124aba7eae7ed2cba258d884",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/old.txt",
+      "mode": "644",
+      "sha256": "3325bf94a80f677d8b0c97d9acf7c8df446c67a6266d87d93253f9ea3017b216",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev12-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "4d218a2250643e2bb5a8704822f8509b02c4946d034df084fbfadb38091e750a",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/build-rev13.py",
+      "mode": "644",
+      "sha256": "731848c64609c237fcb1e82b8e63773bf00382616f8f4f40bc6d31116534248b",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/build-rev13.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "5d2cc332325734248ca02d3c489ce6a38f84392f007d44d97fc7894db51b2ea8",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/manifest-mechanism-proof.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/new.txt",
+      "mode": "644",
+      "sha256": "4d218a2250643e2bb5a8704822f8509b02c4946d034df084fbfadb38091e750a",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/old.txt",
+      "mode": "644",
+      "sha256": "ffdfe0a168296c1ec56a9856673d0ed3b5b4a94d124aba7eae7ed2cba258d884",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev13-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "a95b78fc02134c5375715390b3e6d63e5442060a496fd2319bb72bf4422aed1b",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/build-rev14.py",
+      "mode": "644",
+      "sha256": "8361640a2226367ce2fc53082d76d91dced4c3663ac2472625ef9b3abf349cdd",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/build-rev14.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "6b42e9556af97308383fd25712ff80b114ab7b62e53adc25c5a793701b243d7c",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/manifest-mechanism-proof.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/new.txt",
+      "mode": "644",
+      "sha256": "a95b78fc02134c5375715390b3e6d63e5442060a496fd2319bb72bf4422aed1b",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/old.txt",
+      "mode": "644",
+      "sha256": "4d218a2250643e2bb5a8704822f8509b02c4946d034df084fbfadb38091e750a",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev14-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "de50333fce5667cd94362d74ed7f57496afb584ca0f291f41483905991c619ca",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/build-rev15.py",
+      "mode": "644",
+      "sha256": "f46d7105f478df90b7bb4eb30654437c241b0ec096af8ce15c57c054983690ac",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/build-rev15.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "3376cc5b752ba0ec7706e6bf7eda622854d5aa3f377db41f4614190ec4f5024e",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/manifest-mechanism-proof.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/new.txt",
+      "mode": "644",
+      "sha256": "de50333fce5667cd94362d74ed7f57496afb584ca0f291f41483905991c619ca",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/old.txt",
+      "mode": "644",
+      "sha256": "a95b78fc02134c5375715390b3e6d63e5442060a496fd2319bb72bf4422aed1b",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev15-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "c1c5965802c42ab7edfa35fb169cb603a9be048ceca2cf7b0d6f10b28ed81e3d",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/build-rev16.py",
+      "mode": "644",
+      "sha256": "a22609fa1e0128ab1de7d2cd6f4cb2e314c21498b99b86daad7a03982ef189ce",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/build-rev16.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "2c614717b83299f33c7e1ee505a1c817f0e88190d8b9d2eb5624b8f65e0013a0",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/manifest-mechanism-proof.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/new.txt",
+      "mode": "644",
+      "sha256": "c1c5965802c42ab7edfa35fb169cb603a9be048ceca2cf7b0d6f10b28ed81e3d",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/old.txt",
+      "mode": "644",
+      "sha256": "de50333fce5667cd94362d74ed7f57496afb584ca0f291f41483905991c619ca",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev16-candidate/old.txt",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -392,6 +689,54 @@
       "mode": "644",
       "sha256": "74ecfd1539fa3b158f72d240110162834641ae337293d8b256fb6f149454937d",
       "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev8-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/README.md",
+      "mode": "644",
+      "sha256": "8e1ed60e5647736ca391fa31afd2deaadc7eef39721e3fb1a9adc3c04fc3d9c2",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/README.md",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "fdc0724d1300360607b6a83059430a3cc3977e629dec0b6f272ade0266943e0c",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/build-rev9.py",
+      "mode": "644",
+      "sha256": "278de80aaf0e7d05561814afa877c8b78a31ae9fe8cd61113310dd621982d3f8",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/build-rev9.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "81e62a6918f90af1402feb5778679252811e1b015d729108e8757debca5014ee",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/manifest-mechanism-proof.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/new.txt",
+      "mode": "644",
+      "sha256": "fdc0724d1300360607b6a83059430a3cc3977e629dec0b6f272ade0266943e0c",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/old.txt",
+      "mode": "644",
+      "sha256": "9f285b897f58a751c3164791b2416e085d627a1bd10419261622349806a96be7",
+      "source": "documentserver-patches/9.3.4.60/euro-office-bridge-v1/rev9-candidate/old.txt",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -572,6 +917,174 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/bridge-block.js",
+      "mode": "644",
+      "sha256": "2686705c45e49ae3c40b8a5b4127f9242abb5484b7efd5ed623ae492b21b59f6",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "072bf10a3b9c2231959a4bcf26c10c116c584ca93134f00fbb4f2eb8e47933d6",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/build-rev17.py",
+      "mode": "644",
+      "sha256": "c542ea7c5af1fa403a510663ffe107b71b51994038557762c76063a078082365",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/build-rev17.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/manifest-mechanism-proof.json",
+      "mode": "644",
+      "sha256": "4d55d4de5d755eac39c1bc38c3795a8d5a2ada8a7743e9beee60b61ced4af43c",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/manifest-mechanism-proof.json",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/new.txt",
+      "mode": "644",
+      "sha256": "072bf10a3b9c2231959a4bcf26c10c116c584ca93134f00fbb4f2eb8e47933d6",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/old.txt",
+      "mode": "644",
+      "sha256": "2686705c45e49ae3c40b8a5b4127f9242abb5484b7efd5ed623ae492b21b59f6",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/plan-rev17.py",
+      "mode": "644",
+      "sha256": "511199e784bc146acf1cf371a64f53bd45a414f956b1399cb1813aa6e9c59b6d",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev17-candidate/plan-rev17.py",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/bridge-block.js",
+      "mode": "644",
+      "sha256": "55795f6c07d09ba290094c1b2e426cdfad9ed4b31b5417bc755898ef291eb8b0",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "9ae2b09e78d02028cb7821664141e27aa6d231395238fffc8bedbe7104a757d3",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/build-rev4.py",
+      "mode": "644",
+      "sha256": "c521fdcecc1568e7aa283a93c0559606330f4ffc0526c129347e88bfb35027a6",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/build-rev4.py",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/manifest.json",
+      "mode": "644",
+      "sha256": "9249e951cbd6804337668a0397fe3b5b48c896d53f9d2a06f563b4ebe6307b63",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/manifest.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/new.txt",
+      "mode": "644",
+      "sha256": "c4078976244fdee32e95d53547d39b40d0b31b148d478824484d73760da81e52",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/old.txt",
+      "mode": "644",
+      "sha256": "c0193439b5d1f2fa283ed6c24f729fd588da10353cd9defca8ad6bae79e19d7b",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev4-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/bridge-block.js",
+      "mode": "644",
+      "sha256": "daf94343282b602c212d2e5f194a146b9ed64cc7c9c362ae7b5ecc73b51c4583",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/bridge-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/build-rev5.py",
+      "mode": "644",
+      "sha256": "adeeaa3e31d30387a5b199c8bd56c3a89c09fc739b9d9e467d08936fd077cc7c",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/build-rev5.py",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/manifest.json",
+      "mode": "644",
+      "sha256": "9b0fbaf1b7007e3e32005242ecb5e4ce82352cf58a2f3340c36c72105d900ce8",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/manifest.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/new.txt",
+      "mode": "644",
+      "sha256": "687eefc0f7dbd5d3354a3c3bd76b8ea9dc9883ef737573ae44ae80fceb39cc5a",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/new.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/old.txt",
+      "mode": "644",
+      "sha256": "c4078976244fdee32e95d53547d39b40d0b31b148d478824484d73760da81e52",
+      "source": "documentserver-patches/9.3.5.0/euro-office-bridge-word-v1/rev5-candidate/old.txt",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/euro-office-chart-read-v1/chart-read-block.js",
+      "mode": "644",
+      "sha256": "20d06243532ccd40ee139e738da48b9afbc7baa160d57ced4f2545b647a678b1",
+      "source": "documentserver-patches/9.3.5.0/euro-office-chart-read-v1/chart-read-block.js",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/fresh-install-v1.1.0.json",
+      "mode": "644",
+      "sha256": "3feb24bcdc94874a10b96f63097ef708b6df8e152abd860be5ecfad4392d9e22",
+      "source": "documentserver-patches/9.3.5.0/fresh-install-v1.1.0.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "documentserver-patches/9.3.5.0/fresh-install.json",
+      "mode": "644",
+      "sha256": "67df3bcae1873289cb8126b0f5fc310fc2709519b4e2081015f735d1abe9bdda",
+      "source": "documentserver-patches/9.3.5.0/fresh-install.json",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "documentserver-patches/README.md",
       "mode": "644",
       "sha256": "f01e1c41828588533249a4bafd89eeae95cbbf80f921dec17c3de137ff2d0a25",
@@ -582,7 +1095,7 @@
     {
       "path": "package-lock.json",
       "mode": "644",
-      "sha256": "f93b29fe1f45ce35f073e14394630f0b31c59ce2c162881dffab145c1c87f8d0",
+      "sha256": "275a8bcfd1c886b5f71fe4d201d7fa306afcd44b3a6e801cb2e062628a6a86cf",
       "source": "package-lock.json",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -590,7 +1103,7 @@
     {
       "path": "package.json",
       "mode": "644",
-      "sha256": "629a9be20193ebe6effabdfe15b58403335b07468628554455877febb7c7b7c6",
+      "sha256": "cf6daa148099931e20891b950b5d5588592bcf61a41c771f3f8beb558053f5f5",
       "source": "package.json",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -638,7 +1151,7 @@
     {
       "path": "scripts/gen-tool-inventory.cjs",
       "mode": "644",
-      "sha256": "2e1f6b81c5a1fb8f5ab778904f57111cd04383ab7c86456ed39f3d0bbef1ffd8",
+      "sha256": "03546635c9775140c214aaeb8345560ec45538fc9f68f8cbdbb6bdd97546cf6a",
       "source": "scripts/gen-tool-inventory.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -654,8 +1167,16 @@
     {
       "path": "src/adapters/docx/adapter.cjs",
       "mode": "644",
-      "sha256": "1723ca3a9d1b0ec362a17fb52b6659f566068bf6d84c7f8a1f4811bfa95a61a9",
+      "sha256": "29023eac9ce55606564a6e81ebcfb47ad76408964222904d6202f5ab0fc71384",
       "source": "src/adapters/docx/adapter.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/docx/capabilities.cjs",
+      "mode": "644",
+      "sha256": "06918ef8fe48f42a1d9771206dc83b8091875819c453c994011f6ed6084a7fe3",
+      "source": "src/adapters/docx/capabilities.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -668,9 +1189,25 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "src/adapters/docx/families/comment-write.cjs",
+      "mode": "644",
+      "sha256": "62bc9676a63013b9c92dd8fc844a5b951412b0f12122f18a9b3617419b81dc55",
+      "source": "src/adapters/docx/families/comment-write.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/docx/families/comments.cjs",
+      "mode": "644",
+      "sha256": "a0830d7609bb3d1dd13af1df93247fd835c53873bbc99eed3d093f93a0a30f2b",
+      "source": "src/adapters/docx/families/comments.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "src/adapters/docx/families/formatting.cjs",
       "mode": "644",
-      "sha256": "01cbd442c6d332a3e35e1d305c9092e89cba7ed99b7c617b46637e8b04dfdb13",
+      "sha256": "b372db1952f3f8d9c8233842fa33ee14caf4766a0a02952de0a79149a201e34c",
       "source": "src/adapters/docx/families/formatting.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -678,15 +1215,23 @@
     {
       "path": "src/adapters/docx/families/header-footer.cjs",
       "mode": "644",
-      "sha256": "75c814893eb51494e120f3e643740551bdec207782d1ac66f961846555f7e45f",
+      "sha256": "ee206286d3b2a2465479809f9831c415bdbf2514bf3a3b41b679ef81d3713f45",
       "source": "src/adapters/docx/families/header-footer.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/docx/families/image.cjs",
+      "mode": "644",
+      "sha256": "96c1b1512fe91166149f889256c140d37f9f47ca16cbaa11597a63968b8c93ce",
+      "source": "src/adapters/docx/families/image.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/docx/families/list.cjs",
       "mode": "644",
-      "sha256": "96d9eb176cf3dc0396357220188161d98b8854638f1b791a58830b38edc477ba",
+      "sha256": "1bfe1fc87f95113c6caec425cb30e4982ac3badfd3460dc9a6a0ea1d4981d948",
       "source": "src/adapters/docx/families/list.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -700,9 +1245,25 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "src/adapters/docx/families/numbering.cjs",
+      "mode": "644",
+      "sha256": "83885922e18e689a6714d852e841406b2639f50818d13b870cf9dbfe942963af",
+      "source": "src/adapters/docx/families/numbering.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/docx/families/page-setup.cjs",
+      "mode": "644",
+      "sha256": "5436a2cb224af2d47c70e0c3ca89f7224d6a2974e2cc46999177ef4b8a0d1224",
+      "source": "src/adapters/docx/families/page-setup.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "src/adapters/docx/families/paragraph.cjs",
       "mode": "644",
-      "sha256": "7dc4ff7d8d288c105243a5b5025df6b8fc1be0f847ebfb918c4cb5ffaa411fdb",
+      "sha256": "a8debbcb08b6b511559ba389db1853aae29ed4d8c5ec01504c68c5a76323629d",
       "source": "src/adapters/docx/families/paragraph.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -710,23 +1271,39 @@
     {
       "path": "src/adapters/docx/families/rich.cjs",
       "mode": "644",
-      "sha256": "00fc0e0643dcd7f1ad5704820299dd80e079a0031387c8f0a6e78f5841232c19",
+      "sha256": "61718e62b5afb13fd2164f72fb98298c663aec05c1008acdb028636af7de64d4",
       "source": "src/adapters/docx/families/rich.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/docx/families/style-definition.cjs",
+      "mode": "644",
+      "sha256": "3d305dbb3483235a7a65a92db437f70426f0e01db40af6dd1b7379478a8a54e9",
+      "source": "src/adapters/docx/families/style-definition.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/docx/families/table-column.cjs",
       "mode": "644",
-      "sha256": "c56ec744301de1746308e57554f9d334b757cb61d189619e04f40464119847bd",
+      "sha256": "9caa88f98e58f4127854cfb45e3efbd1061a7dfd8d46463f7387ebb801923df9",
       "source": "src/adapters/docx/families/table-column.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/docx/families/table-format.cjs",
+      "mode": "644",
+      "sha256": "d49765b869e4ac34bd35abdae66f094fd6927aadc62d8868968e51c9a019750d",
+      "source": "src/adapters/docx/families/table-format.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/docx/families/table-merge-split.cjs",
       "mode": "644",
-      "sha256": "3745c436bc2d03b2a859ef45168d756bfa220878294dea2876c1e2156c9be7cc",
+      "sha256": "1613337a10487d1daac09034441d9775ead6cc83f4bee798bc784f1886d1aabc",
       "source": "src/adapters/docx/families/table-merge-split.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -734,7 +1311,7 @@
     {
       "path": "src/adapters/docx/families/table-row.cjs",
       "mode": "644",
-      "sha256": "1e12e99e01e3bbfe1a9136d800900b62589d26c4befcd0ef2f2fe9e0a8cfdcd5",
+      "sha256": "7ae6c0fa68974b0e016b07139a5ab627626a27cb4ad833938fbf56d002417c45",
       "source": "src/adapters/docx/families/table-row.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -742,7 +1319,7 @@
     {
       "path": "src/adapters/docx/families/table.cjs",
       "mode": "644",
-      "sha256": "af51de80cc3ebbea2955b7991d2d8a6db12c2a531d67774a30f66334e8cbe934",
+      "sha256": "f030c8e49d19b6bab963b77a132e5daba88627555268a0c7aaec0ebba0a426a2",
       "source": "src/adapters/docx/families/table.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -750,7 +1327,7 @@
     {
       "path": "src/adapters/docx/families/text.cjs",
       "mode": "644",
-      "sha256": "64b6bc9af42b6103a88738a5100511fd364d05e22c2ccc8ae6e5fe3f514d1ef5",
+      "sha256": "73e8877fa7636fd613063cf0f71099e23bd8a3d699c41518abcb30a78e2a987d",
       "source": "src/adapters/docx/families/text.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -758,7 +1335,7 @@
     {
       "path": "src/adapters/docx/field-contract.cjs",
       "mode": "644",
-      "sha256": "4073b0d59d201f75e90ebef981507f1aa322437c38e0509ba56e68754dd88fe5",
+      "sha256": "d173afb31763439df967a19306da4739ac18681344b0ab36a62e1d58f528053d",
       "source": "src/adapters/docx/field-contract.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -774,7 +1351,7 @@
     {
       "path": "src/adapters/docx/inventory.cjs",
       "mode": "644",
-      "sha256": "916de0ae1131edfbc44713314b8e72e74df93fa54e6359ae55b93c75493bf4a3",
+      "sha256": "a3f999e0410b877787d69cd69dc11498562030704bde499ff6a3309b4ee03431",
       "source": "src/adapters/docx/inventory.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -784,6 +1361,14 @@
       "mode": "644",
       "sha256": "f84b967b94040b9e5bee400bd98ff70bbc03aa0099c694992ea1c268f8bd728c",
       "source": "src/adapters/docx/resolver.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/docx/stored-content.cjs",
+      "mode": "644",
+      "sha256": "334bf14e207548fddfa562a967e625fa375b91f63680f9f14ce2de1b7c223acd",
+      "source": "src/adapters/docx/stored-content.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -798,7 +1383,7 @@
     {
       "path": "src/adapters/xlsx/adapter.cjs",
       "mode": "644",
-      "sha256": "b373bf5e6e3bb76a5418cd32a993a7425b7cea8f3798f483e848997c53c68ea0",
+      "sha256": "4cef626f19b0e4b28ee4aee481b2bfa256716813c0e23babedaa99809716587c",
       "source": "src/adapters/xlsx/adapter.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -806,7 +1391,7 @@
     {
       "path": "src/adapters/xlsx/dependencies.cjs",
       "mode": "644",
-      "sha256": "9c6d6fbaa9473e8d75c04bc778021ed5b4ddf51ecd35acc57133ede797ae20c1",
+      "sha256": "a576e8ef2a7100df36b3d573c3796a21959522936bcb1688c37ed3ecb8a9bb6b",
       "source": "src/adapters/xlsx/dependencies.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -814,31 +1399,55 @@
     {
       "path": "src/adapters/xlsx/drawings.cjs",
       "mode": "644",
-      "sha256": "958403e20b4fba94048bf379cd316610832e329f2f290c54131772969553533b",
+      "sha256": "9fe627ba94127ecdd4626330fbd8a880d2da1a3c28a473ce163e04f5db00b778",
       "source": "src/adapters/xlsx/drawings.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/array-formula.cjs",
+      "mode": "644",
+      "sha256": "8b67e7c88d2974ebadd89d66852bbaaf2abf007f111ed4603954b1cbfc54d7e8",
+      "source": "src/adapters/xlsx/families/array-formula.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/xlsx/families/cells.cjs",
       "mode": "644",
-      "sha256": "0321c6f272a2d4b66de0c819afad020a0a3eb8ebf0afa0569933b94ad68dd32d",
+      "sha256": "b897290ae65f22f8b29c962dfc4fddf3aad86b22bcac0c6b0203d5ab87159fa8",
       "source": "src/adapters/xlsx/families/cells.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/cf-read.cjs",
+      "mode": "644",
+      "sha256": "2c950241563bf393ea55435bc7610c48b8e62e7ef10b0dd3e0e5636bf5d699f3",
+      "source": "src/adapters/xlsx/families/cf-read.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/xlsx/families/cf.cjs",
       "mode": "644",
-      "sha256": "799103a0bba0d27bb489f0a522ca544e52df22fc489ba1e92d06ba6c7013a53f",
+      "sha256": "ad3822b1cf9261c6d2d6f4650c07dd5144adcfd4fff1cb68e6347c391724b4ba",
       "source": "src/adapters/xlsx/families/cf.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/chart-point-labels.cjs",
+      "mode": "644",
+      "sha256": "378828fbf4e761d7b5147fb1e4c852ca228bea28e34878756a3b3bb5277fbba8",
+      "source": "src/adapters/xlsx/families/chart-point-labels.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/xlsx/families/charts.cjs",
       "mode": "644",
-      "sha256": "46bcbb41b31a2820fa4c6640cb6c791a27cf2e585a895294f298d4806f48aee1",
+      "sha256": "f543f760cb27744fc4aaf9949fd38a608e6af6eeef706cd4d67370a6b1401718",
       "source": "src/adapters/xlsx/families/charts.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -846,15 +1455,63 @@
     {
       "path": "src/adapters/xlsx/families/clear.cjs",
       "mode": "644",
-      "sha256": "28de32f8e315e0a91d5bfb5f35816252906910a567f515322e9d08eed360bc29",
+      "sha256": "fa37c2360dbfed19d72d9d24abe712374321ce1c040c80e415ac20a3f34d0200",
       "source": "src/adapters/xlsx/families/clear.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/comments-read.cjs",
+      "mode": "644",
+      "sha256": "c862138eff59aa2570fdb5a3cf6e9585a2b2ff118940d4610eb7c41d1fb03c12",
+      "source": "src/adapters/xlsx/families/comments-read.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/comments.cjs",
+      "mode": "644",
+      "sha256": "de1cb9021592288fa22983727356dfb6ecb4efc0b0d6b1359cad2cfd87e48386",
+      "source": "src/adapters/xlsx/families/comments.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/defined-names-read.cjs",
+      "mode": "644",
+      "sha256": "3d00023f549d4959d9e2a4e37b1aa93495e9f44420aa35f2af71e5f692e18c78",
+      "source": "src/adapters/xlsx/families/defined-names-read.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/delete-cells.cjs",
+      "mode": "644",
+      "sha256": "a65ea9c4d990e7b7975d212fc5c710078771f27b290f3abc539371e0fae651f3",
+      "source": "src/adapters/xlsx/families/delete-cells.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/drawings-insert.cjs",
+      "mode": "644",
+      "sha256": "524462f7d58eb42f0c81263e379db1e0b502db54afa25bb535921734bacdb818",
+      "source": "src/adapters/xlsx/families/drawings-insert.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/filter-read.cjs",
+      "mode": "644",
+      "sha256": "8eaa9cf05aee72d5aab9a58fda457738847dc218ea5139b7ce4f12c60a76a834",
+      "source": "src/adapters/xlsx/families/filter-read.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/xlsx/families/filter.cjs",
       "mode": "644",
-      "sha256": "1b34aa98e51b116d4f20a4d241f700f629e2e30eb8b5b2c6c0dad1b37f943ca4",
+      "sha256": "53175879f696ac9f66064d7a0f8aea85adfdfde1a9de85469e5ac1e8265e2541",
       "source": "src/adapters/xlsx/families/filter.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -870,7 +1527,7 @@
     {
       "path": "src/adapters/xlsx/families/format-diagonal.cjs",
       "mode": "644",
-      "sha256": "d9c43e1e42dd69d75954e5addc58db2ff1d7640753c355f7e583f4856a2354df",
+      "sha256": "c5b4c36387ea3547bb11ab5d0658b0781046607dcc933a9dcad3a1671aae51d8",
       "source": "src/adapters/xlsx/families/format-diagonal.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -878,7 +1535,7 @@
     {
       "path": "src/adapters/xlsx/families/format-fill-clear.cjs",
       "mode": "644",
-      "sha256": "2ac962d08f25d5f552a33351a734fd228353102135a16f404345eef76c457e92",
+      "sha256": "93db5a7fe88934303c17c1299fbb9a541142123b21ebf54a162473a6356dc8af",
       "source": "src/adapters/xlsx/families/format-fill-clear.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -902,7 +1559,7 @@
     {
       "path": "src/adapters/xlsx/families/format-remove.cjs",
       "mode": "644",
-      "sha256": "b4a315d4a7aa237fd796c0da874b1287ce4c19bee65a6d99ca6b00a33cbe6ceb",
+      "sha256": "e9831f12ef933b118fc5feac17f60a7501ac644ae6dccbd0200c1e47eabea0d5",
       "source": "src/adapters/xlsx/families/format-remove.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -916,9 +1573,17 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "src/adapters/xlsx/families/format-run.cjs",
+      "mode": "644",
+      "sha256": "095db921bee2e1df84eadf15dd58f79d0ee8ba93642c1537bfb6eec4db36176a",
+      "source": "src/adapters/xlsx/families/format-run.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "src/adapters/xlsx/families/format.cjs",
       "mode": "644",
-      "sha256": "53d4329202308c14e6fe82dc1f27d0a28a3342e3178953f972492765a0658fa4",
+      "sha256": "d3e90499892527644b24eba898e887aeff3c4ef9aae04d45bc5cf999552e61ca",
       "source": "src/adapters/xlsx/families/format.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -926,15 +1591,23 @@
     {
       "path": "src/adapters/xlsx/families/freeze.cjs",
       "mode": "644",
-      "sha256": "2aa1c4ac886631afa614779ff0c72363b60479ef66cecdea1fc37965a1a9a4bb",
+      "sha256": "f18d7787214ed5604a0a3785e35d7967b106f7977a6ed7bc160268096d48886a",
       "source": "src/adapters/xlsx/families/freeze.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/layout-read.cjs",
+      "mode": "644",
+      "sha256": "ce9dc3212021893773c9108fc2dc48da7f254f305e20f9f1777408d7348cd5df",
+      "source": "src/adapters/xlsx/families/layout-read.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/xlsx/families/layout.cjs",
       "mode": "644",
-      "sha256": "f21a8d3e56ed2e06b76b4191cf605a78328416576fd15f0dc9b5c9c327b0159d",
+      "sha256": "1e29b4f86037e39b02d9649a476ef775c6ece1207f88477d658362a613ed0346",
       "source": "src/adapters/xlsx/families/layout.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -942,7 +1615,7 @@
     {
       "path": "src/adapters/xlsx/families/merge.cjs",
       "mode": "644",
-      "sha256": "037749fbfeb3767a8509067446aeb6fac9a0e8e24d3b3a68a8ee1d23d92009b5",
+      "sha256": "36917e37e437614f28734708fdd45dfbfb95a6fe1b4d73637bb5ed559a87a55b",
       "source": "src/adapters/xlsx/families/merge.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -950,8 +1623,16 @@
     {
       "path": "src/adapters/xlsx/families/names.cjs",
       "mode": "644",
-      "sha256": "ad8fa03a889e7a0f5527bbeb23d52408fd3f7b9eacee8c08857632e4c62f3309",
+      "sha256": "2953d44708b58d41c2c12b8fc7a354935ba50f39f2d135dc709ccdd05955f144",
       "source": "src/adapters/xlsx/families/names.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/page-read.cjs",
+      "mode": "644",
+      "sha256": "870a3fa242269c7e52bbb1679f01a4ec2f09bf0a1463d4b304c763623d5b1060",
+      "source": "src/adapters/xlsx/families/page-read.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -964,6 +1645,14 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "src/adapters/xlsx/families/panes-read.cjs",
+      "mode": "644",
+      "sha256": "10fe41c7098e70f7340a39621108378acec6c673e177c9fdbadbeeaeb6f59d54",
+      "source": "src/adapters/xlsx/families/panes-read.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "src/adapters/xlsx/families/pivot-refresh.cjs",
       "mode": "644",
       "sha256": "c0182449262e101ea392027165d0fdc19487f2b49fa9518af7567b07ed5f4aca",
@@ -972,17 +1661,33 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "src/adapters/xlsx/families/pivots-v2.cjs",
+      "mode": "644",
+      "sha256": "119075eb88e6427e850f9aabf5ad68fbc50b43e65478fcfb733c7b48cc6d551d",
+      "source": "src/adapters/xlsx/families/pivots-v2.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "src/adapters/xlsx/families/pivots.cjs",
       "mode": "644",
-      "sha256": "f8957baa3efab312ef150fe71d7c72dca9b687225a54d74818a52105471906ed",
+      "sha256": "619e4224082cb42450f5e027cf95e8f0c00c91f29328c3e7eed01e3b770d55d0",
       "source": "src/adapters/xlsx/families/pivots.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/print-area-read.cjs",
+      "mode": "644",
+      "sha256": "8635a77cee08516cb75ad623d7af99351f9789601f7b50b0c4b7093bc640dd70",
+      "source": "src/adapters/xlsx/families/print-area-read.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/xlsx/families/print.cjs",
       "mode": "644",
-      "sha256": "a66e3b12774e83a63c4696edc682be714bde8237a87572a33ff7a1d28252a2a0",
+      "sha256": "ea18e05b2f4e508a9301b9620572123d3ba2f2e6f25238e37ba0f3e527eff0f1",
       "source": "src/adapters/xlsx/families/print.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -990,15 +1695,47 @@
     {
       "path": "src/adapters/xlsx/families/range.cjs",
       "mode": "644",
-      "sha256": "f0d23bb8cf9394bbf27b8c8619fc4d7338006b537134628d7148220e7512434a",
+      "sha256": "6bcaf52cbaabd738b7b2fa81db375223db5aaf4d67e84fb9a12c0160791746d3",
       "source": "src/adapters/xlsx/families/range.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/shape-rotation.cjs",
+      "mode": "644",
+      "sha256": "cdad445c6af88da43ee7e8b26ee2e2719a5f4a3ade6d83ff56d8c115de5f3aa7",
+      "source": "src/adapters/xlsx/families/shape-rotation.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/shape-text.cjs",
+      "mode": "644",
+      "sha256": "0a95ff94f80deed8f5123f931ca85c1ae3982e2a33fc332cee655bd95570bd10",
+      "source": "src/adapters/xlsx/families/shape-text.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/sheet-state-read.cjs",
+      "mode": "644",
+      "sha256": "02d15e76953b3a054050c357cc8b6a864578e21f89d2273be98e2a4f2d1f9d7a",
+      "source": "src/adapters/xlsx/families/sheet-state-read.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/families/sheet-visibility.cjs",
+      "mode": "644",
+      "sha256": "4bd29cc731ce1452de01d4f43f18fefe89439d74fa7abd4ab290a5e722d833fb",
+      "source": "src/adapters/xlsx/families/sheet-visibility.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/xlsx/families/sheets.cjs",
       "mode": "644",
-      "sha256": "5b8d37e4115871443982970195d0a3b9677e0185253b18ef87c86794d6502793",
+      "sha256": "06328a5ba668f28241cb38dc83afab6d7d09c3a6b87ed87b1f0b29ba126e87c2",
       "source": "src/adapters/xlsx/families/sheets.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1006,7 +1743,7 @@
     {
       "path": "src/adapters/xlsx/families/sort.cjs",
       "mode": "644",
-      "sha256": "7d2495d195b6836a556592ad07f732ccacb417b91105a58dd4c429039b934568",
+      "sha256": "540b441cc23bf691e4c0bdc89d5e08666371978c0405e716ff848d4b17e7a8ae",
       "source": "src/adapters/xlsx/families/sort.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1014,7 +1751,7 @@
     {
       "path": "src/adapters/xlsx/families/structure.cjs",
       "mode": "644",
-      "sha256": "f4e6b175345b4d1d78f77c8f31f020d71404ecda8434c8b482de88c51fa08b04",
+      "sha256": "60137f869d96d1cb938b0567b66481efe65f641a255ac2ace97f18d0c1ac2a75",
       "source": "src/adapters/xlsx/families/structure.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1022,7 +1759,7 @@
     {
       "path": "src/adapters/xlsx/families/validation.cjs",
       "mode": "644",
-      "sha256": "093b27519c5d3699b8f30b7fe00d4232e93a8ef7cdba14890bb294c41f4d9f3b",
+      "sha256": "99f5e77ef7d3e064e0a38046136525a47a17865619d06990dee307d2a06bc62a",
       "source": "src/adapters/xlsx/families/validation.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1030,7 +1767,7 @@
     {
       "path": "src/adapters/xlsx/formula.cjs",
       "mode": "644",
-      "sha256": "6b5c1da5b006f3e400f414b4c528fd45bcb033ed68a2bfd0736daa0b68e08b1a",
+      "sha256": "503c8f3c79ae39f558a70be8fa810e2b2390cb1bbf1c6c6d5b84970a8aff9beb",
       "source": "src/adapters/xlsx/formula.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1038,7 +1775,7 @@
     {
       "path": "src/adapters/xlsx/inventory.cjs",
       "mode": "644",
-      "sha256": "40507a5f82de0f531819a014db9e38898adcfaf0d4ed900de2ebbd88949723f4",
+      "sha256": "d4e3ad55e4fbbfa35d2646cdd274df9d6cd5df9ed31d8725069d29a8acbef4cc",
       "source": "src/adapters/xlsx/inventory.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1048,6 +1785,14 @@
       "mode": "644",
       "sha256": "77cc1e973e974ddaf429c07ac5ae36f133508839cdf3b3c93c12af29d1cabac4",
       "source": "src/adapters/xlsx/move-expect.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/ooxml/point-data-label-reader.cjs",
+      "mode": "644",
+      "sha256": "9a1a2307b943809be4d95169c51fcb9f544c0fa17469aa25d2d763adc6599282",
+      "source": "src/adapters/xlsx/ooxml/point-data-label-reader.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -1070,16 +1815,32 @@
     {
       "path": "src/adapters/xlsx/pivot-source.cjs",
       "mode": "644",
-      "sha256": "564b5be50f1827267c962279693af70799216e34541f1d90e9e6146d713ca5ed",
+      "sha256": "5b0c677a8fa2ad5b6b6bdf9fd64ebaa65e5bc9d1d1a4d62554f4bd02dd362772",
       "source": "src/adapters/xlsx/pivot-source.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/protection-gate.cjs",
+      "mode": "644",
+      "sha256": "f9b56c7033190a9274597dc710145014ec70e4b43ac17f6b82702f7085275540",
+      "source": "src/adapters/xlsx/protection-gate.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/adapters/xlsx/runtime.cjs",
       "mode": "644",
-      "sha256": "28e63f87faf77e519666dbf73d580a9a4bdded56cc59245ccf62a6389ea08751",
+      "sha256": "fdf4bc09a9953bbd048800b632f23b588041f586ec685d058422f3862759f9ad",
       "source": "src/adapters/xlsx/runtime.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/shape-text.cjs",
+      "mode": "644",
+      "sha256": "bf364576fc00491624ec7dd2e07125eb7ab03565ffee86a0da199f1a39c415d9",
+      "source": "src/adapters/xlsx/shape-text.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -1100,10 +1861,26 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "src/adapters/xlsx/sheet-name.cjs",
+      "mode": "644",
+      "sha256": "eca11597afd4e4466057e767cebd957e779fb54f542f6e8137cc0b6054ff9c89",
+      "source": "src/adapters/xlsx/sheet-name.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "src/adapters/xlsx/shift.cjs",
       "mode": "644",
       "sha256": "3c35d3702765cc00455f418423f51eaa460e1199d8187de8a8a0ff307610fd9a",
       "source": "src/adapters/xlsx/shift.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/adapters/xlsx/stored-content.cjs",
+      "mode": "644",
+      "sha256": "05075c80d805be854d3f666633ae4bd7d44cf36f9d62b80fbf8643e02f7ef2e6",
+      "source": "src/adapters/xlsx/stored-content.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -1134,7 +1911,7 @@
     {
       "path": "src/core/execution/executor.cjs",
       "mode": "644",
-      "sha256": "4c1fa87310b56652a5a27e82fc649ac3b92c7919fcde5df2afbffa3b91f55428",
+      "sha256": "dd694cb6aac864600d1b34a36c7b80fab53fc2d0d5105b874662e6d76615e8cc",
       "source": "src/core/execution/executor.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1254,7 +2031,7 @@
     {
       "path": "src/core/persistence/verified-writes.cjs",
       "mode": "644",
-      "sha256": "76b163c62ad57197e9b314e08e1098fc01c6fb83bc2c34846782f2abc8223f70",
+      "sha256": "4d70076007322f22921c00374900a63a3654e99c871e502619537d830ac32fe5",
       "source": "src/core/persistence/verified-writes.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1270,7 +2047,7 @@
     {
       "path": "src/core/runtime-identity.cjs",
       "mode": "644",
-      "sha256": "9fb9dcb15ab85f9debbfdb667c41e43b062e2aadbd8795d176533760a7ec11f3",
+      "sha256": "cfd6bfb8a1bc4d58fc6879eed4af3d5c43da9c8537d0c2477038312fdab7e848",
       "source": "src/core/runtime-identity.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1294,7 +2071,7 @@
     {
       "path": "src/core/session/lifecycle.cjs",
       "mode": "644",
-      "sha256": "4b3a7b479693da487beb81ff6218fab596eef16325897df7b189c5b1a954d605",
+      "sha256": "a8865bf2c1a3696eac58790bee161395ce179301a65ac4117940488b4ba36489",
       "source": "src/core/session/lifecycle.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1302,7 +2079,7 @@
     {
       "path": "src/core/session/open.cjs",
       "mode": "644",
-      "sha256": "a8193f4f8c7e2d0a042162244a5bd97551b133e2711d4fc8bd95e5d5ca7201f9",
+      "sha256": "5091e7164741f429613e9fce65ed87fedad3b9880e245b862903ea6017dfbad4",
       "source": "src/core/session/open.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1326,7 +2103,7 @@
     {
       "path": "src/core/verification/orchestrate.cjs",
       "mode": "644",
-      "sha256": "217a88f02d5f4a04eeb221aab8feaec7a73ac995bee346ed586a8f682f528934",
+      "sha256": "29241c1c0c9b45c1ed8c24a77407ac90bc890368ce479d7d3f9fc4efc00f5b16",
       "source": "src/core/verification/orchestrate.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1334,7 +2111,7 @@
     {
       "path": "src/drivers/eurooffice/config-host.cjs",
       "mode": "644",
-      "sha256": "126984cdf8771ba75fa059afa7b96cfe9f0ba5a47a9b5644bd8ccc41eb7faf75",
+      "sha256": "1b6c7103339e817bde9ecd8585215942eb36e1e38f87c298e0ea133e186ab4c5",
       "source": "src/drivers/eurooffice/config-host.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1350,15 +2127,23 @@
     {
       "path": "src/drivers/eurooffice/docx-driver.cjs",
       "mode": "644",
-      "sha256": "62840cdca9480bae1ab31ca1042cdbe744444e743f17ada4f59f2ed3187f9afb",
+      "sha256": "842f18e1d1b9eabee14a5c8df4db7bf39ed24dcb3a645f96d4e8990142d3474e",
       "source": "src/drivers/eurooffice/docx-driver.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/drivers/eurooffice/docx-images-read.cjs",
+      "mode": "644",
+      "sha256": "8e7394b8333af67c98bdd0c95bec455326956bd42d8078ced8e580ca8d213ee6",
+      "source": "src/drivers/eurooffice/docx-images-read.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
       "path": "src/drivers/eurooffice/ds-bridge.cjs",
       "mode": "644",
-      "sha256": "1b953fae356b769fdf39fdfce0ff184dd0f658545d681d571c8a7c803b168f72",
+      "sha256": "9103c434eb95d67b30add2793507316361d86cec565bd1ac9118486eaf74f5f5",
       "source": "src/drivers/eurooffice/ds-bridge.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1382,7 +2167,7 @@
     {
       "path": "src/drivers/eurooffice/xlsx-driver.cjs",
       "mode": "644",
-      "sha256": "7d05b85e87aa38f2c450c4a51efa75f014afc51fb740192ca676733bd4d5f39e",
+      "sha256": "021fa0c5eada6e77948f36597035ebff6db423d04d96c454f48ae0eab171f856",
       "source": "src/drivers/eurooffice/xlsx-driver.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1412,6 +2197,14 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "src/server/docx-write-tools.cjs",
+      "mode": "644",
+      "sha256": "b7ef9a5370eb529febdf57f832e3fe3ad15477008072628113fe0893165b5925",
+      "source": "src/server/docx-write-tools.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "src/server/identity.cjs",
       "mode": "644",
       "sha256": "76c950181d93cfb85b0e289f8b40f56bdb7a697da43d1fa939b80ee997832b07",
@@ -1430,7 +2223,7 @@
     {
       "path": "src/server/mcp.cjs",
       "mode": "644",
-      "sha256": "5b3e0ce7094768716f42e24f140df94842ea1af83f9cd3cde1e7f00ccd755840",
+      "sha256": "a18d90b8cd322e3d0f71ac0c8a89c1c91d5b948450af3dfc07b4682c75fb8b38",
       "source": "src/server/mcp.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1446,7 +2239,7 @@
     {
       "path": "src/server/read-tools.cjs",
       "mode": "644",
-      "sha256": "85e1ed718c2f93eec48f85c2bb666754712a5ae0415e913ce8edf13265e96ac8",
+      "sha256": "d630c58a2055d9c5c05e9d5a215aee6833c1d35b6426ec81e5992c8ac209ba01",
       "source": "src/server/read-tools.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1454,7 +2247,7 @@
     {
       "path": "src/server/server-tools.cjs",
       "mode": "644",
-      "sha256": "c2f77e68fc7f22f1d33c7cd759d72f2a2419e5b49d3ae95b5ca6ca3580e5eee9",
+      "sha256": "48abdb1d542fba3a9286e450fceb5747911664a71b9def4da9ce1c3cf85a6d5c",
       "source": "src/server/server-tools.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1468,9 +2261,25 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "src/server/session-registry.cjs",
+      "mode": "644",
+      "sha256": "d469bc19ed7e91356bf4f53fc071eae0ec673e59e2fc7215ee88e74721f0b9f8",
+      "source": "src/server/session-registry.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "src/server/session-reuse-rule.cjs",
+      "mode": "644",
+      "sha256": "783b19cb6655fd0455876f0d1696e7a35ca3a0a40d4c37b9538acd1de165fb5f",
+      "source": "src/server/session-reuse-rule.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "src/server/tools.cjs",
       "mode": "644",
-      "sha256": "8cd4d7ee6a635ce59e5cf8cba65dc61842afa02b98709bbb4a8268586c912c46",
+      "sha256": "de9d63f46f36932cadfed456f5c2123a39c9883295582b56768de133780eba35",
       "source": "src/server/tools.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1478,7 +2287,7 @@
     {
       "path": "src/server/write-tools.cjs",
       "mode": "644",
-      "sha256": "c4a33ed44b7279009d0e97c474523ae422a5debf2c36cccf7f15c96e4703c8fa",
+      "sha256": "58308633cb53e1498e19fcde6c7a3d237a2c05d090cef8cc5f085e2537dad547",
       "source": "src/server/write-tools.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1494,32 +2303,16 @@
     {
       "path": "test/acceptance/docx-b18w-bridge-write-cutover.test.cjs",
       "mode": "644",
-      "sha256": "2d63022e5984758dbaac5e30244b748da965bfa9b5ddf258f5d1d04823d4ac8b",
+      "sha256": "03ea23df67f432602ee76e1495a11527523047bdd93aa22cac2ac7dedcccd6a9",
       "source": "test/acceptance/docx-b18w-bridge-write-cutover.test.cjs",
-      "transformed": true,
-      "licence": "Apache-2.0"
-    },
-    {
-      "path": "test/acceptance/docx-b18w-bridge-write-v2-candidate.test.cjs",
-      "mode": "644",
-      "sha256": "562819be7c06ac71295c65d245595610ecefd47579686c1503415697f4ff6e2d",
-      "source": "test/acceptance/docx-b18w-bridge-write-v2-candidate.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
     {
       "path": "test/acceptance/docx-b21-bridge-read-cutover.test.cjs",
       "mode": "644",
-      "sha256": "79b0b2c1ec5ccad99372206f690f5260fe47b922b8694d8b93f485443e2a853b",
+      "sha256": "bccce3e67ac3b39773e50780bc4c10464c09771601cea9765bfc4873a754fa88",
       "source": "test/acceptance/docx-b21-bridge-read-cutover.test.cjs",
-      "transformed": true,
-      "licence": "Apache-2.0"
-    },
-    {
-      "path": "test/acceptance/docx-b21-bridge-read-v3-candidate.test.cjs",
-      "mode": "644",
-      "sha256": "b49108ecc8508ae0553df17ba1ef0fce288ba7c384579a03ea99b001a8696825",
-      "source": "test/acceptance/docx-b21-bridge-read-v3-candidate.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
@@ -1542,9 +2335,9 @@
     {
       "path": "test/acceptance/docx-m5-gate78.test.cjs",
       "mode": "644",
-      "sha256": "17e4ecab79ff0d9303ddfb579e9044fe9b81702c61feb9a4add422d6836cd884",
+      "sha256": "0d9a63a59332504d205f0431844a5b55c0bd16fcaf3255925b8d2862b2aa4c17",
       "source": "test/acceptance/docx-m5-gate78.test.cjs",
-      "transformed": false,
+      "transformed": true,
       "licence": "Apache-2.0"
     },
     {
@@ -1558,9 +2351,25 @@
     {
       "path": "test/acceptance/docx-rewrite-slice.test.cjs",
       "mode": "644",
-      "sha256": "5f753a3d6fa5ab25030b10f247eb90737919f8dc0f007f36fc628303eafe8fc8",
+      "sha256": "acdae4d870a87bdc098374d30d42890cbe0883007e0fb0918faec8b40ca87e32",
       "source": "test/acceptance/docx-rewrite-slice.test.cjs",
       "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/docx-w04-table-format.test.cjs",
+      "mode": "644",
+      "sha256": "cad906237b16fbbf4d71ec1b30cfb6e49ede0617499239a10cf3cb4c2f935c9c",
+      "source": "test/acceptance/docx-w04-table-format.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/docx-w07-numbering.test.cjs",
+      "mode": "644",
+      "sha256": "f54a2e19c8247d51b9e618d55476ab92cc1be7fcdeebd2f87985969cca26f0f6",
+      "source": "test/acceptance/docx-w07-numbering.test.cjs",
+      "transformed": true,
       "licence": "Apache-2.0"
     },
     {
@@ -1572,9 +2381,33 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/acceptance/docx-w10-9-format-style-fail-closed.test.cjs",
+      "mode": "644",
+      "sha256": "45af178d1f06c692ed7bd72557e61d01e89ceeb1b323473a882bcc060b470156",
+      "source": "test/acceptance/docx-w10-9-format-style-fail-closed.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/docx-w10-style-definition.test.cjs",
+      "mode": "644",
+      "sha256": "fe5edfb1e465ca185b5e33084fb58d2ceeec63b582e578682cb4d0d2e62add63",
+      "source": "test/acceptance/docx-w10-style-definition.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/docx-w11-page-setup.test.cjs",
+      "mode": "644",
+      "sha256": "6c408345e6d3d82a67564d032254aa821cef80958fbee90ce95bef887758cff3",
+      "source": "test/acceptance/docx-w11-page-setup.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/acceptance/docx-w11-partial-format.test.cjs",
       "mode": "644",
-      "sha256": "3018b3fee6ad9c8344a96c9b3d645791b4c016fba679dfd50f9cb7a12ce975dc",
+      "sha256": "1af7b95ac8d2d90df58656e585396fe85620d0eb6b82f78a20f2ae86bfef5925",
       "source": "test/acceptance/docx-w11-partial-format.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1582,7 +2415,7 @@
     {
       "path": "test/acceptance/docx-w2-list.test.cjs",
       "mode": "644",
-      "sha256": "190f9590a9db05bb5ad53a9f192e6ea0e92f5849d15674df53c248a69adb9b46",
+      "sha256": "2ea817150493cb2cbd4740eb865a58460e90436f70c5b10c6b824dc1591f7b9e",
       "source": "test/acceptance/docx-w2-list.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1598,7 +2431,7 @@
     {
       "path": "test/acceptance/docx-w3-rich.test.cjs",
       "mode": "644",
-      "sha256": "84592e48af12a768af0e830f8e4eb6d89b363b3967f88ccfea8a133b2d428d61",
+      "sha256": "184176b471bbc8233ed02714c072149e168c32178a23dcb598fad625f38ed2f1",
       "source": "test/acceptance/docx-w3-rich.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1606,7 +2439,7 @@
     {
       "path": "test/acceptance/docx-w4a-table.test.cjs",
       "mode": "644",
-      "sha256": "205e3cdd880f5667b4f5e1bc5d65667180bf5ebdd52a24b79e178eeaf630051b",
+      "sha256": "2b1ea33dbb0a306cf4bd291f21a4e80bc176d16f5a49a20dfc6c45f6308188cb",
       "source": "test/acceptance/docx-w4a-table.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1614,7 +2447,7 @@
     {
       "path": "test/acceptance/docx-w4b-row.test.cjs",
       "mode": "644",
-      "sha256": "2c8d03076726adb4b1b60b5e69fe341c13925037bf3bc1cceaf34bfce7a3aaf0",
+      "sha256": "1cb51bac4ee5618912cb8b6480a2a84485257e2ece78229ca08687403523e950",
       "source": "test/acceptance/docx-w4b-row.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1622,15 +2455,15 @@
     {
       "path": "test/acceptance/docx-w4c-column.test.cjs",
       "mode": "644",
-      "sha256": "042a024b8d18fbca27a8f9590f30a62b43ed0df7a201760d6c6c8714432228cd",
+      "sha256": "bb684821700e489cbd127d65e1ea2a4295466a75fa6c8d8fad11aede7d22d54c",
       "source": "test/acceptance/docx-w4c-column.test.cjs",
-      "transformed": false,
+      "transformed": true,
       "licence": "Apache-2.0"
     },
     {
       "path": "test/acceptance/docx-w4d-merge-split.test.cjs",
       "mode": "644",
-      "sha256": "4d978961301697867bfbeb3287734d7cd6190be8de1dc6fcb1da7a317517cd93",
+      "sha256": "772dea67ca3d02d4dd346fad3f83716d604e5e70f3629f5483416263eef20a7f",
       "source": "test/acceptance/docx-w4d-merge-split.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1638,7 +2471,7 @@
     {
       "path": "test/acceptance/docx-w5-header-footer.test.cjs",
       "mode": "644",
-      "sha256": "e30d20ad83d0832eb97b08e1ae76012cb3500e7bdf407f9988d403bbb8870196",
+      "sha256": "81cd5d4ca1e5412c2dc7625deb736b8a9a7155c02d3771fb469b9b0aa0c0cd37",
       "source": "test/acceptance/docx-w5-header-footer.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1646,7 +2479,7 @@
     {
       "path": "test/acceptance/docx-wave1.test.cjs",
       "mode": "644",
-      "sha256": "d1a16c3a778028866c0490ed6f711c9375c895a146d2066bcd2ec4778211bf60",
+      "sha256": "3716cfc30f379edf0a0b0e186cf60bc1001519e8ce2347f7dd8e5ae697ebe05c",
       "source": "test/acceptance/docx-wave1.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1654,7 +2487,7 @@
     {
       "path": "test/acceptance/docx-word-bridge-runtime.test.cjs",
       "mode": "644",
-      "sha256": "b5cbe4ed73990d261b5f6fcc327f1de2e238c731e21094aba54924054256fc1f",
+      "sha256": "412d1ceda113ac2c96182c6e8ab61b1ed01bd1ca1bc692dc418f22f798bbef36",
       "source": "test/acceptance/docx-word-bridge-runtime.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1664,6 +2497,1222 @@
       "mode": "644",
       "sha256": "1db137ef026d2ac1413d7de4d6c26072bd377f23bde5f1ab0d3a65b19aa6c0dd",
       "source": "test/acceptance/ds-fresh-install.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/ds935-bridge17-protection-read.test.cjs",
+      "mode": "644",
+      "sha256": "c6b49287e14a93a0b41a842d301000f42572a9fd4ab504a392913e6f12fb07a7",
+      "source": "test/acceptance/ds935-bridge17-protection-read.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/ds935-cell-bridge-fresh-install.test.cjs",
+      "mode": "644",
+      "sha256": "1af3a53dafa88c65a95c7efbf684cc1c310a469be049d825e5c61e90d5ab477c",
+      "source": "test/acceptance/ds935-cell-bridge-fresh-install.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/ds935-chart-read-fresh-install.test.cjs",
+      "mode": "644",
+      "sha256": "86a4c89ca4fc2e69f1a254a3ef7e2968027f2bdaa4fb4a101825aef6dba1d574",
+      "source": "test/acceptance/ds935-chart-read-fresh-install.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/ds935-v110-fresh-install-plan.test.cjs",
+      "mode": "644",
+      "sha256": "34b686fc688511e3f423f272f7625b612dca43be89ad96ae3ca5500c32a99271",
+      "source": "test/acceptance/ds935-v110-fresh-install-plan.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/ds935-word-bridge-fresh-install.test.cjs",
+      "mode": "644",
+      "sha256": "30a5fbc57069e1c85fa43ff1de8034b8c010dfc971e1f6ed69f3e6a101228ecd",
+      "source": "test/acceptance/ds935-word-bridge-fresh-install.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/filter-range-adjacent-data.test.cjs",
+      "mode": "644",
+      "sha256": "c8c7f8b237b4624a0a00afd1ee32cf67cf65d379d39d4d3b07215c40517af734",
+      "source": "test/acceptance/filter-range-adjacent-data.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh100-u1-release.test.cjs",
+      "mode": "644",
+      "sha256": "7870e11e4c1f3945955b04910079b95bf8a888f595d774b902654320ebfc0e62",
+      "source": "test/acceptance/gh100-u1-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh100-u2-session-registry.test.cjs",
+      "mode": "644",
+      "sha256": "0eec88c831162ba111549c2a64cb78bd769ca844562ad6c244b445bd543ca66b",
+      "source": "test/acceptance/gh100-u2-session-registry.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh100-u3-reuse-rule.test.cjs",
+      "mode": "644",
+      "sha256": "55c0f2e18a6b92eb869411434b5d57d0f6fd0a4be57d9203c22c6c3424d7b613",
+      "source": "test/acceptance/gh100-u3-reuse-rule.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh100-u4-withsession-reuse.test.cjs",
+      "mode": "644",
+      "sha256": "8cc2009cc968eb947e0585365030e574660f7013e8db5d31d3620ac36d74f745",
+      "source": "test/acceptance/gh100-u4-withsession-reuse.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh100-u4b-write-wiring.test.cjs",
+      "mode": "644",
+      "sha256": "d197716bbb0944b2c18cecf2f45c64004dd5123fc3ed8508265522e1d49ca083",
+      "source": "test/acceptance/gh100-u4b-write-wiring.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh100-u4c-product-wiring.test.cjs",
+      "mode": "644",
+      "sha256": "0c502599ca7df05891e35bc557fd8def0003c2e8f1f95bb8f0845d1d85e82d9b",
+      "source": "test/acceptance/gh100-u4c-product-wiring.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh100-u4c-read-reuse.test.cjs",
+      "mode": "644",
+      "sha256": "1f14acfc2210b65c01a447864d93d7f539310431d822790beb86bcb0c89ac735",
+      "source": "test/acceptance/gh100-u4c-read-reuse.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh107-mixed-task-refusal.test.cjs",
+      "mode": "644",
+      "sha256": "00fa86230c2683d17fc73fe421ff2b39a4231ad099e947708857708f0fc9d7b6",
+      "source": "test/acceptance/gh107-mixed-task-refusal.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh107b-mixed-tiered-bounded.test.cjs",
+      "mode": "644",
+      "sha256": "ec2321bf635ff565bb43abd655c20f8df8a0d6a20c5fe51dad2fc70b7db0e818",
+      "source": "test/acceptance/gh107b-mixed-tiered-bounded.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh110-read-range-window-only.test.cjs",
+      "mode": "644",
+      "sha256": "5d0f9aeb04331cdc1ea28265ddfad127285e525b0f1f4d19c82d492b78dbb38b",
+      "source": "test/acceptance/gh110-read-range-window-only.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh133-read-sheet-state-release.test.cjs",
+      "mode": "644",
+      "sha256": "bd1e86001284ccf5c00696ec1e6697a421290e2ff931f7c7ae682c8f369c21c3",
+      "source": "test/acceptance/gh133-read-sheet-state-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh134-read-defined-names.test.cjs",
+      "mode": "644",
+      "sha256": "57a5d45c556138c9197d7547bef13e5e85106c3a2f142e90af83d8db185ca250",
+      "source": "test/acceptance/gh134-read-defined-names.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh134-read-print-area.test.cjs",
+      "mode": "644",
+      "sha256": "e669670a3031d4766a541b08e77e416036f1d3bee05ec812fcd2f589a0d22f20",
+      "source": "test/acceptance/gh134-read-print-area.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh137-u1-read-runs-release.test.cjs",
+      "mode": "644",
+      "sha256": "177bb52ca9b9fcc7daa7093cb7e42348fd1c58171d18d478cc84709c6afd3497",
+      "source": "test/acceptance/gh137-u1-read-runs-release.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh137-u2-format-run-release.test.cjs",
+      "mode": "644",
+      "sha256": "12e61dddb9efca825e1686a27c8e6351835216b1ded58435432367adac13fb68",
+      "source": "test/acceptance/gh137-u2-format-run-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh138-u1-defined-name-release.test.cjs",
+      "mode": "644",
+      "sha256": "87baf21305c192b16a8a5f6a5de0464e60d775871ecac3464bef9964b6485406",
+      "source": "test/acceptance/gh138-u1-defined-name-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh138-u2-print-titles-release.test.cjs",
+      "mode": "644",
+      "sha256": "b810b3035d2c77864637e8ec00769ce3aa600b3e0df7ab29e52070ef624e0fee",
+      "source": "test/acceptance/gh138-u2-print-titles-release.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh138-u3-page-layout-release.test.cjs",
+      "mode": "644",
+      "sha256": "f97d0bb80442eab24e689d0b18b6ebed3c9ae507de59dd70d83a22d8e6bfcd67",
+      "source": "test/acceptance/gh138-u3-page-layout-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh138-u4-print-family-release.test.cjs",
+      "mode": "644",
+      "sha256": "bd1e54cac950922d34a41d5b5a1dd1c6bc3904dbddfd5b499eed3ad2dd88f8c2",
+      "source": "test/acceptance/gh138-u4-print-family-release.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh139-u2-move-chart-release.test.cjs",
+      "mode": "644",
+      "sha256": "dbcff9c79f12df3f36543d7651c9e28bd8bbc716efcf46504e8a24c111396be2",
+      "source": "test/acceptance/gh139-u2-move-chart-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh139-u3-insert-drawing-release.test.cjs",
+      "mode": "644",
+      "sha256": "b868f6e90939181ef8a55d431efd0dba995ae85126162acafe00d61b9adf378e",
+      "source": "test/acceptance/gh139-u3-insert-drawing-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh140-u2-read-pivots-release.test.cjs",
+      "mode": "644",
+      "sha256": "2883303b7d4032e08034b99a4f196462085a5ab3aec3db32c98a3629975ca9c7",
+      "source": "test/acceptance/gh140-u2-read-pivots-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh140-u3-create-pivot-release.test.cjs",
+      "mode": "644",
+      "sha256": "afb225b871f340c5fb6c2b952ea17f8393b2375fc485270f43ce972716f58508",
+      "source": "test/acceptance/gh140-u3-create-pivot-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh140-u4-refresh-pivot-release.test.cjs",
+      "mode": "644",
+      "sha256": "9590c4686142b4ffa14c46c05e27581e1b21636959b9986b1b40b1cc6dadce90",
+      "source": "test/acceptance/gh140-u4-refresh-pivot-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh220-docx-u1-driver-surface.test.cjs",
+      "mode": "644",
+      "sha256": "1065acfe526e091da7bcfdd2a812cb9b571714f1ef4fbc7eb5f6e7187de0bc0a",
+      "source": "test/acceptance/gh220-docx-u1-driver-surface.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh220-docx-write-lifecycle.test.cjs",
+      "mode": "644",
+      "sha256": "018b872776f4acd05d1531b9fbe4ba0106d9d63ef1cb989a6f87f2cac065a769",
+      "source": "test/acceptance/gh220-docx-write-lifecycle.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh222-docx-table-format-read.test.cjs",
+      "mode": "644",
+      "sha256": "c29350c97ca8feca7eceae803e06ab2019cea76a834747a09301292b9ee52063",
+      "source": "test/acceptance/gh222-docx-table-format-read.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh223-docx-page-setup-read.test.cjs",
+      "mode": "644",
+      "sha256": "e0859acd8c0ef9753a795e170774f1dff67b486f7dfe194d6982484f809c029c",
+      "source": "test/acceptance/gh223-docx-page-setup-read.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh224-docx-styles-read.test.cjs",
+      "mode": "644",
+      "sha256": "45949aef2895974e499677f6a955b7ef990417be417d20f6756da75e16f81a4b",
+      "source": "test/acceptance/gh224-docx-styles-read.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh224b-docx-read-styles-by-name.test.cjs",
+      "mode": "644",
+      "sha256": "891c7a407d90f9e478faa4865c253e2804a81c2f67e4010725333262a0be7b05",
+      "source": "test/acceptance/gh224b-docx-read-styles-by-name.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh225-docx-numbering-read.test.cjs",
+      "mode": "644",
+      "sha256": "2f67ed88f08f90fee517b33fe3ad3922011dbbd26a340a2f3dff26e4c6f1ed29",
+      "source": "test/acceptance/gh225-docx-numbering-read.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh226-docx-notes-read.test.cjs",
+      "mode": "644",
+      "sha256": "e55885c66305c94670e1cfe47a18e522ca9a6f4647dac2ff4e154ed8bf617064",
+      "source": "test/acceptance/gh226-docx-notes-read.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh227-docx-section-flags-read.test.cjs",
+      "mode": "644",
+      "sha256": "a2765e63b806d643d06fbc841236d8f79c36f967b25970387a027f3db232aa28",
+      "source": "test/acceptance/gh227-docx-section-flags-read.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh228-docx-write-release.test.cjs",
+      "mode": "644",
+      "sha256": "06282c9f3d6cf7341f16ae1f0c81db9b4ce709f3324938a5bd09a8ab0a573a55",
+      "source": "test/acceptance/gh228-docx-write-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh229-format-text-write-release.test.cjs",
+      "mode": "644",
+      "sha256": "07da163bffadf16a73c643ec77805edb94d3bbf6e13daf953cd7c645c7227b9d",
+      "source": "test/acceptance/gh229-format-text-write-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh230-format-text-color-highlight-vertalign.test.cjs",
+      "mode": "644",
+      "sha256": "b21fc299030696994db7ed2bdf361831dcdf27dcff1596f4b65ced089a62260e",
+      "source": "test/acceptance/gh230-format-text-color-highlight-vertalign.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh231-format-text-paragraph-props.test.cjs",
+      "mode": "644",
+      "sha256": "5a1077b77fe4bc63746e2aeb88ab3ecfa304f38e6ed45494c7bc28ab41c3a555",
+      "source": "test/acceptance/gh231-format-text-paragraph-props.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh232-format-text-tabs-borders-pagination.test.cjs",
+      "mode": "644",
+      "sha256": "790719935962c0fb2535f7312a7821482e3ce3bccb6b30f57e33c59110d2f06e",
+      "source": "test/acceptance/gh232-format-text-tabs-borders-pagination.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh233-docx-insert-paragraph-release.test.cjs",
+      "mode": "644",
+      "sha256": "01ee54e99555857dfc10776ed66f6fb4e08cd357362e42675d7bf52d7e10aeb8",
+      "source": "test/acceptance/gh233-docx-insert-paragraph-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh234-docx-delete-paragraph-release.test.cjs",
+      "mode": "644",
+      "sha256": "f8f1d403004b136a51220008c0144cc44c92b684bd949ba24844dd6e9652fe83",
+      "source": "test/acceptance/gh234-docx-delete-paragraph-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh235-docx-move-paragraph-release.test.cjs",
+      "mode": "644",
+      "sha256": "b7776f0fc52f8694e64f20dba299972c97d805c5b9e197db019a6038fe03d746",
+      "source": "test/acceptance/gh235-docx-move-paragraph-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh236-docx-list-release.test.cjs",
+      "mode": "644",
+      "sha256": "9e0dc8f9d4d8d116848304ff44393d391f2dc35aa7534599f2fb7ec32d995c88",
+      "source": "test/acceptance/gh236-docx-list-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh236b-set-list-type-shared-guard.test.cjs",
+      "mode": "644",
+      "sha256": "43715904dcf37ec086a2f54f1b1c7af90ac25f77f04c946c05413ea4c2e1c2ff",
+      "source": "test/acceptance/gh236b-set-list-type-shared-guard.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh237-docx-list-relative-release.test.cjs",
+      "mode": "644",
+      "sha256": "2ae611f011b88b85814ae1f9995a8559ba551682dfe336ba6f179023e31eb99a",
+      "source": "test/acceptance/gh237-docx-list-relative-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh248-docx-set-numbering.test.cjs",
+      "mode": "644",
+      "sha256": "9693333a6228713ef0cfb2cdcac6ed486b121487e2f0bd5dde6e441f40387c93",
+      "source": "test/acceptance/gh248-docx-set-numbering.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh249-docx-table-cell-release.test.cjs",
+      "mode": "644",
+      "sha256": "5b2a7c7ea6f3764e0c1d42a2ee84a0de9751800728c8a9662028f779c14ad12b",
+      "source": "test/acceptance/gh249-docx-table-cell-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh250-docx-table-row-insert-release.test.cjs",
+      "mode": "644",
+      "sha256": "2b60c7c262ea8e285763a8caf00422b0de0de147926d0560d9c72c75b6ba1fb4",
+      "source": "test/acceptance/gh250-docx-table-row-insert-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh251-docx-table-row-delete-release.test.cjs",
+      "mode": "644",
+      "sha256": "2bcc43c987252584f03848e97a934a6e16225afb5399eee01c1d57a78d76025b",
+      "source": "test/acceptance/gh251-docx-table-row-delete-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh252-docx-table-column-insert-release.test.cjs",
+      "mode": "644",
+      "sha256": "8b9ab4a89c5ad051209be7fa60b69cc327d61832ce73a22eedc9c304f1677265",
+      "source": "test/acceptance/gh252-docx-table-column-insert-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh253-docx-table-column-delete-release.test.cjs",
+      "mode": "644",
+      "sha256": "aa6b79e64418eda75c47baa7809685722393fd289e591e1256ee4d68b534bd8a",
+      "source": "test/acceptance/gh253-docx-table-column-delete-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh254-docx-table-merge-release.test.cjs",
+      "mode": "644",
+      "sha256": "db3184b9ab59c642175174b4e6f4374ab506f1cd44a344b55089ccb6b6edbcab",
+      "source": "test/acceptance/gh254-docx-table-merge-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh255-docx-table-split-release.test.cjs",
+      "mode": "644",
+      "sha256": "a5904b58844df7f8c346abb765c6b0e668714b1bedacfd664452b65f0473ffe5",
+      "source": "test/acceptance/gh255-docx-table-split-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh256-format-table-borders-shading.test.cjs",
+      "mode": "644",
+      "sha256": "e119a9661fe2111082dd6a354f886e7e3059009c95ebe0224673b50c5ae68ea1",
+      "source": "test/acceptance/gh256-format-table-borders-shading.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh257-format-table-margins-indent-width.test.cjs",
+      "mode": "644",
+      "sha256": "2b2f7ce1d095bf2f9dd72336bfb2d8554db4b1e8e3a91e95d62d37dd465ff5aa",
+      "source": "test/acceptance/gh257-format-table-margins-indent-width.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh257b-format-table-zero-margin-indent.test.cjs",
+      "mode": "644",
+      "sha256": "6cce6fb9fbf5728cfb01f42cae835bb589f2c4a8028df5b73e4a0a976ae6e2f8",
+      "source": "test/acceptance/gh257b-format-table-zero-margin-indent.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh258-docx-table-style-release.test.cjs",
+      "mode": "644",
+      "sha256": "ee81970ca1da20a91124471cb3aea35ea6ed85e1c474c6271f623cb89349a611",
+      "source": "test/acceptance/gh258-docx-table-style-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh259-docx-edit-header-release.test.cjs",
+      "mode": "644",
+      "sha256": "5e84c7558cbb7147e5a27761b41df0cc7e09bcb65c77586a20f03cb7cb134613",
+      "source": "test/acceptance/gh259-docx-edit-header-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh260-docx-edit-footer-release.test.cjs",
+      "mode": "644",
+      "sha256": "f27aac2f0ca129ac613e9c8579321f52bd18f531137cec7951191ca1297de66c",
+      "source": "test/acceptance/gh260-docx-edit-footer-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh261-docx-header-footer-variants-release.test.cjs",
+      "mode": "644",
+      "sha256": "a89b104efb3eb0c8f7637ba64c0e7f66ab2b11a34cc32f4c032a8b7bcc20d339",
+      "source": "test/acceptance/gh261-docx-header-footer-variants-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh262-docx-page-setup-release.test.cjs",
+      "mode": "644",
+      "sha256": "0ede3a2cfc5c62e8ba506f3db62c9b02b4eb3efded3c675f3acac92254200454",
+      "source": "test/acceptance/gh262-docx-page-setup-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh263-docx-page-setup-columns-startpage-release.test.cjs",
+      "mode": "644",
+      "sha256": "c05ed6c076d83008db2403c0aca7029dae948993ea22e82bbfa823ff5abad65e",
+      "source": "test/acceptance/gh263-docx-page-setup-columns-startpage-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh264-docx-define-style.test.cjs",
+      "mode": "644",
+      "sha256": "727b9341100ac2eae575d18ca5fdc81319c5fd88acc7fdd22cd92e3ba187b775",
+      "source": "test/acceptance/gh264-docx-define-style.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh265-docx-modify-style.test.cjs",
+      "mode": "644",
+      "sha256": "8649f4382da8cb8b3b60e757a346c3f1c77e18295b42d27b00fcca7f9a8e7825",
+      "source": "test/acceptance/gh265-docx-modify-style.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh266-docx-link-bookmark.test.cjs",
+      "mode": "644",
+      "sha256": "1f0bb9970911721a939a482a467aaff38354977bcd4488c0571919d8bbded49e",
+      "source": "test/acceptance/gh266-docx-link-bookmark.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh266-docx-rich-range.test.cjs",
+      "mode": "644",
+      "sha256": "0a7a09d59d5137303c67ff85fab553bf56c40551b8a5e350633ba4959e31372c",
+      "source": "test/acceptance/gh266-docx-rich-range.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh267-docx-notes-release.test.cjs",
+      "mode": "644",
+      "sha256": "4adc45ccb0b2a1585d9999e1f08ec36b5b961a27f0c934668ab73cbfe84d32d2",
+      "source": "test/acceptance/gh267-docx-notes-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh268c-docx-image-write.test.cjs",
+      "mode": "644",
+      "sha256": "2aef2a7c3306e8640baf6f3f98050e6f65604182d5d8756a9953381550bfba42",
+      "source": "test/acceptance/gh268c-docx-image-write.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh268d-docx-image-write-product-wiring.test.cjs",
+      "mode": "644",
+      "sha256": "2cb9bc679508050eb2ddf79bf6ca00b01dc5137e1ebd04253c5e707650af5c6a",
+      "source": "test/acceptance/gh268d-docx-image-write-product-wiring.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh269c-docx-resolve-comment.test.cjs",
+      "mode": "644",
+      "sha256": "46abfe914ca73a64657a30ad57f24c271cd7018945df8299d6dff3aa435d9377",
+      "source": "test/acceptance/gh269c-docx-resolve-comment.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh269d-docx-reply-add-comment.test.cjs",
+      "mode": "644",
+      "sha256": "8eca1ba2474272775d30874628252deeede8ae33aac5d5a3152479f42d2e5d9a",
+      "source": "test/acceptance/gh269d-docx-reply-add-comment.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh269e-comments-product-step-schemas.test.cjs",
+      "mode": "644",
+      "sha256": "d5fbfc3b2675fb4666118e272540b03ce86698ce33b3d7948b7bfeb5336a9e67",
+      "source": "test/acceptance/gh269e-comments-product-step-schemas.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh270b-format-table-per-table-vmerge.test.cjs",
+      "mode": "644",
+      "sha256": "70453561f9ee7c2b6ec080b3dd744048d524d1c821dc5f6a088acb74de757353",
+      "source": "test/acceptance/gh270b-format-table-per-table-vmerge.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh271-bodykey-grid-calc.test.cjs",
+      "mode": "644",
+      "sha256": "e40da2063f3d7e52b73d6978a17c6177d21a77b1150e2516610eaf5fbdddc102",
+      "source": "test/acceptance/gh271-bodykey-grid-calc.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh271-docx-sliced-property-read.test.cjs",
+      "mode": "644",
+      "sha256": "94ad09cd1a03fe0fa2c2b1f07c4560656e2662ca5c29b8b13a7c3fe180530ba1",
+      "source": "test/acceptance/gh271-docx-sliced-property-read.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh289-docx-hf-paragraph-mode.test.cjs",
+      "mode": "644",
+      "sha256": "ba6823056ee155212657e440e815771e2db4311ba379644171aeb2a361d4c3b5",
+      "source": "test/acceptance/gh289-docx-hf-paragraph-mode.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh290-format-text-limits.test.cjs",
+      "mode": "644",
+      "sha256": "c4f8c4bc1a65fde35fe69f77e8d0e596e548a2f2ac500d68bf60f48115c644f4",
+      "source": "test/acceptance/gh290-format-text-limits.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh291-n3-nested-cell.test.cjs",
+      "mode": "644",
+      "sha256": "0ffdc5ba932527fbeaced91856e0421348ee144445a1035d9ca935a0605761d1",
+      "source": "test/acceptance/gh291-n3-nested-cell.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh292-style-align-write.test.cjs",
+      "mode": "644",
+      "sha256": "390c0137cc2216ac44407f6beff5827202cfdd41dfac4ddc833027c403445322",
+      "source": "test/acceptance/gh292-style-align-write.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh292-style-fields.test.cjs",
+      "mode": "644",
+      "sha256": "ba283c63a1e9b00b2543d7bee7aee1e11ae1c5b895b14bb0f439f8bdf318bc50",
+      "source": "test/acceptance/gh292-style-fields.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh292c-style-based-on.test.cjs",
+      "mode": "644",
+      "sha256": "398d18107a081ec9a36f22acb5d5f4a613ad0963a8fe0b3578e017406fa91817",
+      "source": "test/acceptance/gh292c-style-based-on.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh292d-character-style.test.cjs",
+      "mode": "644",
+      "sha256": "c600388f20647ad22eadc8ab9ffcc5aac41a55f5243b8ac22012e246aff9ea27",
+      "source": "test/acceptance/gh292d-character-style.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh292e-style-off-and-auto.test.cjs",
+      "mode": "644",
+      "sha256": "df63b60241fdb366896d9bc0ab3a3ddc1b21428653e54a1124a41bd94eefc2d9",
+      "source": "test/acceptance/gh292e-style-off-and-auto.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh292f-style-next-link.test.cjs",
+      "mode": "644",
+      "sha256": "ddfd8e76f6643d9af1b30b0d4d99c18a8070e6b9742f2d7d7382a31dcb8fdabc",
+      "source": "test/acceptance/gh292f-style-next-link.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh293-l7-list-scope.test.cjs",
+      "mode": "644",
+      "sha256": "3235620dbb64e214b652d3591e9fa8261dba926580e94a8a293f816653329491",
+      "source": "test/acceptance/gh293-l7-list-scope.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh293-level-reference-guard.test.cjs",
+      "mode": "644",
+      "sha256": "8bfbcb971c51c6c66e4159fa96d76f1fec2950216548b5fdffc8b7ae13fb2b3c",
+      "source": "test/acceptance/gh293-level-reference-guard.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh293-shared-abstract-guard.test.cjs",
+      "mode": "644",
+      "sha256": "e8f1272207c2f95f7c7088fd1f6d3a11e6d34fd21fd727995c29f42dbe9d64b4",
+      "source": "test/acceptance/gh293-shared-abstract-guard.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh298-c-structured-refs.test.cjs",
+      "mode": "644",
+      "sha256": "72096f07e2aec7abe9d9e758806f5665356c6385672f16605d406a95a7922647",
+      "source": "test/acceptance/gh298-c-structured-refs.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh300-k1-read-comments.test.cjs",
+      "mode": "644",
+      "sha256": "faa0d68e2705a9d2d17ce45022003b0f0c0609203cb8f632f32727f633ab6214",
+      "source": "test/acceptance/gh300-k1-read-comments.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh300-k2-add-comment.test.cjs",
+      "mode": "644",
+      "sha256": "7117ccaf27bcf80b2f6e872d0ef4f82ec72e99a49d06c0a5c11e7680b51bbb25",
+      "source": "test/acceptance/gh300-k2-add-comment.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh301-d1-validation-operators.test.cjs",
+      "mode": "644",
+      "sha256": "4db941272f70f71700777940e62df51f7226030005c9df9679903071c7abb9d9",
+      "source": "test/acceptance/gh301-d1-validation-operators.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh301-d2-filter-shapes.test.cjs",
+      "mode": "644",
+      "sha256": "9865198fb96870f01b2d6936413b296b2de7917bda1c9ad0dde8850141f8d005",
+      "source": "test/acceptance/gh301-d2-filter-shapes.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh301-d3-multikey-sort.test.cjs",
+      "mode": "644",
+      "sha256": "3007a7684274c947ee6432414a0f4849b9896df04f5b00f5138366b359555d93",
+      "source": "test/acceptance/gh301-d3-multikey-sort.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh301-d4-array-formula.test.cjs",
+      "mode": "644",
+      "sha256": "d21daf88966610d4c16bec60de62472cdef5dc54fc3dc4aa5ba8bc3541e1514c",
+      "source": "test/acceptance/gh301-d4-array-formula.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh302-g2-read-pivots-richer.test.cjs",
+      "mode": "644",
+      "sha256": "1cf06327b91e424aead8f7d477d6f94b2cce294e9b0d0708b6bd5dcec6d771db",
+      "source": "test/acceptance/gh302-g2-read-pivots-richer.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh302-g3-create-pivot-v2.test.cjs",
+      "mode": "644",
+      "sha256": "799b30349a3752418df4f55f35576b8a3eeaa6e18aa1ac2da7190102ea662097",
+      "source": "test/acceptance/gh302-g3-create-pivot-v2.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh302-g4-shape-text.test.cjs",
+      "mode": "644",
+      "sha256": "128982af082e60ce19c06dfcf0002e72f419036cb7303dda87187b4af7f3347f",
+      "source": "test/acceptance/gh302-g4-shape-text.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh302-g5-point-data-label.test.cjs",
+      "mode": "644",
+      "sha256": "a62df1372186b69e99a18b82f72b0ef3f055532acd1c902e30d38aab0696007d",
+      "source": "test/acceptance/gh302-g5-point-data-label.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh302-g6-copy-chart-labels.test.cjs",
+      "mode": "644",
+      "sha256": "9615127012794da0898e463e6432cea4378a9626bff32ba514debf8c210c49f2",
+      "source": "test/acceptance/gh302-g6-copy-chart-labels.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh302-g7-shape-rotation.test.cjs",
+      "mode": "644",
+      "sha256": "ad9a5b128dd5439fb000715e1b4771a1c4a3c02422e3309f8fa80ceb0e9e8c1d",
+      "source": "test/acceptance/gh302-g7-shape-rotation.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh303-r1-sheet-visibility.test.cjs",
+      "mode": "644",
+      "sha256": "16dac7ff4cf8a337e8dec26281aa4c4f14f4f1ceff83ed9ecde7006e4e4ece4f",
+      "source": "test/acceptance/gh303-r1-sheet-visibility.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh325-read-drawings-size-unobservable.test.cjs",
+      "mode": "644",
+      "sha256": "4832500e1455a27a6bd55d612ffb2eede74b0b5618e4acc03c5f07eaec733517",
+      "source": "test/acceptance/gh325-read-drawings-size-unobservable.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh326-protection-guard.test.cjs",
+      "mode": "644",
+      "sha256": "51962acce79fe0c7c904416b9df45feab33fccf750869ff5300d0f23cb8f5426",
+      "source": "test/acceptance/gh326-protection-guard.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh326-protection-read-client-wiring.test.cjs",
+      "mode": "644",
+      "sha256": "45818a1231b17ec1d89c50f5df318dea37ef951fdde63f71c951c618e5c0fde3",
+      "source": "test/acceptance/gh326-protection-read-client-wiring.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh327-hidden-formula-redaction.test.cjs",
+      "mode": "644",
+      "sha256": "4ad415c8945f7321f2598074a18000617b17812fff60297ca6c23aaf1729cd6e",
+      "source": "test/acceptance/gh327-hidden-formula-redaction.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh72-read-range-tiered.test.cjs",
+      "mode": "644",
+      "sha256": "1c00b7102ecab23833c8d3ce0cf656234f13fe8dcdb28b139069cc329f24714d",
+      "source": "test/acceptance/gh72-read-range-tiered.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh76-docx-verify-stored-content.test.cjs",
+      "mode": "644",
+      "sha256": "8f849bbb6042a3e7869ad9754435fca1949d5ed8faf690c1634cfc59114915d9",
+      "source": "test/acceptance/gh76-docx-verify-stored-content.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh76-timing-log.test.cjs",
+      "mode": "644",
+      "sha256": "0fdd12683ad2916fd68d0c26cd358e2be3715c9d7f4473da1dc6e860afcc0147",
+      "source": "test/acceptance/gh76-timing-log.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh76-verify-stored-content.test.cjs",
+      "mode": "644",
+      "sha256": "72c047e5f7efc0bf42bff5575ee668ca6eb0a3d579d578d3c15671e4d2cd0168",
+      "source": "test/acceptance/gh76-verify-stored-content.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh81-format-range-border.test.cjs",
+      "mode": "644",
+      "sha256": "c1b8e6a73701a4a5c2ae5b71be79d665b81de630d2a2e6f0a0c1a415243a7c1a",
+      "source": "test/acceptance/gh81-format-range-border.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh83-format-border-merged-cells.test.cjs",
+      "mode": "644",
+      "sha256": "2c1b588d9fce140888989c1d948db9cbdf43e938d66e16b20fdda78ae9264f76",
+      "source": "test/acceptance/gh83-format-border-merged-cells.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh86-truncated-shared-edge-border-detail.test.cjs",
+      "mode": "644",
+      "sha256": "2646e1438eef528f75a81ad37e0e54724e6d450e34c1687831515cea09aa9691",
+      "source": "test/acceptance/gh86-truncated-shared-edge-border-detail.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh86b-shared-edge-bounded.test.cjs",
+      "mode": "644",
+      "sha256": "35ed55f534dbe229b641db5c6450e5eedc87206cd58a38c42d2904fbc44205be",
+      "source": "test/acceptance/gh86b-shared-edge-bounded.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh87-failure-why.test.cjs",
+      "mode": "644",
+      "sha256": "38643197cb44f133f604f90ec0a758458798187c615be9fe55b2c02810a4ec4a",
+      "source": "test/acceptance/gh87-failure-why.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh88-format-fill-product.test.cjs",
+      "mode": "644",
+      "sha256": "b13c93cabe555fafe6d26a7d8e27d18d59ad1343496bd3b614b808a885e40b6a",
+      "source": "test/acceptance/gh88-format-fill-product.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh90-format-fill-font-merged-cells.test.cjs",
+      "mode": "644",
+      "sha256": "a602dc4230a6d5ee29eff9e49a94f67fd55c33e64f018544237eab86ac5f7ec6",
+      "source": "test/acceptance/gh90-format-fill-font-merged-cells.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh93-align-justify-implies-wrap.test.cjs",
+      "mode": "644",
+      "sha256": "ad025ee8cf59f402f10b9172533ff590f795e848ee3c3970c14bb9ea82329799",
+      "source": "test/acceptance/gh93-align-justify-implies-wrap.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh93-format-align-product.test.cjs",
+      "mode": "644",
+      "sha256": "e7437f25e2d0ee7b2944e52b5e081c0b881e71d326d3af51d83d45c6c03365bb",
+      "source": "test/acceptance/gh93-format-align-product.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh95-border-next-to-merged-neighbour.test.cjs",
+      "mode": "644",
+      "sha256": "953ca73222d302abbf5c102dfc586b8509a3af4ee86e09cc2925218733b518c6",
+      "source": "test/acceptance/gh95-border-next-to-merged-neighbour.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh96-failure-unsupported.test.cjs",
+      "mode": "644",
+      "sha256": "5fae11c4229cab99434c745d2a19d9f96431c32657167eba5645ab25a761e206",
+      "source": "test/acceptance/gh96-failure-unsupported.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh96-set-validation-replace.test.cjs",
+      "mode": "644",
+      "sha256": "93f593b9f5e3fa0eba127dfe2514b88289071c457e37b2cbc138cd84376e4bb7",
+      "source": "test/acceptance/gh96-set-validation-replace.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh96-validation-no-formula-index.test.cjs",
+      "mode": "644",
+      "sha256": "a9e23b624e3e11db06631120fba36367a2e3952250e6df736dd4c9b33ce48611",
+      "source": "test/acceptance/gh96-validation-no-formula-index.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/gh99-batch-write.test.cjs",
+      "mode": "644",
+      "sha256": "fced650bd31c3fd28657851c62f3ca941e61574a9d8b23c20937d2ed74d5fc70",
+      "source": "test/acceptance/gh99-batch-write.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l01-format-wrap.test.cjs",
+      "mode": "644",
+      "sha256": "c9375d07b354cf724bef314c1b9da69913e2d23b0a7ab3ae5455cf18ae2782e4",
+      "source": "test/acceptance/l01-format-wrap.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l02-2-format-font-underline-strikeout.test.cjs",
+      "mode": "644",
+      "sha256": "46952c516db5406e73de4b1a5e2454e242289b85e35ad88f36f6240592e3fc2b",
+      "source": "test/acceptance/l02-2-format-font-underline-strikeout.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l02-format-font-name-size.test.cjs",
+      "mode": "644",
+      "sha256": "b1a2c97973f016c1b9ebcf11f72520765c0298ef654df6afaee1297daed21cb2",
+      "source": "test/acceptance/l02-format-font-name-size.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l03-2-format-align-ext.test.cjs",
+      "mode": "644",
+      "sha256": "ee75e06d6b0c07b15d899554effc75c656e333638cf43e3302f600fda2300de8",
+      "source": "test/acceptance/l03-2-format-align-ext.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l05-copy-sheet-release.test.cjs",
+      "mode": "644",
+      "sha256": "d2798d404217928bc49945ad5c90ed68cbb0366c841b08beb015bdb31716affa",
+      "source": "test/acceptance/l05-copy-sheet-release.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l05-delete-sheet-release.test.cjs",
+      "mode": "644",
+      "sha256": "f3142ceb279e9bbd3bce56c540324ab000d053381a0275d9d8c164b4a8e4126a",
+      "source": "test/acceptance/l05-delete-sheet-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l05-move-sheet-release.test.cjs",
+      "mode": "644",
+      "sha256": "be0ea100bcc9a4270c60b1c9f3ec6df27df6c8f91a93e4e766b46903e6fec0c5",
+      "source": "test/acceptance/l05-move-sheet-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l06-copy-range-explicit-write.test.cjs",
+      "mode": "644",
+      "sha256": "8d2e83875d27c095e205ee31807c2270414b92d1bb0806fd8c8066e85b3cb4dd",
+      "source": "test/acceptance/l06-copy-range-explicit-write.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l06-copy-range-release.test.cjs",
+      "mode": "644",
+      "sha256": "7001bb9c5922d3e38e61e1cea5df6b659d54c01f73d0937d3d36d8d9a0fae768",
+      "source": "test/acceptance/l06-copy-range-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l06b-move-range-release.test.cjs",
+      "mode": "644",
+      "sha256": "770acc44c31d065a585119684626c2174d3a9652a4c1e6964c4b890c0f009459",
+      "source": "test/acceptance/l06b-move-range-release.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l07-chart-release.test.cjs",
+      "mode": "644",
+      "sha256": "c6ae58947f159a5e0f29d4b1ce7a89ed4d72e06459bfda8dbc6c48d7b19b259f",
+      "source": "test/acceptance/l07-chart-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l11-3-filter-large-book.test.cjs",
+      "mode": "644",
+      "sha256": "64456ef3125ca31c2714b3c7470113132637c36a3574cbfef904bf3efea730f7",
+      "source": "test/acceptance/l11-3-filter-large-book.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l11-filter-range-release.test.cjs",
+      "mode": "644",
+      "sha256": "8ba8a395c88df213285d914902967b1f7c5a22bf0e3a90db928443310313390b",
+      "source": "test/acceptance/l11-filter-range-release.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l14-l17-clear-range-scope.test.cjs",
+      "mode": "644",
+      "sha256": "0abb2695d56321a8b3c390a195939b81ba8272d32b608078c51e104f7ca3928a",
+      "source": "test/acceptance/l14-l17-clear-range-scope.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l16-1-black-border-verify.test.cjs",
+      "mode": "644",
+      "sha256": "a795c961a160666d4f352d809d5c831533e1919159ef5f55637488573a990aed",
+      "source": "test/acceptance/l16-1-black-border-verify.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l18-1-delete-cells-offline.test.cjs",
+      "mode": "644",
+      "sha256": "8ab7d0e4bbf1805b9ff4c374246df077660b53f217e633082527d93169892d44",
+      "source": "test/acceptance/l18-1-delete-cells-offline.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l18-1-failure-unobservable.test.cjs",
+      "mode": "644",
+      "sha256": "ab5d51339ee504a158715a5ee578a2ebdb3e9843b639eac6315124a0f1a17994",
+      "source": "test/acceptance/l18-1-failure-unobservable.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l19-delete-rows-boundary.test.cjs",
+      "mode": "644",
+      "sha256": "74c61e78fc4610736c743db98c89f84c92ef739cb6d5eb900763ee116bfeeec5",
+      "source": "test/acceptance/l19-delete-rows-boundary.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l19c-delete-rows-batched-release.test.cjs",
+      "mode": "644",
+      "sha256": "22d8769aa6fae222c1369aea1e267b56130a7782dd68aaaa12b8792aa23dd2ce",
+      "source": "test/acceptance/l19c-delete-rows-batched-release.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l22a-validation-time-release.test.cjs",
+      "mode": "644",
+      "sha256": "6fc606928e7e278edbc3c2100781ef2b18765762131708ece54f78705fc43d67",
+      "source": "test/acceptance/l22a-validation-time-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l22b-validation-custom-release.test.cjs",
+      "mode": "644",
+      "sha256": "6a0f779b92bb3cacaadfc72be825af0784a4ba471b10d86dcd6dcc7a405d273f",
+      "source": "test/acceptance/l22b-validation-custom-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l22c-validation-list-limit.test.cjs",
+      "mode": "644",
+      "sha256": "58da2a91c42d066e6a74813aa617201593b37f5c692fe890434987ee5eef83e6",
+      "source": "test/acceptance/l22c-validation-list-limit.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/l22d-validation-date-release.test.cjs",
+      "mode": "644",
+      "sha256": "24da99e1d14823fb986674a6e33397b7da727a490f978cd189935dd709fa6d9d",
+      "source": "test/acceptance/l22d-validation-date-release.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/layout-other-sheet-truncated.test.cjs",
+      "mode": "644",
+      "sha256": "cac5d0eb95d0ad3e1c17805b05b875f669e9d9b64ff55f6780dade5ee32e0969",
+      "source": "test/acceptance/layout-other-sheet-truncated.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -1678,7 +3727,7 @@
     {
       "path": "test/acceptance/m11-2-credential-routing.test.cjs",
       "mode": "644",
-      "sha256": "15bcabe03f991e3ddee04da0dd14595a2eb9047d8f30bb58cd77e3015617b13c",
+      "sha256": "7b97fade1401ebde41f90b296100a6ceca6e398535406126a8b8977d2b79170f",
       "source": "test/acceptance/m11-2-credential-routing.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1686,7 +3735,7 @@
     {
       "path": "test/acceptance/m11-3a-read-tools.test.cjs",
       "mode": "644",
-      "sha256": "f192edd16c2ede79a8bb3f573fc795468f48c371b7fd8ce480f28f4c7f334aa8",
+      "sha256": "df8e843cc5d9d9862842eec46a6e57b0059a2167eb6d2aa08b5ee6368b39892e",
       "source": "test/acceptance/m11-3a-read-tools.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1694,7 +3743,7 @@
     {
       "path": "test/acceptance/m11-3a1-section-variant.test.cjs",
       "mode": "644",
-      "sha256": "c8a4faa81688073c89f6046f2fe339e1e5fbcd20212569648757ffbbce05410b",
+      "sha256": "1b5573c2adfb9fca9e1ddfe57763e84d878a2ad457e0a506ae2c05c5a285bb48",
       "source": "test/acceptance/m11-3a1-section-variant.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1710,7 +3759,7 @@
     {
       "path": "test/acceptance/m11-3b2-read-mcp-release.test.cjs",
       "mode": "644",
-      "sha256": "33cbf25d1e4505782dd6e42c8f40b555e2cc012fb14857e5dfd58be8ace4a535",
+      "sha256": "164fe631915db528d834dbbc90534fc1a80ae9c72f02277922b82d5a3ea5cfc7",
       "source": "test/acceptance/m11-3b2-read-mcp-release.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1718,7 +3767,7 @@
     {
       "path": "test/acceptance/m11-4a1-write-handler.test.cjs",
       "mode": "644",
-      "sha256": "e788a8fd997214010e41c0c668591ed03af2d1680cc3ad09adad0b35906d1461",
+      "sha256": "b23e671dde6e633b5a6c9a41b82dae0fbabd24afcca5a93bfcd8bce1e475800f",
       "source": "test/acceptance/m11-4a1-write-handler.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1726,15 +3775,23 @@
     {
       "path": "test/acceptance/m11-4a2-executor-wiring.test.cjs",
       "mode": "644",
-      "sha256": "e2d65f7db8b965c8a4d0b012edcdf1d4e379695b6aa5c5b6fad49c9d0123c005",
+      "sha256": "3b7f0955e765517f6b7d2c59246a61c3e479164c3eb79a75fa8276a53e0b5f81",
       "source": "test/acceptance/m11-4a2-executor-wiring.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/acceptance/m11-4b-docx-write-handler.test.cjs",
+      "mode": "644",
+      "sha256": "bdfb3a312b7548e72476fa49e5d517f49adb912239dab99c456e3b1a717f521b",
+      "source": "test/acceptance/m11-4b-docx-write-handler.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/acceptance/m11-4b1-write-mcp-release.test.cjs",
       "mode": "644",
-      "sha256": "b38abc0afe6fdca9b340c31513baf45329217f67de6b75d3be185409435fbcc4",
+      "sha256": "81aa787ead0f4aa126cb1fd974c00bf069b0a9e2fe8ed671c5a9ee594bd1e10d",
       "source": "test/acceptance/m11-4b1-write-mcp-release.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1742,7 +3799,7 @@
     {
       "path": "test/acceptance/m3-executor.test.cjs",
       "mode": "644",
-      "sha256": "729542068786705f3ef7d07e1da43abed11489c0d258cabfb7f170a8025498ac",
+      "sha256": "ebbf479fd0727323f72d1d6e327a59b8f1952b082218bcb48ced665c4f3c0b3a",
       "source": "test/acceptance/m3-executor.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1756,17 +3813,9 @@
       "licence": "Apache-2.0"
     },
     {
-      "path": "test/acceptance/m7-s32-tiered.test.cjs",
-      "mode": "644",
-      "sha256": "141564fb384ea7f063303b8c9ded540e53edf904e27cd1e92cc62bc9c4956597",
-      "source": "test/acceptance/m7-s32-tiered.test.cjs",
-      "transformed": true,
-      "licence": "Apache-2.0"
-    },
-    {
       "path": "test/acceptance/m7-s32b-formula-index.test.cjs",
       "mode": "644",
-      "sha256": "755fe9c77221e2283e5d1d9b8ef3e02aa3d7bb3d1b76fa74d08ea781d7a54321",
+      "sha256": "7ff2f42b4b838ab8c67a6984a521147d1f3d5eac8909ca9271f11362763ecd30",
       "source": "test/acceptance/m7-s32b-formula-index.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1782,7 +3831,7 @@
     {
       "path": "test/acceptance/m8-cross-format-contract.test.cjs",
       "mode": "644",
-      "sha256": "cede8783bca004cf7d513fe2804f720cf672181558d7a5760bf2807d481e72d7",
+      "sha256": "68cca1fd693c16e21c7364b0a37f0011331a584900bd7c61cb9b16f521b5bf7e",
       "source": "test/acceptance/m8-cross-format-contract.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1790,7 +3839,7 @@
     {
       "path": "test/acceptance/m8-docx-build-gate.test.cjs",
       "mode": "644",
-      "sha256": "781e5d7edcb17053e69fbc23ea3b0cfe6e3cb715cb432e15daa960f92eb51502",
+      "sha256": "b805a1393e918642abc0d1854d9a9f0b3e5084de51258ccb14f335dc106c32df",
       "source": "test/acceptance/m8-docx-build-gate.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1804,6 +3853,14 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/acceptance/mona1-failure-reason.test.cjs",
+      "mode": "644",
+      "sha256": "11ec9bbca7ccdcb20e3c4bd6388d35779d079a8f1d63abd2d0911175a84be4ae",
+      "source": "test/acceptance/mona1-failure-reason.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/acceptance/observation-verification.test.cjs",
       "mode": "644",
       "sha256": "bf74e5545e116a3eafa62155af0651c86e023c9e03f35f0df588bcaa90460044",
@@ -1814,7 +3871,7 @@
     {
       "path": "test/acceptance/preservation-placement.test.cjs",
       "mode": "644",
-      "sha256": "f495076afdeeea81183941a6bc1fd02f94b0ac8c962ecde1827f7c9f77746f88",
+      "sha256": "fb784459f6526e50616b60eb106b302ce1c2199ae1086600e14b1253f6e6a9aa",
       "source": "test/acceptance/preservation-placement.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -1830,7 +3887,7 @@
     {
       "path": "test/acceptance/product-mcp-entrypoint.test.cjs",
       "mode": "644",
-      "sha256": "3c7615f781569169e7a1dde9c1e662026b612208c1fcf731033c51a6b1f31f3e",
+      "sha256": "c27972bdebde1088a9829e2ba763d527093bcd5029fe3e7e6dd9d0554e929b7d",
       "source": "test/acceptance/product-mcp-entrypoint.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1852,6 +3909,38 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/acceptance/r3-format-table-union.test.cjs",
+      "mode": "644",
+      "sha256": "92d104f85a5669b13947c7170e34fe6074973a8885d7735cb21d5b785458b365",
+      "source": "test/acceptance/r3-format-table-union.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/r3-release-trim.test.cjs",
+      "mode": "644",
+      "sha256": "bd88aedca91ab7d4c89f9d3c1399bfc8dc9120355fba13ec29d6eeed233764d2",
+      "source": "test/acceptance/r3-release-trim.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/read-bound-45000.test.cjs",
+      "mode": "644",
+      "sha256": "8ff9a9014dc8be5a713301ca16b5d4a7677aacb20f8c364f6e89bf43fdf34b27",
+      "source": "test/acceptance/read-bound-45000.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/ref-on-target-families.test.cjs",
+      "mode": "644",
+      "sha256": "b8a73044cc6b8b329b85290c30996c7e9c0cbafed1c0e609c8c32e20f176543f",
+      "source": "test/acceptance/ref-on-target-families.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/acceptance/reference-broker.test.cjs",
       "mode": "644",
       "sha256": "12bfdb044c4f7b53c8ad00279e6e6d37d3525705204bdb915698058dccb53db4",
@@ -1868,49 +3957,57 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/acceptance/uncertain-may-persist.test.cjs",
+      "mode": "644",
+      "sha256": "1fe3cd0371809e00692a8bb976c6e2cde82b22011f423a450c6fdbd3113a0e2a",
+      "source": "test/acceptance/uncertain-may-persist.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/acceptance/uncertain-persistence.test.cjs",
       "mode": "644",
-      "sha256": "648f4675803e7842f4c030470c9b043292503ef5f2f53a15215acaae5e882e88",
+      "sha256": "d74a94091d131b13a1e0655591e01ae0b8c629e96840926314419071487aed2f",
       "source": "test/acceptance/uncertain-persistence.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
     {
-      "path": "test/acceptance/xlsx-b03w-bridge-write-cutover.test.cjs",
+      "path": "test/acceptance/xb10-format-merged-axes.test.cjs",
       "mode": "644",
-      "sha256": "cca86a9ead73d8f17c82cf506fb566cf261d9b6a5e8c2e21423ecf952212f8ca",
-      "source": "test/acceptance/xlsx-b03w-bridge-write-cutover.test.cjs",
+      "sha256": "f7aeda52670c4b4c93b1c9f1134e071b46567440eb9b78f1e3099fc7d17f8142",
+      "source": "test/acceptance/xb10-format-merged-axes.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
     {
-      "path": "test/acceptance/xlsx-b03w-bridge-write-v8-candidate.test.cjs",
+      "path": "test/acceptance/xl09-freeze-ceiling.test.cjs",
       "mode": "644",
-      "sha256": "ba8bac7639bc901ad39368821de04c56c491ea2b417dc366f66745b9173e14e0",
-      "source": "test/acceptance/xlsx-b03w-bridge-write-v8-candidate.test.cjs",
+      "sha256": "c9566f417df612747cb0f74c544cc200c19eda53d8474c371de06567587c140a",
+      "source": "test/acceptance/xl09-freeze-ceiling.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-b03w-bridge-write-cutover.test.cjs",
+      "mode": "644",
+      "sha256": "ae02bee0ab39bb0664f97f15a3303eca699a4c28c263a68dcbb64aee11eb9501",
+      "source": "test/acceptance/xlsx-b03w-bridge-write-cutover.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
     {
       "path": "test/acceptance/xlsx-b05w-bridge-write-cutover.test.cjs",
       "mode": "644",
-      "sha256": "04a48ffed8db2f9ca74702e67c501676490a81f86bef683ad6b29d166d3dd71d",
+      "sha256": "9d9b613524bc7564c095dbde3eacb1e14e0761a9dded0cb38a51f4a1c184ccaf",
       "source": "test/acceptance/xlsx-b05w-bridge-write-cutover.test.cjs",
-      "transformed": true,
-      "licence": "Apache-2.0"
-    },
-    {
-      "path": "test/acceptance/xlsx-b05w-bridge-write-v6-candidate.test.cjs",
-      "mode": "644",
-      "sha256": "73607abf9f7a4d4edb5e52c90f90409fcae74cc470a2e99b75e7f96348cd7424",
-      "source": "test/acceptance/xlsx-b05w-bridge-write-v6-candidate.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
     {
       "path": "test/acceptance/xlsx-b05w-runtime-gate.test.cjs",
       "mode": "644",
-      "sha256": "50c3495b0ce8df29690f15455bb63ab26c025dffa6b3a0763e569247c2e9958b",
+      "sha256": "ebda604efe15f322712e8e753608c7d8568b5025f6a815b59a6b4ad71baffcc3",
       "source": "test/acceptance/xlsx-b05w-runtime-gate.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1918,16 +4015,8 @@
     {
       "path": "test/acceptance/xlsx-b10w-bridge-write-cutover.test.cjs",
       "mode": "644",
-      "sha256": "966d47f3d67258bbeee9a37cb9d81ae8c0de1d13ff6777ee0ea02e5c54a517e4",
+      "sha256": "fcf6e5767a4061a1114d93e233886718ebebf0d7be7adf42d70b63cd3e19dcfd",
       "source": "test/acceptance/xlsx-b10w-bridge-write-cutover.test.cjs",
-      "transformed": true,
-      "licence": "Apache-2.0"
-    },
-    {
-      "path": "test/acceptance/xlsx-b10w-bridge-write-v7-candidate.test.cjs",
-      "mode": "644",
-      "sha256": "4a429d6388d01d4617ae013607a9d125fc195b2e6cff947b0f7040582e5ac755",
-      "source": "test/acceptance/xlsx-b10w-bridge-write-v7-candidate.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
@@ -1950,8 +4039,64 @@
     {
       "path": "test/acceptance/xlsx-b15-runtime-hydration-bridge.test.cjs",
       "mode": "644",
-      "sha256": "eabb44d96f27b63da0573ba6ed7042bbdb644d927863c4cef0c3aa319c2e8deb",
+      "sha256": "83ec9730c7b2043aeeeb52af59cafd7594e765680a7587cc5f23ec5ebfe44f76",
       "source": "test/acceptance/xlsx-b15-runtime-hydration-bridge.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-gh77-open-failed-ds-events.test.cjs",
+      "mode": "644",
+      "sha256": "d67783e0929f72945fc24881996aaf46488aecbb2c090a2345a1471cba924f60",
+      "source": "test/acceptance/xlsx-gh77-open-failed-ds-events.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-l09-layout-read-projection.test.cjs",
+      "mode": "644",
+      "sha256": "311d33eba1e76683b357ebd5b4a16a1c347b00e13d1a46a0272450ad7f94805d",
+      "source": "test/acceptance/xlsx-l09-layout-read-projection.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-l10-sheet-settings-read-projection.test.cjs",
+      "mode": "644",
+      "sha256": "c17cf84dd01043ce5a92fae71ea722aa271ee2ffa7d100c680a9227ab99df6f0",
+      "source": "test/acceptance/xlsx-l10-sheet-settings-read-projection.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-l16-2-merged-ring.test.cjs",
+      "mode": "644",
+      "sha256": "2621cf1eea063fb2edeee25e5f683293ae7bde913c2d2ba298c14f496b2faafa",
+      "source": "test/acceptance/xlsx-l16-2-merged-ring.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-l16-3-c5-remove-merge.test.cjs",
+      "mode": "644",
+      "sha256": "047fc9186c039de3523b975ee47c88acf0b72bf545156a12a53f0e95fd842fbf",
+      "source": "test/acceptance/xlsx-l16-3-c5-remove-merge.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-l16-3-merge-integrity-verify.test.cjs",
+      "mode": "644",
+      "sha256": "fb06e856d2242f3e82bdd13287164de75f69f2fe83e647bec94baf21a8375f10",
+      "source": "test/acceptance/xlsx-l16-3-merge-integrity-verify.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-l21-sheet-names.test.cjs",
+      "mode": "644",
+      "sha256": "408b29ab7f120d637f444dd0526becb0ed6354719fabcd519621c7b4e432d0a5",
+      "source": "test/acceptance/xlsx-l21-sheet-names.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
@@ -1966,7 +4111,7 @@
     {
       "path": "test/acceptance/xlsx-m7-b04-remove.test.cjs",
       "mode": "644",
-      "sha256": "9fd97c8dbdebbdaaf1e49f49ac37d61d3b34be8e58fe7b88b595484dd1bc3bee",
+      "sha256": "6f20712ef732ac79e396d990be9409d8b23673bb18cda4aa529b9c1a8fe99416",
       "source": "test/acceptance/xlsx-m7-b04-remove.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1990,7 +4135,7 @@
     {
       "path": "test/acceptance/xlsx-m7-build-gate-readlive.test.cjs",
       "mode": "644",
-      "sha256": "b5a1d03fcdeee12fd2ef2fac1aeeec895e6579e49bb2bf2cb5cfc13c0fa82bec",
+      "sha256": "0df096c41fd53062d5f6d18c3e2123d7e8ab2d471c4ad90e42f9c2d408baeff0",
       "source": "test/acceptance/xlsx-m7-build-gate-readlive.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -1998,7 +4143,7 @@
     {
       "path": "test/acceptance/xlsx-m7-d-cells.test.cjs",
       "mode": "644",
-      "sha256": "f64e85d2b541a7e52ae86be55f87c0eb3c57c75bbf9eb789804b8a7a4c875acd",
+      "sha256": "ee4f27f9a390398ec855c27913d6dbfd4d18d6b987c2e140c150f0c420db69da",
       "source": "test/acceptance/xlsx-m7-d-cells.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2006,7 +4151,7 @@
     {
       "path": "test/acceptance/xlsx-m7-d-filter.test.cjs",
       "mode": "644",
-      "sha256": "51844107235f9635c8e9e1f95d4a8dc143cb0f95e828483747fc1fe0efb755f2",
+      "sha256": "1f876426da0d2ec026c9681f88a7f74fa29acbd93fa6bcf3a2124450deb02345",
       "source": "test/acceptance/xlsx-m7-d-filter.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2022,7 +4167,7 @@
     {
       "path": "test/acceptance/xlsx-m7-d-o-slice.test.cjs",
       "mode": "644",
-      "sha256": "6a80fc1da4cdcd80983a8d9806972afb2a0920a5064414f15e8b5801d5fff7eb",
+      "sha256": "364e1acb75a9988ff1680a7f3ed18d8877b650aa6891c10cfd1598bbcb487cd7",
       "source": "test/acceptance/xlsx-m7-d-o-slice.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2030,7 +4175,7 @@
     {
       "path": "test/acceptance/xlsx-m7-d-rules.test.cjs",
       "mode": "644",
-      "sha256": "84449a042a08b5f7f425fe3237de81d4faf1e81f79c7f12b26524d13649953ed",
+      "sha256": "f3df98b51c9b2ecbd02b601215e9eee25b888923c4662761f96a500c0e3e09de",
       "source": "test/acceptance/xlsx-m7-d-rules.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2038,7 +4183,7 @@
     {
       "path": "test/acceptance/xlsx-m7-d-sheetnames.test.cjs",
       "mode": "644",
-      "sha256": "ad4dd4568829a692c4d6e17e367fece980965f96d531938d8f81160381bee197",
+      "sha256": "6b4bdae910265796281e9141e571ada6936f9fd9543cd995c894ab0c705b2113",
       "source": "test/acceptance/xlsx-m7-d-sheetnames.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2046,7 +4191,7 @@
     {
       "path": "test/acceptance/xlsx-m7-db-hydration.test.cjs",
       "mode": "644",
-      "sha256": "d505c2d4f1fe1cb7b6644552696150aeae0e9904254f7f7af4a9f062462e9e70",
+      "sha256": "4f68c8d6f1d3bf48da24d8882f4712b7df85b2c88de44fb14e340042caf9ecaa",
       "source": "test/acceptance/xlsx-m7-db-hydration.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2062,7 +4207,7 @@
     {
       "path": "test/acceptance/xlsx-m7-e-move.test.cjs",
       "mode": "644",
-      "sha256": "065bcdbb7916f1e60e83a90372a177a040e44867a852d5227b9ebc40b41c543a",
+      "sha256": "d42384ca619fe5b51745ec494dbba5fee59715cf76bcc7f1ce0b457754d85891",
       "source": "test/acceptance/xlsx-m7-e-move.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2084,9 +4229,17 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/acceptance/xlsx-m7-f04-format-run.test.cjs",
+      "mode": "644",
+      "sha256": "6be2e26184477f11c45111c6c533a3a63897174a0ac885131e868b5ad0f6ad1b",
+      "source": "test/acceptance/xlsx-m7-f04-format-run.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/acceptance/xlsx-m7-f07bc-align-ext.test.cjs",
       "mode": "644",
-      "sha256": "a11556ced4230fd3aacd02fe7160c065f081f13a793aa3f9586b8c97ec30e1f9",
+      "sha256": "19c13606e941e314b9ee64bb94b1fdd783aee91948210b24eefa2b7793775d83",
       "source": "test/acceptance/xlsx-m7-f07bc-align-ext.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2094,7 +4247,7 @@
     {
       "path": "test/acceptance/xlsx-m7-f08-fill-clear.test.cjs",
       "mode": "644",
-      "sha256": "d41a519e65aae9ee7c7d1e2712fe077af5bcf1bb2f9fe12263ca146a1379b06e",
+      "sha256": "2b3bbe73a8ad35e75ec827e5bfbb50c639830ddbe0f7cb770decf723404dab52",
       "source": "test/acceptance/xlsx-m7-f08-fill-clear.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2102,7 +4255,7 @@
     {
       "path": "test/acceptance/xlsx-m7-f2-print.test.cjs",
       "mode": "644",
-      "sha256": "3e4ae2ea3d7a424fd34e05423b90f520155d9702724e1a37f80b87c45a4cc820",
+      "sha256": "a5cd296f5b12892803f4425a40877d13681e5d912610c21968fa5ecb0ecee8fb",
       "source": "test/acceptance/xlsx-m7-f2-print.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2110,7 +4263,7 @@
     {
       "path": "test/acceptance/xlsx-m7-h-create-pivot.test.cjs",
       "mode": "644",
-      "sha256": "829786e7ee0f8ff84b8473d86c39da9ffcb1a86dd178348f35b187d450e4b6a7",
+      "sha256": "7647b4f51a98ec210d8f5e561d53765443dd5dc2f89c4614b017e4e9f2e889a6",
       "source": "test/acceptance/xlsx-m7-h-create-pivot.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2118,7 +4271,7 @@
     {
       "path": "test/acceptance/xlsx-m7-h-pivot-source.test.cjs",
       "mode": "644",
-      "sha256": "b026901385d0d42b5fd6e8a6461318867f35b836a03283695209efca27d55427",
+      "sha256": "f9c1124c99fb57922d4c985cd50bf5ac69669b6ead21ea42d45d4f58a188ea9a",
       "source": "test/acceptance/xlsx-m7-h-pivot-source.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2142,7 +4295,7 @@
     {
       "path": "test/acceptance/xlsx-m7-p3-refresh-pivot.test.cjs",
       "mode": "644",
-      "sha256": "56d68936985fb2e3555886fea0bda75c0498f23f4105d99e59f80817bc869792",
+      "sha256": "ae361d695db1ef9c102df8096522a3dc5ba2d682a1344b633624c2991d8f7c20",
       "source": "test/acceptance/xlsx-m7-p3-refresh-pivot.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2158,7 +4311,7 @@
     {
       "path": "test/acceptance/xlsx-m7-s1.test.cjs",
       "mode": "644",
-      "sha256": "e6ede1be6d3a9c4907c42ab63b32e735480e622ed26405590ada0e6d1b625319",
+      "sha256": "b52946d62506d69f9fc33c1c581af24d8c782bb5fb6d21bb67859d26a0fdad28",
       "source": "test/acceptance/xlsx-m7-s1.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2174,7 +4327,7 @@
     {
       "path": "test/acceptance/xlsx-m7-s2b.test.cjs",
       "mode": "644",
-      "sha256": "a888bc96e282b47814eecda083b88067a9ddbab5f31e5c3874f083d894e5ca21",
+      "sha256": "3f546537304a32814e629936ad9742f154581088c6ea77f81793d6a53ec81079",
       "source": "test/acceptance/xlsx-m7-s2b.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2182,7 +4335,7 @@
     {
       "path": "test/acceptance/xlsx-m7-s3.test.cjs",
       "mode": "644",
-      "sha256": "d8c95407a0898f369b9d80f54db3c9018ec01b9a9d39d14e9a1a173397eaa3c1",
+      "sha256": "e93f0951db3d0772d62bb25bef1a230ca5ebe30aa3ae9348d5b859500f553e64",
       "source": "test/acceptance/xlsx-m7-s3.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2214,7 +4367,7 @@
     {
       "path": "test/acceptance/xlsx-m7-s5.test.cjs",
       "mode": "644",
-      "sha256": "73657ef939ce4abf0432efc3cc7e28144fbc5df749cd77a506f7c86529a1f78a",
+      "sha256": "5f88b816eda9a98a15b362312801719fef6b92930d76e870102e0374c80e2fb0",
       "source": "test/acceptance/xlsx-m7-s5.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2222,9 +4375,9 @@
     {
       "path": "test/acceptance/xlsx-w1-write-range.test.cjs",
       "mode": "644",
-      "sha256": "04e32c5183e3a14e7d7906bfce324244641062becace37f73758082946eceb87",
+      "sha256": "9df4c4214f4e0ebcc5bb641dc7fa699144352d63e0c5b8295c4f22e95597a187",
       "source": "test/acceptance/xlsx-w1-write-range.test.cjs",
-      "transformed": false,
+      "transformed": true,
       "licence": "Apache-2.0"
     },
     {
@@ -2238,7 +4391,7 @@
     {
       "path": "test/acceptance/xlsx-w2-formulas.test.cjs",
       "mode": "644",
-      "sha256": "4152433b4b1b8261dabc523185f7a1398406632cf84f62f6f2e59e8604433072",
+      "sha256": "8e479d8c36207aa139c7e03a90bf732ed4bd7df4f14dc20a0d5ad03b2f015283",
       "source": "test/acceptance/xlsx-w2-formulas.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2246,7 +4399,7 @@
     {
       "path": "test/acceptance/xlsx-w3-sheets.test.cjs",
       "mode": "644",
-      "sha256": "10379a30f4ab537cae65247fe1d77fa877ca7d20c5ca876f9a1a1c7927200ea5",
+      "sha256": "aa423598b8a09736be78f08c746f387a290bce0c45a9f606f0fbca4654eee645",
       "source": "test/acceptance/xlsx-w3-sheets.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2254,7 +4407,7 @@
     {
       "path": "test/acceptance/xlsx-w4-format.test.cjs",
       "mode": "644",
-      "sha256": "4421afbba4a6b08d85ce47f0a90b6a424679a39f91fba3f452ab31f0d8a80238",
+      "sha256": "5cb14b4eae6cda6bfc6267a2884ef9284352a50a4b0fb81e4130275510709842",
       "source": "test/acceptance/xlsx-w4-format.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2262,7 +4415,7 @@
     {
       "path": "test/acceptance/xlsx-w4-freeze.test.cjs",
       "mode": "644",
-      "sha256": "1a8f40e9ee8897626e7e272eb36adc8db30b9cecb1d9bd2156a40f6f6b8df2ee",
+      "sha256": "47931fed7120f6fd12bf8f4cc59f63447f78534cbfbb5fc9088a129b332c53ce",
       "source": "test/acceptance/xlsx-w4-freeze.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2286,9 +4439,9 @@
     {
       "path": "test/acceptance/xlsx-w5-range.test.cjs",
       "mode": "644",
-      "sha256": "07ad91141cb47d3f8bbf11296011b4b273c39fa23f026656472c3fc75811488a",
+      "sha256": "f280379ae7ceeef166a6e8200b8a62a1c6f3515a9b4f242800f49383c4307c85",
       "source": "test/acceptance/xlsx-w5-range.test.cjs",
-      "transformed": true,
+      "transformed": false,
       "licence": "Apache-2.0"
     },
     {
@@ -2326,7 +4479,7 @@
     {
       "path": "test/acceptance/xlsx-w6-sort.test.cjs",
       "mode": "644",
-      "sha256": "a4fdeb5b47168fe0c0b294c74e3c7f0e5f370f162d4da27ab194d3afb20ce924",
+      "sha256": "6f27d73fa5f855334f5140c6345ba9c44670f5ff726e2bf586492e1961506d5b",
       "source": "test/acceptance/xlsx-w6-sort.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2334,15 +4487,15 @@
     {
       "path": "test/acceptance/xlsx-w6-validation.test.cjs",
       "mode": "644",
-      "sha256": "37a700c19e8d9d3b02fab58bf964acae82f724218a44b9a36d3480d2a54bfe1a",
+      "sha256": "2c27a441fd8e587c43e4a227f828da0d0704819d7c1188260a805782241bcd48",
       "source": "test/acceptance/xlsx-w6-validation.test.cjs",
-      "transformed": false,
+      "transformed": true,
       "licence": "Apache-2.0"
     },
     {
       "path": "test/acceptance/xlsx-w7-charts.test.cjs",
       "mode": "644",
-      "sha256": "e7b780b9bfc899e21f4072f298582f2f3c3149355d3b72b94e23284207a246b1",
+      "sha256": "3a2e2967e91a457cd6734c8f0977dab79c09b10e5b4a62f809aa4c3f44e26dcf",
       "source": "test/acceptance/xlsx-w7-charts.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2350,7 +4503,7 @@
     {
       "path": "test/acceptance/xlsx-w8-page.test.cjs",
       "mode": "644",
-      "sha256": "d11179f4c98192a2355a650e2eafdfecf007153c062f6fe1adf73459e4a2c15d",
+      "sha256": "e8f9fc247d9c7815ee55475230b24a86bb80a52f0176a781d92a8e3d409369e1",
       "source": "test/acceptance/xlsx-w8-page.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2358,7 +4511,7 @@
     {
       "path": "test/acceptance/xlsx-w8-print.test.cjs",
       "mode": "644",
-      "sha256": "a7b77fc550d65285c1aa1350601a109bcb3593d040647e0563908efeb397406f",
+      "sha256": "2618271d440351da4cb43bd795552e88cc01276b290d774a8683e3e8c4037150",
       "source": "test/acceptance/xlsx-w8-print.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2374,7 +4527,7 @@
     {
       "path": "test/acceptance/xlsx-wave-b-read-bridge.test.cjs",
       "mode": "644",
-      "sha256": "c973d75d04a3316fe0d9931c74beed98e3098477c8fd4f65d5e49b9f56b6afb5",
+      "sha256": "5bcc6202a4ceaf10b8e93d03bc7027eeb250b4c039f424ff201c97741864fa15",
       "source": "test/acceptance/xlsx-wave-b-read-bridge.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2382,9 +4535,25 @@
     {
       "path": "test/acceptance/xlsx-wave-b-read-driver-parity.test.cjs",
       "mode": "644",
-      "sha256": "49e4eca482078f8afe1ff3f4fab90ea9be287f82ecab2a92ba83294b2c67d6c9",
+      "sha256": "9bd4953e2aad54c0f56ee6a243dc8355c1b18c6a0b9da98b14de0c21d6047aa1",
       "source": "test/acceptance/xlsx-wave-b-read-driver-parity.test.cjs",
       "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-x-o06-move-chart.test.cjs",
+      "mode": "644",
+      "sha256": "e3309704e9ed6da1712547fd5429e193b1e6a2e6f4d439c0cdef49476a975beb",
+      "source": "test/acceptance/xlsx-x-o06-move-chart.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-x-o08-drawings-insert.test.cjs",
+      "mode": "644",
+      "sha256": "8c87e52b1bf7f550b3c7694dc9ca22b30fc8a3a2ec018a1b2833a841d1ce4420",
+      "source": "test/acceptance/xlsx-x-o08-drawings-insert.test.cjs",
+      "transformed": true,
       "licence": "Apache-2.0"
     },
     {
@@ -2396,11 +4565,91 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/acceptance/xlsx-xo03-6b-v8-compat.test.cjs",
+      "mode": "644",
+      "sha256": "76cb60a8c63046c2c8a38861755983a400dc05c8e8d268675927e8ebd00bcc1f",
+      "source": "test/acceptance/xlsx-xo03-6b-v8-compat.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-xo04-11-chart-style-marker-gridlines.test.cjs",
+      "mode": "644",
+      "sha256": "5b5338227b1f0146087bbb269aa72f9420e8f5332db0ec690a75ef05cb08562c",
+      "source": "test/acceptance/xlsx-xo04-11-chart-style-marker-gridlines.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-xo04-chart-style.test.cjs",
+      "mode": "644",
+      "sha256": "0afba6218f4e1b8d011e1b4543f4502f67fee27da9cfcf22c2d6bc4317854ee3",
+      "source": "test/acceptance/xlsx-xo04-chart-style.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-xo05-3-chart-style-gap-overlap-series-order.test.cjs",
+      "mode": "644",
+      "sha256": "9f606f31eff1a96492d28337c9ad2a54738e1a56ed7cab033854137957496bc9",
+      "source": "test/acceptance/xlsx-xo05-3-chart-style-gap-overlap-series-order.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-xo05-5-c-marker-symbol-line-style.test.cjs",
+      "mode": "644",
+      "sha256": "61e1fca729581231c79bbb38fff8ce839ff9a2dcfe10e12c6bb20a5b01ab78dc",
+      "source": "test/acceptance/xlsx-xo05-5-c-marker-symbol-line-style.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/acceptance/xlsx-xo05-chart-axis-datalabels.test.cjs",
       "mode": "644",
       "sha256": "c8a7a4e20c5eff19c07825a41c31e9a95af0d11431e34bb7c29c26eb749df878",
       "source": "test/acceptance/xlsx-xo05-chart-axis-datalabels.test.cjs",
       "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-xo07-3-delete-chart.test.cjs",
+      "mode": "644",
+      "sha256": "85285e39e1e5ec553a5a156e8ebfdb0ec663a4c4a582913e2f460ea3ca928780",
+      "source": "test/acceptance/xlsx-xo07-3-delete-chart.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xlsx-xo07-4b-copy-chart.test.cjs",
+      "mode": "644",
+      "sha256": "2993b908dd1bc0979bedf3ca2319d481ed5b944979031439404c26a25e5dec72",
+      "source": "test/acceptance/xlsx-xo07-4b-copy-chart.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xn01-number-format.test.cjs",
+      "mode": "644",
+      "sha256": "315c53c23c5771584a1927396005111d3580fdf362358684b16ccd29f8d5e328",
+      "source": "test/acceptance/xn01-number-format.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xp01-print-area-replaces.test.cjs",
+      "mode": "644",
+      "sha256": "c95aea48fd2781cb60fb5f4f8b4100c700fbe7ce6a3ece33390971a18dc35e92",
+      "source": "test/acceptance/xp01-print-area-replaces.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/acceptance/xt01-cell-value-typing.test.cjs",
+      "mode": "644",
+      "sha256": "7abf7dc353816a6109c8d0e986e5026b6b11f83f6ba5f8d8a952014bb6592958",
+      "source": "test/acceptance/xt01-cell-value-typing.test.cjs",
+      "transformed": false,
       "licence": "Apache-2.0"
     },
     {
@@ -2518,7 +4767,7 @@
     {
       "path": "test/fakes/ds-bridge-runtime.cjs",
       "mode": "644",
-      "sha256": "b04eb8ef3a3958aa8b7ebed0c5464fc7533ad61963826a98ae73ca768f3b481a",
+      "sha256": "ec503b9aea0c5883da710e4c74dda52de34ee9097228c4cd594fecd95e592f86",
       "source": "test/fakes/ds-bridge-runtime.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2542,9 +4791,9 @@
     {
       "path": "test/fakes/fake-docx-driver.cjs",
       "mode": "644",
-      "sha256": "ba1694cf4e8a87730da5f36e46e7dfafd62451bc719a1cbef73bc420247b64b0",
+      "sha256": "3cb1fdb368c24525bb685c0e3bdc4014bde2313f2a6c8beeeadbf938ccb37517",
       "source": "test/fakes/fake-docx-driver.cjs",
-      "transformed": false,
+      "transformed": true,
       "licence": "Apache-2.0"
     },
     {
@@ -2574,15 +4823,23 @@
     {
       "path": "test/fakes/fake-xlsx-driver.cjs",
       "mode": "644",
-      "sha256": "f470e87b74b7f6d0d09a3f1407c186b2c2d2f40c99a27ce8f29ace19038d3d29",
+      "sha256": "9223e2ee4713b4e16fc860a86d38c9c12457652f85a9355447f98f3d0730b572",
       "source": "test/fakes/fake-xlsx-driver.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/fakes/fake-xlsx-session-env.cjs",
+      "mode": "644",
+      "sha256": "a892998a38dd79f1cd1771ae59782f8c4711a30942bd1a4e1e2c64b10598650a",
+      "source": "test/fakes/fake-xlsx-session-env.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/fakes/print-bridge-runtime.cjs",
       "mode": "644",
-      "sha256": "ad66788ff211265829d6b48cd578978e96025aa1a4e3ffbfc54d7041ea05767b",
+      "sha256": "73ee1ea167aca5fa7084369ad9329725bdbcdd2f12582e1f05df4457c88074e1",
       "source": "test/fakes/print-bridge-runtime.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2590,15 +4847,15 @@
     {
       "path": "test/fakes/read-editors.cjs",
       "mode": "644",
-      "sha256": "bd81a5da9e7c65e01007dd2f36dd03d7760ff7ebb63568500476d62a25e2f24b",
+      "sha256": "49f4e5b7b095f0436724194efae7dee5944eff630f8e7598b74401c232775aed",
       "source": "test/fakes/read-editors.cjs",
-      "transformed": false,
+      "transformed": true,
       "licence": "Apache-2.0"
     },
     {
       "path": "test/fakes/write-refusals.cjs",
       "mode": "644",
-      "sha256": "ddddb6886d9f4fb11ddafb6fb6672878902e6dec60cadf7c72972faea78a036e",
+      "sha256": "1652cc971f86543c1e1e503ed891464cb79687425a055f4d128ed7d0ffe6168e",
       "source": "test/fakes/write-refusals.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2606,7 +4863,7 @@
     {
       "path": "test/fakes/write-wiring.cjs",
       "mode": "644",
-      "sha256": "1eeaa74b887c16f3570ccda8681a149dd949a5d387a274e5790adc95a0487b7d",
+      "sha256": "06d69b4c8541627a77ec8bd6009da97224e38e2d2edea25471d5dbf4fbdcbd4e",
       "source": "test/fakes/write-wiring.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
@@ -2636,6 +4893,94 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/fixtures/gh223/make-multisection-docx.py",
+      "mode": "644",
+      "sha256": "d7baf1d4796a739638c86ff3cf93b283b07800bc8a739a362d531250d553a9c5",
+      "source": "test/fixtures/gh223/make-multisection-docx.py",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh223/multisection.docx",
+      "mode": "644",
+      "sha256": "dd4d9ec564b6c0565781dedfe3f916eb5a9059823c6a4e726f82f3dd6e158fb9",
+      "source": "test/fixtures/gh223/multisection.docx",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh225/make-multilevel-docx.py",
+      "mode": "644",
+      "sha256": "7a5bc2cb66bd710b5507b3a34cbe590c0c01d2ffafde2dc304b1324a0b73c2f1",
+      "source": "test/fixtures/gh225/make-multilevel-docx.py",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh225/multilevel.docx",
+      "mode": "644",
+      "sha256": "453b14c0437116d81ab29cdd2b163a54d3cc0beebfdb2c5fb32a4029334acbc8",
+      "source": "test/fixtures/gh225/multilevel.docx",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh226/make-multinote-docx.py",
+      "mode": "644",
+      "sha256": "2101e5dabdda6c88a9fde7633b1c931f6472860b67827b690484ee43ff54c1ae",
+      "source": "test/fixtures/gh226/make-multinote-docx.py",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh226/make-multipara-notes-docx.py",
+      "mode": "644",
+      "sha256": "6f5371bdeb0a760cd936b92b8fe2f8c80584676fd0a5eee347da4c67d7528b2d",
+      "source": "test/fixtures/gh226/make-multipara-notes-docx.py",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh226/multinote.docx",
+      "mode": "644",
+      "sha256": "db94dad6db89f947d0a0db1542adc2f87010a5ed02daeb27b4bf6be27714115e",
+      "source": "test/fixtures/gh226/multinote.docx",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh226/multipara-notes.docx",
+      "mode": "644",
+      "sha256": "74eb9ebc0d40414fc85a917a0fe0592959c3e8746ff1e0e5a56714f9ecd05664",
+      "source": "test/fixtures/gh226/multipara-notes.docx",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh291/grid-gap.docx",
+      "mode": "644",
+      "sha256": "2137ac23d6aad1568ed5e303156ad1cfe3bcd88da6f068fa47e09852f25afd0d",
+      "source": "test/fixtures/gh291/grid-gap.docx",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh291/make-grid-gap-docx.py",
+      "mode": "644",
+      "sha256": "720d866e8f37b8b6377566257c425aa6239bada9b3a84914687135e62895bd46",
+      "source": "test/fixtures/gh291/make-grid-gap-docx.py",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/gh293/shared-abstractnum.docx",
+      "mode": "644",
+      "sha256": "822839fd80ecb1eeecaf09dc2ebc58e3cbf7ae6a91bd6a135c4c466fff610eeb",
+      "source": "test/fixtures/gh293/shared-abstractnum.docx",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/fixtures/legacy-config-host.cjs",
       "mode": "644",
       "sha256": "33476135dc6b77a4faae91147c3c27299cb5ae831621c9e813830ad7e77a056a",
@@ -2656,6 +5001,78 @@
       "mode": "644",
       "sha256": "36497fe9dfa850f0a3c668e328c999ca1f4c1da64733e98c158fc1d75b382266",
       "source": "test/fixtures/m5/ragged-grid.docx",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/fixtures/release-harness-legacy-before-stored-gate.json",
+      "mode": "644",
+      "sha256": "a495c66d1b8a8f06fd09dd11644a539e3413011e8269f113aa735b5e6cb3b0cf",
+      "source": "test/fixtures/release-harness-legacy-before-stored-gate.json",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/helpers/private-source.cjs",
+      "mode": "644",
+      "sha256": "0163b88612e8f787de168a490870bd022d722f33a6343830d406da0494c71a40",
+      "source": "test/helpers/private-source.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/helpers/trim-skip.cjs",
+      "mode": "644",
+      "sha256": "1ba3a8c5931ac4421dd58e497d0b66113cd3dbbd1ef46c0cc8e7e731149f5ecc",
+      "source": "test/helpers/trim-skip.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/b03-write-handler-identity.test.cjs",
+      "mode": "644",
+      "sha256": "80390413e8515ca9e9498a7fd736d865f45307bba45bac58f952bcd3003557f1",
+      "source": "test/static/b03-write-handler-identity.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/b05-write-handler-identity.test.cjs",
+      "mode": "644",
+      "sha256": "e1a53e9b10a6853cfcdab4c6f07d8be3c7281a30eedf75e22f6a025a8e98df15",
+      "source": "test/static/b05-write-handler-identity.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/b10-write-handler-identity.test.cjs",
+      "mode": "644",
+      "sha256": "af52de801406592397327c56452c9d7cdc599c3b1648da9d07266e085136706e",
+      "source": "test/static/b10-write-handler-identity.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/b22-write-handler-identity.test.cjs",
+      "mode": "644",
+      "sha256": "466ca51c889b4af88807c066e0d6fffbd0061558bd2b54d1b0268b7efd125285",
+      "source": "test/static/b22-write-handler-identity.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/b23-write-handler-identity.test.cjs",
+      "mode": "644",
+      "sha256": "c41e839511c8c48ea50d77ae5422692077275bd0ddc1cd7a81707db5d425490d",
+      "source": "test/static/b23-write-handler-identity.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/b24-write-handler-identity.test.cjs",
+      "mode": "644",
+      "sha256": "fc0bd2b8bceb3ae226bb7d1ac4fa8de6bc9d90e62e7c49c44142640605a72dc6",
+      "source": "test/static/b24-write-handler-identity.test.cjs",
       "transformed": false,
       "licence": "Apache-2.0"
     },
@@ -2700,6 +5117,70 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/static/docx-b18-write-handler-identity.test.cjs",
+      "mode": "644",
+      "sha256": "6fdfc8baa12f2d4e2d584282a9b9780ec836a8614fe5206ec0f9c6cbdbb78dcb",
+      "source": "test/static/docx-b18-write-handler-identity.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-b21-read-handler-identity.test.cjs",
+      "mode": "644",
+      "sha256": "14a758b445ade5470919934b3f7efa719723724157c619be689f81aca6cf9637",
+      "source": "test/static/docx-b21-read-handler-identity.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-driver-linespacing-read-vm.test.cjs",
+      "mode": "644",
+      "sha256": "e9f6e07fd9988cea63120f3abed661e4eb1512dd8c091c503d15ce916eaa4981",
+      "source": "test/static/docx-driver-linespacing-read-vm.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-driver-numbering-read-vm.test.cjs",
+      "mode": "644",
+      "sha256": "d80a0acbcedea3ba45c804954cce2218e2b1f5fb7f2990bfebaf69666ba65b54",
+      "source": "test/static/docx-driver-numbering-read-vm.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-driver-property-query-table-read-vm.test.cjs",
+      "mode": "644",
+      "sha256": "24db96dad572fe5192281428091ed705d522d096dbcbbaaa9c11c9ae002193fe",
+      "source": "test/static/docx-driver-property-query-table-read-vm.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-driver-style-read-vm.test.cjs",
+      "mode": "644",
+      "sha256": "583cb0279a9b1dc3c821c1f67df21c6d96e48b97a35e2ce6126d72d66ba5e0e0",
+      "source": "test/static/docx-driver-style-read-vm.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-gh292-style-next-link-bridge-handler.test.cjs",
+      "mode": "644",
+      "sha256": "45ff2dcd6e371cd08fc0f21be5c1e4d284a54f3eb773e342ba546b6c46161f3b",
+      "source": "test/static/docx-gh292-style-next-link-bridge-handler.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-gh293-list-scope-bridge-handler.test.cjs",
+      "mode": "644",
+      "sha256": "9cea309ff4e341d2c0db328ae7cb5f30ad387fcff30d8f47892f1e0426b1cf58",
+      "source": "test/static/docx-gh293-list-scope-bridge-handler.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/static/docx-intent-accounting.test.cjs",
       "mode": "644",
       "sha256": "ac7cc45f9f392a588b87ccdf717813cfe3725c2ce196fc5f9061396cbe2a219a",
@@ -2708,9 +5189,89 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/static/docx-nested-tables-in-read-tables-vm.test.cjs",
+      "mode": "644",
+      "sha256": "d9c2819c6eae468553885aed53ea6af6a6eabfeced348957239ef502c968ff37",
+      "source": "test/static/docx-nested-tables-in-read-tables-vm.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-new-capabilities.test.cjs",
+      "mode": "644",
+      "sha256": "81ab83483ca55ce106aa51e596cfe4358d4781f2b4aa104f41aa67ce03b0522c",
+      "source": "test/static/docx-new-capabilities.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-parse-blocks-nested-table.test.cjs",
+      "mode": "644",
+      "sha256": "fc59f83231a67018a59836ce19186669972d768768a0aaac682568f5b1b3da4e",
+      "source": "test/static/docx-parse-blocks-nested-table.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-readlive-no-silent-null.test.cjs",
+      "mode": "644",
+      "sha256": "318d9e10c659186fe59eff828d8811b4b2ca3eb3167d21eb5049607daa23e65e",
+      "source": "test/static/docx-readlive-no-silent-null.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-rewrite-superset-vm.test.cjs",
+      "mode": "644",
+      "sha256": "107dd9c6a72645c9a459aa20c64af24a12e07205bf27df0c70129765f8fafe94",
+      "source": "test/static/docx-rewrite-superset-vm.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-rich-read-callcommand-result-escape-vm.test.cjs",
+      "mode": "644",
+      "sha256": "6ebcbbb3c1b4299dc1e01e7468e2b56ef068501a14fbee53f23f91fe63558b65",
+      "source": "test/static/docx-rich-read-callcommand-result-escape-vm.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-rich-read-noterefs-named-vm.test.cjs",
+      "mode": "644",
+      "sha256": "1d741f5785040fabc1652a9269d0be5ca1ea6e07a81c04a45b850f4f0f8ecc6b",
+      "source": "test/static/docx-rich-read-noterefs-named-vm.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-rich-read-per-element-guard-vm.test.cjs",
+      "mode": "644",
+      "sha256": "11f3f7c1bb436222961c92f69aad5e7880a768a552100a7758271e8abf63ed00",
+      "source": "test/static/docx-rich-read-per-element-guard-vm.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-rich-read-search-throws-vm.test.cjs",
+      "mode": "644",
+      "sha256": "2f980482bab2857a8afc9813dc284d89e685dc408b60c0d142e3198d0e155846",
+      "source": "test/static/docx-rich-read-search-throws-vm.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/docx-tables-top-level-walk-vm.test.cjs",
+      "mode": "644",
+      "sha256": "8aa40697507fd9fd6ef2b766d388c273f7c247bd26a003361a45f4dae9608bcf",
+      "source": "test/static/docx-tables-top-level-walk-vm.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/static/driver-read-query.test.cjs",
       "mode": "644",
-      "sha256": "163350f9a482e1ba27571a7573e570709e6fb85440a97d5d5398b2c0954c5f36",
+      "sha256": "9014dd811fedc17c43ba479bf6017ea4d59f860ff715ae5273d982dde98255c8",
       "source": "test/static/driver-read-query.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2718,8 +5279,24 @@
     {
       "path": "test/static/ds-bridge-client.test.cjs",
       "mode": "644",
-      "sha256": "4a656647a6fa9b2c71a42d14df3dc365c41e5a51e479f35a547d1f104441f052",
+      "sha256": "6e650a28828e6148839af528209555ef3253607ddd69b3f16c2947822a605956",
       "source": "test/static/ds-bridge-client.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/ds935-live-harness-hardcodes.test.cjs",
+      "mode": "644",
+      "sha256": "abf010f5f94e673907cc121570f7db55334fcee173c28bffccd84317b880ccf3",
+      "source": "test/static/ds935-live-harness-hardcodes.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/ds935-live-regression-set-coverage.test.cjs",
+      "mode": "644",
+      "sha256": "4872b71aeecc71c2d5cadcb886365ab94051c93e9da631f6ed4d235176eb66cf",
+      "source": "test/static/ds935-live-regression-set-coverage.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
@@ -2732,9 +5309,73 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/static/formatting-command-vm.test.cjs",
+      "mode": "644",
+      "sha256": "cd5cf330b0b05eb671e655ed24a486f1b4eef82b844dee4f9624f02907effd18",
+      "source": "test/static/formatting-command-vm.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/gh139-b16-markersymbol-linestyle-read.test.cjs",
+      "mode": "644",
+      "sha256": "0343647e64d92d932ac1f2bd6d7616c01d762d10d89ea0cff04f32e1cad4ad86",
+      "source": "test/static/gh139-b16-markersymbol-linestyle-read.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/gh139-chart-symmetry-matrix.test.cjs",
+      "mode": "644",
+      "sha256": "176c16f5ea7242a078bb1133c7830f65df362587a4de607fc508e0ea5effec06",
+      "source": "test/static/gh139-chart-symmetry-matrix.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/gh140-pivot-contract.test.cjs",
+      "mode": "644",
+      "sha256": "211bdc641ba69e4c3ec25ba04289ee6c495efbac8949600fd58e62961ceb9b3d",
+      "source": "test/static/gh140-pivot-contract.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/gh141-cell-format-symmetry-matrix.test.cjs",
+      "mode": "644",
+      "sha256": "45591bd6a9d8c1de27e2e85dea70f4d908003e9fb6c4181d2d90c017e6df4b61",
+      "source": "test/static/gh141-cell-format-symmetry-matrix.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/gh141-master-reconciliation-evidence.test.cjs",
+      "mode": "644",
+      "sha256": "a1784d4953ff607fab1fd9e6ab1fcfff75cd2c3987c3648b1c7c0bec61a538d8",
+      "source": "test/static/gh141-master-reconciliation-evidence.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/gh226-note-chain-read-vm.test.cjs",
+      "mode": "644",
+      "sha256": "2fae0f71447a79055e55aa958c65161c034d7a9884c1f387d14b07612f413f12",
+      "source": "test/static/gh226-note-chain-read-vm.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/live-harness-build-identity-pattern.test.cjs",
+      "mode": "644",
+      "sha256": "1d275f31a83de6017e7a83f3829d94c7e0f9dfd231b6e199599caef21ba9dcf9",
+      "source": "test/static/live-harness-build-identity-pattern.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/static/m11-5a2-dual-runtime-compat.test.cjs",
       "mode": "644",
-      "sha256": "ca814198d3c8e113307f113e59c9b3cbd1758b1f60d49818d62de215b941b97a",
+      "sha256": "814e0d6a14258394c51703aa0b60cf2190fc5a3dc731985c29a6f112de71eaa3",
       "source": "test/static/m11-5a2-dual-runtime-compat.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2758,7 +5399,7 @@
     {
       "path": "test/static/no-fixed-delay.test.cjs",
       "mode": "644",
-      "sha256": "53b1fafcb7407413bf0d5dc8de5a5bb8edb210bdddff7f2ee7ada9a3b0d89f65",
+      "sha256": "db53aa746f84b8f9b41d6ed429a508a9c2ab6e6a5c6bd4698675ee4649777401",
       "source": "test/static/no-fixed-delay.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2772,10 +5413,42 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/static/public-capabilities-doc.test.cjs",
+      "mode": "644",
+      "sha256": "653a4fde048b4fd9b1b0255bd3993b991fe398f8781005ccd7686f9d4fcff211",
+      "source": "test/static/public-capabilities-doc.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/public-upgrade-note.test.cjs",
+      "mode": "644",
+      "sha256": "b6ada94d06a7b8579229bc48825d9c9a974953dd71818c9fea503aea84531649",
+      "source": "test/static/public-upgrade-note.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/release-stored-content-gate-required.test.cjs",
+      "mode": "644",
+      "sha256": "937ce3555af809870d2f1aa37811dd2efc0e482766cf93632b6808cfffc1e508",
+      "source": "test/static/release-stored-content-gate-required.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/static/runtime-identity.test.cjs",
       "mode": "644",
-      "sha256": "2fe42a11c7f21284fd056a67ca3bd6b89af7781f8069b36bd36c630699589540",
+      "sha256": "74c7d571fb511f6e36d0d622339dd295914029b70da174c8b8a05da844ccea53",
       "source": "test/static/runtime-identity.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/style-definition-command-vm.test.cjs",
+      "mode": "644",
+      "sha256": "da7a568a6c699537726094e482309e8484ee313c78c88b24cda450b061e83ec0",
+      "source": "test/static/style-definition-command-vm.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
     },
@@ -2790,9 +5463,17 @@
     {
       "path": "test/static/tool-exposure-exact-set-guard.test.cjs",
       "mode": "644",
-      "sha256": "652c44816c86f2f00d4d6077165dc4565a8fd256949fec96aa5afc83f8c39546",
+      "sha256": "70c4723d175f09f8e82a2057253bbebb585c49202db855393b5a7c4e326d1886",
       "source": "test/static/tool-exposure-exact-set-guard.test.cjs",
       "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/write-tool-field-filter-census.test.cjs",
+      "mode": "644",
+      "sha256": "bd9c44bb387fa842722ceba5497f53ab2dc7245c2b76f431c8766ce65d8276ab",
+      "source": "test/static/write-tool-field-filter-census.test.cjs",
+      "transformed": false,
       "licence": "Apache-2.0"
     },
     {
@@ -2804,9 +5485,25 @@
       "licence": "Apache-2.0"
     },
     {
+      "path": "test/static/xlsx-driver-chart-effective-labels.test.cjs",
+      "mode": "644",
+      "sha256": "6ddf3750b63e31734dccddc47be38fb380e373dc036d5aad9c4b709dfdce38cf",
+      "source": "test/static/xlsx-driver-chart-effective-labels.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/xlsx-driver-chart-scatter-getvalues-throws.test.cjs",
+      "mode": "644",
+      "sha256": "900062ebe45c1a1da75dd762a289ac1b9d83dcec766572ab50aef650b000d8a7",
+      "source": "test/static/xlsx-driver-chart-scatter-getvalues-throws.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
       "path": "test/static/xlsx-driver-dependents.test.cjs",
       "mode": "644",
-      "sha256": "a166129e22e0b0cf9cfeeef5e1442e400be9f53de98b219d051b9d040d7d43d7",
+      "sha256": "ef38e91da358bd5e876e92e624b05390f62cd242d0a78760147a8ddeeb2ca084",
       "source": "test/static/xlsx-driver-dependents.test.cjs",
       "transformed": true,
       "licence": "Apache-2.0"
@@ -2814,9 +5511,33 @@
     {
       "path": "test/static/xlsx-driver-read-query.test.cjs",
       "mode": "644",
-      "sha256": "ef9ee93507f23a04682c955a5d9e0f92de9795c8b333d21529c88abd7591c0f8",
+      "sha256": "7c2f814a7bf338834f9cb21e9aa83f57743e867096a03da2ec27ec6d8752ae7d",
       "source": "test/static/xlsx-driver-read-query.test.cjs",
       "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/xlsx-gh77-config-host-ds-events.test.cjs",
+      "mode": "644",
+      "sha256": "c6b02b85db16b0ed7dc46d70c4820eae3a7c53adb43ad0d5f424e764ff53989a",
+      "source": "test/static/xlsx-gh77-config-host-ds-events.test.cjs",
+      "transformed": false,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/xlsx-point-data-label-reader.test.cjs",
+      "mode": "644",
+      "sha256": "f2e5cb56b9485855802c717a54dc14bc0f3535fc1719ca3db9135a5e13c23de8",
+      "source": "test/static/xlsx-point-data-label-reader.test.cjs",
+      "transformed": true,
+      "licence": "Apache-2.0"
+    },
+    {
+      "path": "test/static/xlsx-ref-on-target.test.cjs",
+      "mode": "644",
+      "sha256": "d0dd3d31a7647a72cbafb8b329fd72060e66b99f4f9208afc95dee6a9ee38476",
+      "source": "test/static/xlsx-ref-on-target.test.cjs",
+      "transformed": false,
       "licence": "Apache-2.0"
     },
     {

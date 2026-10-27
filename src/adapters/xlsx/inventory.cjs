@@ -44,7 +44,12 @@ function deps(sheets, cells, payload, formulas) {
 const internalFlag = x => (typeof x === 'boolean' ? x : (typeof x === 'string' && x.startsWith('UNOBSERVABLE') ? x : 'UNOBSERVABLE:not-boolean'));
 
 function normalizeCell(c) {
-  const f = typeof c.f === 'string' && c.f.startsWith('=') ? c.f : '';
+  // X-T01 (LIVE xt01-r1): GetFormula returns the VALUE TEXT of a non-formula cell, so a Text-typed cell holding '=1+1'
+  // reads f '=1+1' like a formula. It is a text literal when the cell's number format is the Text type '@' AND COUNT is 0
+  // AND GetValue is that same text (a formula's GetValue is its RESULT). Only window cells read with their number format
+  // can be told apart; any other such cell stays a formula (the conservative reading).
+  const textLiteral = c.nf === '@' && c.count === 0 && typeof c.f === 'string' && c.f.startsWith('=') && String(c.v) === c.f;
+  const f = !textLiteral && typeof c.f === 'string' && c.f.startsWith('=') ? c.f : '';
   const count = c.count === 0 || c.count === 1 ? c.count : null;
   const v = c.v === undefined ? null : c.v;
   const out = { v, f, count, merge: typeof c.merge === 'string' ? c.merge.replace(/\$/g, '').toUpperCase() : null };
@@ -88,8 +93,13 @@ function normalizeInventory(payload) {
     truncated: payload.truncated === true,
     unsupported: Object.freeze(unsupported),
     // per-sheet objects of the sheets the read named (charts / pivots / sheet-level names); an axis whose
-    // reader failed is a reason string, never an empty list
-    objects: Object.freeze(Object.fromEntries(Object.entries(objectsOf(payload, sheets.map(s => s.name))).map(([n, o]) => [n, Object.freeze({ ...o })]))),
+    // reader failed is a reason string, never an empty list.
+    // GH #140 U2 fix: `{ ...o }` on a STRING reason spreads it into a per-character object
+    // ({0:'U',1:'N',...}) instead of preserving the string -- the SAME whole-sheet gap
+    // create_pivot/refresh_pivot's own gate() already names via axis()'s try/catch (xlsx-driver.cjs)
+    // was silently losing its reason this way (pivots.cjs's allPivots() would then push
+    // `why: o.pivots` = undefined, never the real string). A string passes through unchanged.
+    objects: Object.freeze(Object.fromEntries(Object.entries(objectsOf(payload, sheets.map(s => s.name))).map(([n, o]) => [n, typeof o === 'string' ? o : Object.freeze({ ...o })]))),
     // M7 P3: the raw pivot identities of the same sheets (pivot-refs.cjs), for refresh_pivot only
     pivotRefs: deepFreeze(pivotRefsOf(payload.objects)),
     // column / row layout (wave 4), read only when a layout step asked: { sheet: { cols: { B: { width, hidden } },
@@ -101,6 +111,12 @@ function normalizeInventory(payload) {
     active: typeof payload.active === 'string' ? payload.active : null,
     // the public range-level validation reads (wave 6), keyed '<sheet>!<range>'; null when none was asked
     cfReads: payload.cfReads && typeof payload.cfReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.cfReads))) : null,
+    // X-F04 (format_run): the per-cell run-map reads, keyed '<sheet>!<cell>'; null when none was asked
+    runReads: payload.runReads && typeof payload.runReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.runReads))) : null,
+    // GH #301 D4 (write_array_formula): the per-cell raw GetFormulaArray reads, keyed '<sheet>!<cell>'; null when none was asked
+    arrayReads: payload.arrayReads && typeof payload.arrayReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.arrayReads))) : null,
+    // X-L10: every sheet's visibility (true | false | 'UNOBSERVABLE:<why>'), read only for a freeze step; null when not read
+    visibility: payload.visibility && typeof payload.visibility === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.visibility))) : null,
     validationReads: payload.validationReads && typeof payload.validationReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.validationReads))) : null,
     // the print-setting reads (wave 8, the model), keyed by sheet name; null when none was asked
     printReads: payload.printReads && typeof payload.printReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.printReads))) : null,
@@ -110,8 +126,20 @@ function normalizeInventory(payload) {
     chartReads: payload.chartReads && typeof payload.chartReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.chartReads))) : null,
     // drawings (M7 S2b): every sheet's image / shape / chart through the public getters, or null when not asked
     drawingReads: payload.drawingReads && typeof payload.drawingReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.drawingReads))) : null,
+    // sheet protection (GH #326 / #327, U4a client-wiring only): { protected, forbids } per sheet through
+    // sheet.protection.read/v1 (B/17), or null when not asked -- the #326 guard / #327 redaction units consume it
+    protectionReads: payload.protectionReads && typeof payload.protectionReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.protectionReads))) : null,
+    // sheet protection, RANGE-scoped (GH #327, U5): { protected, forbids, cells: { range, nonEmpty, unlocked,
+    // hidden } } keyed '<sheet>!<range>' through sheet.protection.read/v1 (B/17) -- read_range's own redaction
+    // (read-tools.cjs) consumes it; null when not asked (or when the tier dropped it, same as cfReads/validationReads)
+    protectionRangeReads: payload.protectionRangeReads && typeof payload.protectionRangeReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.protectionRangeReads))) : null,
     // the AutoFilter reads (wave 6), keyed by sheet name; null when none was asked
     filterReads: payload.filterReads && typeof payload.filterReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.filterReads))) : null,
+    // the comment reads (GH #300 K1, read_comments), keyed by sheet name; null when none was asked
+    commentReads: payload.commentReads && typeof payload.commentReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.commentReads))) : null,
+    // GH #300 K2 (add_comment): the session's comment author { id, name } from the signed editor config, a NAMED
+    // 'UNOBSERVABLE:<why>' when the session has none, null when not asked
+    sessionUser: payload.sessionUser && typeof payload.sessionUser === 'object' ? Object.freeze({ id: String(payload.sessionUser.id), name: String(payload.sessionUser.name) }) : (typeof payload.sessionUser === 'string' ? payload.sessionUser : null),
     // build = the editor build the driver saw; fileId = the document the session opened (a move's carried expectation is
     // bound to it, owner decision 2026-09-30); null when the driver did not name it
     // M7 S32 slice 1: the observation tier. 'tiered': the cells above are ONLY the task's windows, and `digests` (per
@@ -147,10 +175,13 @@ function formulaEntries(primary) {
 
 /** The tier fields of the inventory; a tiered payload's digest gap is pushed to `unsupported` (incomplete). */
 function tierFields(sheets, payload, unsupported) {
+  // GH #110: a read-only window read (above the digest ceiling) carries no digest and asserts no preservation
+  if (payload.tier === 'window') return { tier: 'window', digests: null };
   if (payload.tier !== 'tiered') return { tier: 'full', digests: null };
   const gap = digestGap(sheets, payload.digests);
   if (gap) unsupported.push({ field: 'digest', reason: gap });
-  return { tier: 'tiered', digests: Array.isArray(payload.digests) ? deepFreeze(JSON.parse(JSON.stringify(payload.digests))) : null };
+  // X-N01b: bounded = the reduced variant was read (the sheet-wide style read replaced by the digest's number formats)
+  return { tier: 'tiered', digests: Array.isArray(payload.digests) ? deepFreeze(JSON.parse(JSON.stringify(payload.digests))) : null, ...(payload.bounded === true ? { bounded: true } : {}) };
 }
 
 /** A tiered payload must carry exactly one well-formed digest per sheet; otherwise the reason (incomplete). */

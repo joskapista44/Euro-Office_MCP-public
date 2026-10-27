@@ -23,10 +23,17 @@ const formula = require('../formula.cjs');
  * row's cells moved together; a same-row formula compared by its row-free shape, not by its value -- formula values
  * are stale in session, W6 probe). L3: every other cell (a formula outside referencing the block is compared by its
  * text -- its value changes with the sort by design). Retry: the key already ordered -> SATISFIED, 0 write / 0 command.
+ *
+ * GH #301 D3 (public-API delta; LIVE S-02 on 9.3.5: SetSort with up to three keys, correct order, same-row formulas
+ * follow): `keys: [{ column, order }]` (1..3, distinct columns inside the range) is the alternative to keyColumn +
+ * order -- never both. Every key column is held to the single key's contract (no formula, no mixed types, no
+ * collation guess). A blank cell is measured only in a DESCENDING PRIMARY key (R21, blanks last); a blank in any
+ * secondary key is refused (its placement is not measured). L1 checks the rows lexicographically over all keys.
  */
 
 const INTENTS = Object.freeze(['sort_range']);
-const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range', 'key', 'order', 'hasHeaders']);
+const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range', 'keyColumn', 'order', 'keys', 'hasHeaders']);
+const MAX_KEYS = 3;
 const MAX_CELLS = 1000;
 
 function plan(step, index) {
@@ -37,8 +44,8 @@ function plan(step, index) {
   const g = parseRange(step.range);
   if (!g) return { ok: false, detail: `${at} requires a plain A1 range` };
   if (g.count > MAX_CELLS) return { ok: false, detail: `${at} range has ${g.count} cells, over the ${MAX_CELLS} ceiling` };
-  if (typeof step.key !== 'string' || !/^[A-Z]{1,3}$/.test(step.key) || colNum(step.key) < g.c1 || colNum(step.key) > g.c2) return { ok: false, detail: `${at}: key must be a column letter inside the range` };
-  if (!['asc', 'desc'].includes(step.order)) return { ok: false, detail: `${at}: order must be 'asc' or 'desc'` };
+  const keys = keysOf(step, g, at);
+  if (keys.detail) return { ok: false, detail: keys.detail };
   if (typeof step.hasHeaders !== 'boolean') return { ok: false, detail: `${at}: hasHeaders must be true or false (no default -- a guessed header row is a sorted data row)` };
   const first = g.r1 + (step.hasHeaders ? 1 : 0);
   if (g.r2 - first < 1) return { ok: false, detail: `${at}: fewer than two data rows` };
@@ -50,13 +57,29 @@ function plan(step, index) {
       family: 'sort',
       selector: Object.freeze({ sheet: step.sheet, range: rangeText(g) }),
       grid: Object.freeze({ c1: g.c1, c2: g.c2, r1: g.r1, r2: g.r2, first }),
-      key: colNum(step.key),
-      order: step.order,
+      keys: Object.freeze(keys.list.map(k => Object.freeze(k))),
+      keyColumn: keys.list[0].column,
+      order: keys.list[0].order,
       hasHeaders: step.hasHeaders,
       cells: Object.freeze(cellsOf(g).map(a => Object.freeze({ a }))),
       preservationMode: 'PRIMITIVE_INTEGRAL',
     },
   };
+}
+
+/** keyColumn + order (one key) or keys (1..MAX_KEYS) -> [{ column: colNum, order }], or a named refusal. */
+function keysOf(step, g, at) {
+  const inside = c => typeof c === 'string' && /^[A-Z]{1,3}$/.test(c) && colNum(c) >= g.c1 && colNum(c) <= g.c2;
+  const oneOf = step.keys !== undefined;
+  if (oneOf && (step.keyColumn !== undefined || step.order !== undefined)) return { detail: `${at}: give either keys or keyColumn + order, not both` };
+  const raw = oneOf ? step.keys : [{ column: step.keyColumn, order: step.order }];
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > MAX_KEYS) return { detail: `${at}: keys must list 1 to ${MAX_KEYS} keys` };
+  for (const k of raw) {
+    if (!k || !inside(k.column)) return { detail: `${at}: ${oneOf ? 'every key column' : 'keyColumn'} must be a column letter inside the range` };
+    if (!['asc', 'desc'].includes(k.order)) return { detail: `${at}: order must be 'asc' or 'desc'` };
+  }
+  if (new Set(raw.map(k => k.column)).size !== raw.length) return { detail: `${at}: a key column may appear only once` };
+  return { list: raw.map(k => ({ column: colNum(k.column), order: k.order })) };
 }
 
 const cmpCode = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -84,7 +107,7 @@ function entryOf(cell, c, r, op) {
   if (!cell) return { problem: 'xlsx-sort-cell-unread' };
   if (cell.merge && cell.merge !== addr(c, r)) return { problem: 'xlsx-sort-merge-in-block' };
   if (cell.f !== '') {
-    if (c === op.key) return { problem: 'xlsx-sort-formula-key-unmeasured' };
+    if (op.keys.some(k => k.column === c)) return { problem: 'xlsx-sort-formula-key-unmeasured' };
     const shape = sameRowShape(cell.f, r, op.grid);
     return shape === null ? { problem: 'xlsx-sort-formula-in-block-unmeasured' } : { v: shape, n: false };
   }
@@ -112,32 +135,39 @@ function sameRowShape(f, r, grid) {
   return ok ? `=${body}` : null;
 }
 
-/** The comparator for this block's keys, or why the collation would be a guess. */
+/** One comparator per key (in key order), or why the collation would be a guess. */
 function comparatorOf(rows, op) {
-  const k = op.key - op.grid.c1;
-  const all = rows.map(t => t[k]);
-  if (op.order === 'asc' && all.some(x => x.v === '')) return { problem: 'xlsx-sort-blank-key-unmeasured' };
-  const keys = all.filter(x => x.v !== '');
-  const numeric = keys.every(x => x.n);
-  if (!numeric && keys.some(x => x.n)) return { problem: 'xlsx-sort-mixed-key-types-unmeasured' };
-  if (numeric) return { cmp: (a, b) => Number(a) - Number(b) };
-  const vals = [...new Set(keys.map(x => x.v))];
-  const orderBy = f => vals.slice().sort(f).join('\u0000');
-  const code = orderBy(cmpCode);
-  if (orderBy(cmpCase) !== code || orderBy(cmpNum) !== code || vals.some(v => /[^\x20-\x7e]/.test(v))) return { problem: 'xlsx-sort-collation-unmeasured', keys: vals.slice(0, 20) };
-  return { cmp: cmpCode };
+  const cmps = [];
+  for (const [i, key] of op.keys.entries()) {
+    const k = key.column - op.grid.c1;
+    const all = rows.map(t => t[k]);
+    // R21: a blank is measured only in a DESCENDING PRIMARY key (blanks last)
+    if ((i > 0 || key.order === 'asc') && all.some(x => x.v === '')) return { problem: 'xlsx-sort-blank-key-unmeasured', column: colName(key.column) };
+    const keys = all.filter(x => x.v !== '');
+    const numeric = keys.every(x => x.n);
+    if (!numeric && keys.some(x => x.n)) return { problem: 'xlsx-sort-mixed-key-types-unmeasured', column: colName(key.column) };
+    if (numeric) { cmps.push({ k, order: key.order, cmp: (a, b) => Number(a) - Number(b) }); continue; }
+    const vals = [...new Set(keys.map(x => x.v))];
+    const orderBy = f => vals.slice().sort(f).join('\u0000');
+    const code = orderBy(cmpCode);
+    if (orderBy(cmpCase) !== code || orderBy(cmpNum) !== code || vals.some(v => /[^\x20-\x7e]/.test(v))) return { problem: 'xlsx-sort-collation-unmeasured', column: colName(key.column), keys: vals.slice(0, 20) };
+    cmps.push({ k, order: key.order, cmp: cmpCode });
+  }
+  return { cmps };
 }
 
-/** The key ordered; a blank key (desc only, R21) after every non-blank one. */
-function ordered(rows, op, cmp) {
-  const k = op.key - op.grid.c1;
-  return rows.every((t, i) => {
-    if (i === 0) return true;
-    const [x, y] = [rows[i - 1][k].v, t[k].v];
-    if (x === '' || y === '') return y === '';
-    return op.order === 'asc' ? cmp(x, y) <= 0 : cmp(x, y) >= 0;
-  });
+/** Two rows compared over every key in turn; a blank (the desc primary key only, R21) after every non-blank one. */
+function compareRows(x, y, cmps) {
+  for (const { k, order, cmp } of cmps) {
+    const [a, b] = [x[k].v, y[k].v];
+    if (a === '' && b === '') continue;
+    if (a === '' || b === '') return a === '' ? 1 : -1;
+    const c = cmp(a, b);
+    if (c !== 0) return order === 'asc' ? c : -c;
+  }
+  return 0;
 }
+const ordered = (rows, cmps) => rows.every((t, i) => i === 0 || compareRows(rows[i - 1], t, cmps) <= 0);
 const multiset = rows => rows.map(t => JSON.stringify(t.map(x => x.v))).sort().join('\n');
 
 function gate(p, op) {
@@ -148,15 +178,15 @@ function gate(p, op) {
   const r = rowsOf(p, op);
   if (r.problem) return { ok: false, reason: r.problem, cell: r.cell };
   const c = comparatorOf(r.rows, op);
-  if (c.problem) return { ok: false, reason: c.problem, keys: c.keys };
-  return { ok: true, rows: r.rows, cmp: c.cmp };
+  if (c.problem) return { ok: false, reason: c.problem, column: c.column, keys: c.keys };
+  return { ok: true, rows: r.rows, cmps: c.cmps };
 }
 
 function classify(p, op) {
   const g = gate(p, op);
   if (!g.ok) return { state: 'FAIL_CLOSED', evidence: g };
-  const where = { sheet: op.selector.sheet, range: op.selector.range, key: colName(op.key), order: op.order };
-  if (ordered(g.rows, op, g.cmp)) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-key-already-ordered' } };
+  const where = { sheet: op.selector.sheet, range: op.selector.range, keyColumn: colName(op.keyColumn), order: op.order, ...(op.keys.length > 1 ? { keys: keysText(op) } : {}) };
+  if (ordered(g.rows, g.cmps)) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-key-already-ordered' } };
   return { state: 'APPLY', evidence: where };
 }
 
@@ -166,10 +196,14 @@ function resolve(p, selector, ctx = {}) {
   return { ok: true, target: Object.freeze({ sheet: selector.sheet, range: selector.range }) };
 }
 
-/** One callCommand: exact-name sheet check, then the public SetSort over the block (the source's measured call). */
+const keysText = op => op.keys.map(k => `${colName(k.column)} ${k.order}`).join(', ');
+
+/** One callCommand: exact-name sheet check, then the public SetSort over the block (the source's measured call);
+ * GH #301 D3: key 2 / key 3 fill the SAME call's second and third key slots (null when absent, as before). */
 function lower(op) {
   const { sheet, range } = op.selector;
-  const keyRange = `${colName(op.key)}${op.grid.r1}:${colName(op.key)}${op.grid.r2}`;
+  const keyArg = k => `ws.GetRange(${JSON.stringify(`${colName(k.column)}${op.grid.r1}:${colName(k.column)}${op.grid.r2}`)}), ${JSON.stringify(k.order === 'asc' ? 'xlAscending' : 'xlDescending')}`;
+  const slots = [0, 1, 2].map(i => (op.keys[i] ? keyArg(op.keys[i]) : 'null, null')).join(', ');
   return {
     kind: 'callCommand',
     body: `
@@ -177,11 +211,11 @@ try {
   const name = ${JSON.stringify(sheet)};
   const ws = Api.GetSheet(name);
   if (!ws || ws.GetName() !== name) return { ok: false, stage: 'sheet-identity' };
-  ws.GetRange(${JSON.stringify(range)}).SetSort(ws.GetRange(${JSON.stringify(keyRange)}), ${JSON.stringify(op.order === 'asc' ? 'xlAscending' : 'xlDescending')}, null, null, null, null, ${JSON.stringify(op.hasHeaders ? 'xlYes' : 'xlNo')}, 'xlSortColumns');
+  ws.GetRange(${JSON.stringify(range)}).SetSort(${slots}, ${JSON.stringify(op.hasHeaders ? 'xlYes' : 'xlNo')}, 'xlSortColumns');
   return { ok: true };
 } catch (err) { return { ok: false, stage: 'threw', error: String(err) }; }
 `,
-    meta: Object.freeze({ family: 'sort', sheet, range, key: op.key, order: op.order, hasHeaders: op.hasHeaders, grid: op.grid }),
+    meta: Object.freeze({ family: 'sort', sheet, range, keyColumn: op.keyColumn, order: op.order, keys: op.keys, hasHeaders: op.hasHeaders, grid: op.grid }),
   };
 }
 
@@ -195,18 +229,26 @@ function verifyPrimitive(op, before, after) {
     const n = cellAt(after.primary, op.selector.sheet, x);
     return !!w && !!n && w.f === n.f && JSON.stringify(w.v) === JSON.stringify(n.v);
   });
-  const isOrdered = ordered(a.rows, op, b.cmp);
+  const isOrdered = ordered(a.rows, b.cmps);
   const rowsKept = multiset(a.rows) === multiset(b.rows);
   return { ok: headerKept && isOrdered && rowsKept, evidence: { sheet: op.selector.sheet, range: op.selector.range, headerKept, ordered: isOrdered, rowsKept, proof: 'fresh-live-rows-and-order' } };
 }
 
-/** L3: every other cell (the block is L1's); a formula elsewhere is compared by its text. */
-const verifyPreservation = (op, before, after) => cells.verifyPreservation(op, before, after);
+/** L3: every other cell (the block is L1's); a formula elsewhere is compared by its text.
+ * X-L13/5: sort_range has NO extra axis of its own -- the shared digest proof (cells.verifyPreservation) is the
+ * whole of it, so a tiered observation reports preservationScope FULL, never a reduced/BOUNDED proof. Below 45000
+ * (FULL tier) this stays byte-identical to before -- no field at all. */
+function verifyPreservation(op, before, after) {
+  const rest = cells.verifyPreservation(op, before, after);
+  if (!rest.ok && rest.evidence && rest.evidence.reason) return rest;
+  if (before.primary.tier === 'tiered') return { ok: rest.ok, evidence: { ...rest.evidence, preservationScope: 'FULL' } };
+  return rest;
+}
 
 function wholeTaskChecks(op, finalObservation) {
   const g = gate(finalObservation && finalObservation.primary, op);
-  const ok = g.ok && ordered(g.rows, op, g.cmp);
-  return [{ name: `${op.selector.sheet}!${op.selector.range} ordered by ${colName(op.key)} ${op.order}`, ok, detail: ok ? null : { reason: g.reason || 'not-ordered' } }];
+  const ok = g.ok && ordered(g.rows, g.cmps);
+  return [{ name: `${op.selector.sheet}!${op.selector.range} ordered by ${keysText(op)}`, ok, detail: ok ? null : { reason: g.reason || 'not-ordered' } }];
 }
 
 const windowsOf = op => [{ sheet: op.selector.sheet, range: op.selector.range }];

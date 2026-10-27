@@ -27,7 +27,11 @@ const wantsAlignExtWrite = op => op.want.some(w => w.key === 'indent' || w.key =
  * XLSX `format` family: format_range (M6 wave 4). Every sub-option is verified PER CELL on a fresh read
  * (W4a LIVE: a range-level getter reports the top-left for the whole range).
  *
- *   fill          PUBLIC SetFillColor / GetFillColor().GetRGB()                 (W4a)
+ *   fill          PUBLIC SetFillColor / GetFillColor().GetRGB()                 (W4a). GH #90 (LIVE-measured):
+ *                 a target range containing a MERGED area is not refused -- a plain range-level
+ *                 write lands on every member (one call, the whole merge), verified on every member too. A merge
+ *                 that CROSSES the requested range's boundary stays refused, named (xlsx-format-merge-crosses-
+ *                 range-refused) -- partial colouring of a merged block is misleading.
  *   fill 'none'   (M7 backlog X-F08): clears the fill, keeps every other axis -- the
  *                 ONE working public path is the SAME ClearFormats() + explicit-restore composite
  *                 border.mode 'remove' uses (format-fill-clear.cjs, built on format-remove.cjs's
@@ -45,7 +49,11 @@ const wantsAlignExtWrite = op => op.want.some(w => w.key === 'indent' || w.key =
  *   font          PUBLIC setters / GetCharacters(1, len).GetFont()              (W4a2) -- bold / italic only TRUE
  *                 (a false readback is not measured: an untouched cell reads null); not on an EMPTY cell (no
  *                 characters), not on a FORMULA cell (not measured), not on a mixed-run cell (the driver compares
- *                 the first / last character with the whole)
+ *                 the first / last character with the whole). GH #90 (LIVE-measured): a target range
+ *                 containing a MERGED area is not refused -- the write and the verification both stay on
+ *                 the anchor; every other member's value (and so its font axis) is blanked by the merge itself,
+ *                 the SAME empty-cell case above, not a new gap. A merge crossing the range's boundary stays
+ *                 refused, named, same as fill's.
  *   font.underline / font.strikeout / font.subscript / font.superscript  (M7 backlog X-F05, zero
  *                 #ref, LIVE m7-s21-probe1/2): the SAME public GetCharacters(1, len).GetFont()
  *                 path, format-font-effects.cjs. underline/strikeout are RANGE-level setters
@@ -115,7 +123,7 @@ const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range', 'format']);
 const MAX_CELLS = 2000; // X-B11 (m7-b11-probe1-4 MEASURED): every format axis
 // (bold/fill/numberFormat/outline/inside/all/remove) satisfies the 3-part bound (command <=5s,
 // L1+L3 complete in-session AND after reopen, save confirmed) up to and including N=2000. The
-// workbook-level ~5000-used-cell read ceiling (format.cjs's own live read, not yet migrated to
+// workbook-level ~45000-used-cell read ceiling (format.cjs's own live read, not yet migrated to
 // tiered observation) is unchanged and independent of this per-task write ceiling.
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 
@@ -144,8 +152,14 @@ function borderExpectation(b) {
   if (bad.length) return { error: `border key(s) not supported: ${bad.join(', ')}` };
   if (b.style === 'none') return { error: "border.style 'none' is not a style -- use border.mode 'remove' with the sides to remove" };
   if (!(b.style in STYLE)) return { error: `border.style must be one of ${Object.keys(STYLE).join(', ')} (the measured styles)` };
-  if (typeof b.color !== 'string' || !HEX.test(b.color)) return { error: "border.color must be '#RRGGBB'" };
-  const expect = { s: STYLE[b.style], c: intOf(b.color) };
+  // X-B07 (LIVE-measured, test/live/xlsx-xb07-auto-border-colour-probe.live.cjs): 'auto' = the editor's "Automatic"
+  // border colour -- the PUBLIC Api.AutoColor() writes <color auto="1"/>, and the Bridge border read reports it as
+  // c: null (an explicit black reads 0 and saves as indexed 64 -- a DIFFERENT state). Not offered on the diagonals
+  // (unmeasured there). Named limit, unchanged: a BLACK request still tolerates a null read (the W4c 0 | null rule),
+  // so a black request on an 'auto' edge reads SATISFIED.
+  if (typeof b.color !== 'string' || !(HEX.test(b.color) || b.color === 'auto')) return { error: "border.color must be '#RRGGBB' or 'auto'" };
+  if (b.color === 'auto' && isDiagonalSides(b.sides)) return { error: "border.color 'auto' is not supported on the diagonal sides (unmeasured)" };
+  const expect = { s: STYLE[b.style], c: b.color === 'auto' ? null : intOf(b.color) };
   if (b.mode && b.mode !== 'cells') return edgeModeExpectation(b.mode, b, expect);
   // X-B05/S03: diagonal sides are a SEPARATE, same-cell-only vocabulary -- never mixed with top/bottom/
   // left/right in one call, and never routed through the SIDE/OPPOSITE/neighbour machinery outline/
@@ -176,7 +190,8 @@ function borderModeResult(want, b) {
 const FONT_KEYS = Object.freeze(['bold', 'italic', 'name', 'size', 'color', 'underline', 'strikeout', 'subscript', 'superscript']);
 /** [key, valid, error, expect] for the value-carrying font keys, in their want order. */
 const FONT_VALUES = Object.freeze([
-  ['name', v => typeof v === 'string' && !!v && v.length <= 100, 'font.name must be a non-empty string', v => v],
+  // L-02/1 LIVE: the xlsx font-name limit is 31 characters -- a longer name reads whole in the session and is cut AFTER the reopen
+  ['name', v => typeof v === 'string' && !!v && v.length <= 31, 'font.name must be a non-empty string of at most 31 characters (the xlsx font-name limit)', v => v],
   ['size', v => Number.isFinite(v) && v >= 1 && v <= 409, 'font.size must be a number in [1, 409]', v => v],
   ['color', v => typeof v === 'string' && HEX.test(v), "font.color must be '#RRGGBB'", v => intOf(v)],
 ]);
@@ -227,6 +242,10 @@ function expectationsOf(spec) {
     const bad = Object.keys(a).filter(k => !['horizontal', 'vertical', 'rotation', 'readingOrder', 'indent', 'shrink'].includes(k));
     if (bad.length) return { error: `align key(s) not supported: ${bad.join(', ')}` };
     if ('horizontal' in a) { if (!(a.horizontal in H)) return { error: `align.horizontal must be one of ${Object.keys(H).join(', ')}` }; want.push({ key: 'align.h', expect: H[a.horizontal] }); }
+    // GH #93: SetAlignHorizontal('justify') also turns the cell's wrap ON (LIVE-measured, session + reopen, text /
+    // number / empty cells, test/live/justify-text-cell-probe.live.cjs) -- expect that coupled wrap unless the step
+    // asks for wrap itself. Vertical justify / distributed: no such coupling measured, not assumed.
+    if (a.horizontal === 'justify' && !('wrap' in spec)) want.push({ key: 'wrap', expect: true });
     if ('vertical' in a) { if (!(a.vertical in V)) return { error: `align.vertical must be one of ${Object.keys(V).join(', ')}` }; want.push({ key: 'align.v', expect: V[a.vertical] }); }
     // X-F07a: align.rotation, the SAME public SetOrientation/GetOrientation path
     // the S24 probes measured -- format-rotation.cjs.
@@ -313,7 +332,7 @@ function plan(step, index) {
       // ring too: clearing a shared edge can clear a ring neighbour's facing side exactly like outline/inside do.
       // X-F07a: rotation locks rows the SAME way -- the S24 probe measured the row height move
       // from null to a concrete value around a rotation write; the footprint stays conservative either way.
-      footprint: Object.freeze({ style: (e.outline || e.remove) ? `${addr(ring.c1, ring.r1)}:${addr(ring.c2, ring.r2)}` : rangeText(g), ...(('wrap' in step.format || (step.format.align && 'rotation' in step.format.align)) ? { rows: Object.freeze([g.r1, g.r2]) } : {}) }),
+      footprint: Object.freeze({ style: (e.outline || e.remove) ? `${addr(ring.c1, ring.r1)}:${addr(ring.c2, ring.r2)}` : rangeText(g), ...(('wrap' in step.format || (step.format.align && ('rotation' in step.format.align || step.format.align.horizontal === 'justify'))) ? { rows: Object.freeze([g.r1, g.r2]) } : {}) }),
       preservationMode: 'PRIMITIVE_INTEGRAL',
     },
   };
@@ -333,7 +352,15 @@ function holds(cell, w) {
 }
 
 /** Every style key of a cell, flattened (an unobservable axis is one key). */
-const styleKeysOf = cell => Object.fromEntries(STYLE_KEYS.map(k => [k, JSON.stringify(readKey(cell, k))]));
+/** `blackIsNull`: a border colour that the ClearFormats()-and-restore composite (op.remove / op.fillClear) re-issues explicitly reads 0 in the writing session,
+ * while the same black read null in the fresh read before (P0.5/c: black reads 0 in a session and null after a reopen). Without this, a kept BLACK side or diagonal
+ * on a restored cell reads as drift and the product's own verification answers VERIFY_CANNOT_PROVE_TERMINAL_STATE for a write that landed (L-16/1 LIVE). Scoped to
+ * those two ops and to border {s,c} objects only: any other op, a different colour or a different style still counts as drift. */
+const nullToBlack = v => (v && typeof v === 'object' && v.c === null ? { ...v, c: 0 } : v);
+const styleKeysOf = (cell, blackIsNull = false) => Object.fromEntries(STYLE_KEYS.map(k => {
+  const v = readKey(cell, k);
+  return [k, JSON.stringify(blackIsNull && k.startsWith('border.') ? nullToBlack(v) : v)];
+}));
 
 const inGrid = (op, a) => { const c = colNum(col(a)); const r = row(a); return c >= op.grid.c1 && c <= op.grid.c2 && r >= op.grid.r1 && r <= op.grid.r2; };
 const requestedSides = op => op.want.filter(w => w.key.startsWith('border.')).map(w => w.key.slice(7));
@@ -374,18 +401,42 @@ const borderWant = (op, x) => ({ key: `border.${x}`, expect: op.outline.expect }
  * of `op.cells` -- so it already covers every facing side `expectationsAt` would add there, outline's ring
  * cells included. Only L1 has no such window-wide check of its own. Remove's `removeFacing` plays the exact
  * same role, for the sides cleared only because a neighbour's edge was the one directly removed. */
-const expectationsAt = (op, a) => [...wantsAt(op, a), ...facingSides(op, a).map(x => borderWant(op, x)), ...removeFacing(op, a).map(removeWant)];
+const expectationsAt = (op, a, cell) => [...wantsAt(op, a, cell), ...facingSides(op, a).map(x => borderWant(op, x)), ...removeFacing(op, a).map(removeWant)];
 
-/** Every expectation of a range cell: the spec's keys, plus its outline sides. */
-const wantsAt = (op, a) => [...op.want, ...edgeSides(op, a).map(x => borderWant(op, x))];
+/** Every expectation of a range cell: the spec's keys, plus its outline sides -- or, for 'cells'-mode border on
+ * a merge MEMBER cell (GH #83), only the requested sides on that merge's own perimeter (mergeAwareSides). `cell`
+ * is the cell's own pre-write read (optional -- omitted call sites that can never see a merge member keep the
+ * unfiltered behaviour, same as before this change). */
+function wantsAt(op, a, cell) {
+  if (cell && cell.merge && cell.merge !== a) {
+    if (isBorderCellsModeOnly(op)) {
+      const byKey = new Map(op.want.map(w => [w.key, w.expect]));
+      return mergeAwareSides(op, a, cell).map(x => ({ key: `border.${x}`, expect: byKey.get(`border.${x}`) }));
+    }
+    // GH #90: a non-anchor merge member carries no font requirement at all -- its value (and so its font axis)
+    // is blanked by the merge itself, LIVE-measured UNOBSERVABLE there; the write and the verification both stay
+    // on the anchor. `cell.merge !== a` is true for the ANCHOR too (the probe's own second finding: the merge
+    // text never equals a single member's own address) -- `isMergeAnchor` is the real distinction. Fill falls
+    // through to the unfiltered return below -- every member (anchor included) is a legitimate target.
+    if (isFontOnly(op) && !isMergeAnchor(cell, a)) return [];
+  }
+  return [...op.want, ...edgeSides(op, a).map(x => borderWant(op, x))];
+}
 
 /** The range + its one-cell ring, as addresses. */
 const windowCells = op => cellsOf(parseRange(op.ring));
 
-/** May side `side` of cell `a` change? Requested on a target; or the SHARED edge of a target whose facing side is requested. */
-function sideMayChange(op, a, side) {
+/** May side `side` of cell `a` change? Requested on a target; or the SHARED edge of a target whose facing side is
+ * requested. GH #83: for 'cells' mode on a merge MEMBER (`cell` is its pre/post-write read, when available),
+ * narrowed to that merge's OWN perimeter (mergeAwareSides) -- a bug that leaked a write onto an INTERIOR edge
+ * must NOT be silently tolerated here just because the side was globally requested somewhere in the range. */
+function sideMayChange(op, a, side, cell) {
   if (op.outline) return edgeSides(op, a).includes(side) || facingSides(op, a).includes(side);
   if (op.remove) return removeFacing(op, a).includes(side);
+  // GH #95: the merge-member narrowing is for a TARGET member only; a RING cell that belongs to a merge (e.g. the right
+  // edge of a merged label next to the target) keeps the plain shared-edge rule below -- its facing side legitimately
+  // changes when the target draws that edge.
+  if (isBorderCellsModeOnly(op) && inGrid(op, a) && cell && cell.merge && cell.merge !== a) return mergeAwareSides(op, a, cell).includes(side);
   const sides = requestedSides(op);
   if (!sides.length || !(side in OPPOSITE)) return false;
   if (inGrid(op, a) && sides.includes(side)) return true;
@@ -393,20 +444,119 @@ function sideMayChange(op, a, side) {
   return !!n && inGrid(op, n) && sides.includes(OPPOSITE[side]);
 }
 
+/** GH #83: border.mode 'cells' sets each target cell's OWN sides independently, with no shared-edge/ring
+ * coordination at all (unlike outline/inside/all) -- the same per-cell independence `boundedEligible` already
+ * relies on. X-M01 (cells.cjs write_range) already carries an anchor exemption for VALUE writes; 'cells'
+ * border goes further (LIVE-measured, docs/GH83-BORDER-MERGED-DESIGN-20261014.md): writing ONLY
+ * the anchor leaves the merged block's own far edge unset, so EVERY member of the merge is a legitimate
+ * target here, not just the anchor -- `mergeAwareSides()` below is what keeps each member's write to its OWN
+ * perimeter side(s). Nothing broader: not fill/font/numberFormat/align, not outline/inside/all/remove/diagonal. */
+const isBorderCellsModeOnly = op => op.want.length > 0 && op.want.every(w => w.key.startsWith('border.')) && !op.outline && !op.inside && !op.remove && !op.diagonal;
+
+/** GH #90 (LIVE-measured test/live/xlsx-gh90-merge-fill-font-probe.live.cjs, R1=R2):
+ * a plain range-level `fill` write over a merged area's own range address lands on EVERY member (the
+ * MERGE_B shape -- one range call, all four members read the colour back), unlike border.mode 'cells'
+ * (per-cell SetBorders). So fill needs no per-member filtering of WHAT is written -- only the membership
+ * refusal lifted, below -- and is verified on every member accordingly (LIVE-measured, see the probe cited above). */
+const isFillOnly = op => op.want.length > 0 && op.want.every(w => w.key === 'fill') && !op.fillClear && !op.outline && !op.inside && !op.remove && !op.diagonal;
+
+/** GH #90: the SAME range-level write for font lands only where the merge keeps characters -- the anchor;
+ * every other member's value is blanked by the merge itself (LIVE-measured, R1=R2), so its font axis is
+ * UNOBSERVABLE there (not a gap, the engine's own behaviour) -- `wantsAt()` below drops the requirement for
+ * those members entirely instead of letting the unobservable read refuse the whole task. */
+const FONT_WANT_KEYS = new Set(['bold', 'font.bold', 'italic', 'font.italic', 'font.name', 'font.size', 'font.color', 'font.underline', 'font.strike', 'font.sub', 'font.sup']);
+const isFontOnly = op => op.want.length > 0 && op.want.every(w => FONT_WANT_KEYS.has(w.key)) && !op.outline && !op.inside && !op.remove && !op.diagonal;
+
+/** GH #90: fill and font are both merge-aware the same way border 'cells' is -- membership no longer refuses
+ * on its own, only a merge that crosses the requested range's boundary does (`cellRefusal`'s own check). */
+const isFillOrFontOnly = op => isFillOnly(op) || isFontOnly(op);
+
+/** X-B10 / L-15 (owner decision "A", internal tracker; LIVE-measured test/live/xlsx-xb10-merged-format-axes-probe.live.cjs,
+ * LIVE probe, 1x3 + 2x2 merge, session + reopen): align (h+v), wrap, numberFormat, fill 'none' written through
+ * SetFillColor('No Fill') and the border OUTLINE (per-edge-cell SetBorders) each land on EVERY member of a merged area,
+ * the merge and the anchor value survive. Exactly these five axes are merge-aware; nothing broader (rotation / reading
+ * order / indent / shrink, border inside / all / remove / diagonal, a mix with other keys keep refusing merge membership).
+ * ClearFormats() is NOT among them: LIVE it DISSOLVES the merge, so the X-F08 clear composite never runs on a merge
+ * (lower() writes 'No Fill' instead, see `noFillPath`). */
+const MERGE_SAFE_KEYS = new Set(['align.h', 'align.v', 'wrap', 'nf']);
+const isMergeSafePlainAxes = op => op.want.length > 0 && op.want.every(w => MERGE_SAFE_KEYS.has(w.key)) && !op.fillClear && !op.outline && !op.inside && !op.remove && !op.diagonal;
+const isMergeSafeOutline = op => !!op.outline && !op.inside && !op.remove && !op.diagonal && op.want.length === 0 && !op.fillClear;
+const isMergeSafeFillClear = op => !!op.fillClear && !op.outline && !op.inside && !op.remove && !op.diagonal;
+const isMergeSafeAxis = op => isMergeSafePlainAxes(op) || isMergeSafeOutline(op) || isMergeSafeFillClear(op);
+
+/** X-B10: is `cell` a member of a merged area (the anchor included -- its `merge` text is the whole range, never its own address). */
+const inMerge = (cell, a) => !!cell && !!cell.merge && cell.merge !== a;
+
+/** X-B10: fill 'none' over a range that touches ANY merged area is written as a plain 'No Fill' on the range (no ClearFormats
+ * composite, no restore: nothing else is touched). A range without a merge keeps the X-F08 composite, unchanged. */
+const noFillPath = (op, cellsByAddr) => op.fillClear && op.cells.some(({ a }) => inMerge(cellsByAddr && cellsByAddr[a], a));
+
+/** GH #83: for 'cells' mode, the SIDE keys (t/b/l/r) cell `a` should actually carry -- every requested side
+ * for a non-merged cell; for a merge MEMBER, only the requested sides on THAT merge's own outer perimeter
+ * (top: its own top row; bottom: its own bottom row; left/right likewise) -- an INTERIOR edge of the block is
+ * never written (LIVE-measured: it stays at its prior {s:0} state, session+reopen). `cell` is the
+ * cell's PRE-write read (its `.merge` field names the merge's own range text, e.g. 'BA201:BD201'). */
+function mergeAwareSides(op, a, cell) {
+  const want = requestedSides(op);
+  if (!cell || !cell.merge || cell.merge === a) return want;
+  const m = parseRange(cell.merge);
+  if (!m) return want;
+  const c = colNum(col(a));
+  const r = row(a);
+  return want.filter(x => (x === 't' && r === m.r1) || (x === 'b' && r === m.r2) || (x === 'l' && c === m.c1) || (x === 'r' && c === m.c2));
+}
+
+/** GH #90: is address `a` the merge's own top-left (anchor) cell -- the one member a merge keeps the value
+ * and font on. `cell.merge` (the merge's own range text, e.g. 'G2:H3') is NEVER equal to a single member's own
+ * address, anchor included -- the probe's own second finding -- so position is the only way to tell. */
+function isMergeAnchor(cell, a) {
+  const m = parseRange(cell.merge);
+  return !!m && colNum(col(a)) === m.c1 && row(a) === m.r1;
+}
+
 /** A target cell's own refusal before the per-key checks: unread format, inside a merge, a diagonal conflict (X-B05),
  * subscript/superscript:true requested on a non-text cell (X-F05 -- a silent no-op, LIVE m7-s21-probe1). */
 function cellRefusal(op, cell, a) {
   if (!cell || !('wrap' in cell) || !('nf' in cell) || !('fill' in cell)) return { reason: 'xlsx-target-format-unread', cell: a };
-  if (cell.merge && cell.merge !== a) return { reason: 'xlsx-format-in-merged-area-refused', cell: a, mergeArea: cell.merge };
+  // GH #83: 'cells' mode is merge-aware (mergeAwareSides) -- EVERY member of a merge is a legitimate target,
+  // not just the anchor (LIVE-measured, see isBorderCellsModeOnly's own comment). GH #90: fill and font are
+  // merge-aware the same way -- fill writes and verifies the whole merged area (isFillOnly), font writes and
+  // verifies the anchor only (isFontOnly, see wantsAt). X-B10: align / wrap / numberFormat / fill 'none' /
+  // border outline are merge-aware too (isMergeSafeAxis -- every member written and verified). Every other mode/key
+  // (border inside/all/remove/diagonal, rotation, reading order, indent, shrink, a mix of keys) refuses any merge
+  // membership unchanged.
+  // L-16/3: border remove is released over a merge through C5 (format-remove.cjs c5Wrap) -- a merged target must lie wholly inside the range, like every merge-aware mode
+  const mergeAware = isBorderCellsModeOnly(op) || isFillOrFontOnly(op) || isMergeSafeAxis(op) || !!op.remove;
+  if (cell.merge && cell.merge !== a && !mergeAware) return { reason: 'xlsx-format-in-merged-area-refused', cell: a, mergeArea: cell.merge };
+  // GH #83 review (and GH #90, same reasoning): a merge-aware write draws its result only from the members
+  // INSIDE the range -- a merge that crosses the range boundary would get a partial frame/fill/font (or none)
+  // while L1 still holds, so it is refused, named, before any write: the caller widens the range to the whole merge.
+  if (cell.merge && cell.merge !== a && mergeAware) {
+    const m = parseRange(cell.merge);
+    if (!m || m.c1 < op.grid.c1 || m.c2 > op.grid.c2 || m.r1 < op.grid.r1 || m.r2 > op.grid.r2) return { reason: 'xlsx-format-merge-crosses-range-refused', cell: a, mergeArea: cell.merge };
+  }
   const fx = fontEffectsRefusal(op.want, cell, a);
   if (fx) return fx;
   const conflict = diagonalConflict(op, cell);
   return conflict ? { cell: a, ...conflict } : null;
 }
 
+/** GH #86: a shared-edge border step whose observation still came back truncated above the read bound -- since GH #86
+ * (b) these modes HAVE a bounded variant, so this is a task the bounded read could not cover (e.g. mixed with a step
+ * that has none, or a window over the bound). The refusal names the bound and, for the drawing modes, the merge-aware
+ * 'cells' path. null = no hint. */
+function truncatedDetail(op) {
+  if (!op || !(op.outline || op.inside || op.remove)) return null;
+  const bound = "the workbook is over the 45000-cell read bound and this task's bounded read was not available (border modes 'outline' / 'inside' / 'all' / 'remove' need it)";
+  return op.remove ? bound : `${bound}; use border.mode 'cells' with sides ['top','bottom','left','right'] (merge-aware) for every cell edge`;
+}
+
 function gate(primary, op) {
   if (!primary || primary.format !== 'xlsx') return { ok: false, reason: 'xlsx-observation-missing' };
-  if (!primary.complete) return { ok: false, reason: primary.truncated ? 'xlsx-observation-truncated' : 'xlsx-observation-unreadable-getters', unsupported: primary.unsupported };
+  if (!primary.complete) {
+    const detail = primary.truncated ? truncatedDetail(op) : null;
+    return { ok: false, reason: primary.truncated ? 'xlsx-observation-truncated' : 'xlsx-observation-unreadable-getters', unsupported: primary.unsupported, ...(detail ? { detail } : {}) };
+  }
   const s = primary.sheets.filter(x => x.name === op.selector.sheet);
   if (s.length !== 1) return { ok: false, reason: s.length > 1 ? 'xlsx-sheet-ambiguous' : 'xlsx-sheet-not-found', available: primary.sheets.map(x => x.name) };
   const found = {};
@@ -414,13 +564,14 @@ function gate(primary, op) {
     const cell = cellAt(primary, op.selector.sheet, a);
     const refused = cellRefusal(op, cell, a);
     if (refused) return { ok: false, ...refused };
-    for (const w of wantsAt(op, a)) {
+    for (const w of wantsAt(op, a, cell)) {
       const axis = w.key.split('.')[0];
       // X-F03 (S09 LIVE m7-s09-probe1; spec): bold/name/size/color are MEASURED to
       // work on a formula cell (byte-stable through a value-length change and a reopen, same as
-      // a non-formula control) -- the refusal lifts for those four. font.italic:true stays
-      // refused (never measured on a formula cell; the asymmetry with italic:false is intentional).
-      if (w.key === 'font.italic' && cell.f !== '') return { ok: false, reason: 'xlsx-format-font-on-formula-unmeasured', cell: a };
+      // a non-formula control). font.italic:true, the last refused axis, is measured the same way
+      // (test/live/xlsx-xf03-italic-formula.live.cjs: product path, formula result 10 -> 100000,
+      // reopen SATISFIED 0/0, saved file italic + formula preserved, a plain control identical)
+      // -- no font axis is refused on a formula cell any more.
       const v = readKey(cell, w.key);
       if (v === undefined || unobservable(v)) return { ok: false, reason: `xlsx-format-${axis === 'nf' ? 'number-format' : axis}-unobservable`, cell: a, why: v === undefined ? 'not-read' : v };
     }
@@ -438,7 +589,9 @@ function gate(primary, op) {
 function windowGap(primary, op, found) {
   if (op.outline) return outlineWindowGap(primary, op);
   if (op.remove) return removeGate(primary, op, found);
-  if (op.fillClear) return fillClearGate(primary, op, found);
+  // X-B10: over a merge the clear is a plain 'No Fill' (no restore of kept axes), so the composite's kept-axis /
+  // diagonal gate does not apply; the diagonal conflict is still refused by cellRefusal.
+  if (op.fillClear) return noFillPath(op, found) ? null : fillClearGate(primary, op, found);
   return null;
 }
 
@@ -449,7 +602,9 @@ function outlineWindowGap(primary, op) {
     if (!cell || !('wrap' in cell)) return { reason: 'xlsx-target-format-unread', cell: a };
     const v = readKey(cell, 'border.t');
     if (v === undefined || unobservable(v)) return { reason: 'xlsx-format-border-unobservable', cell: a, why: v === undefined ? 'not-read' : v };
-    if (cell.merge && cell.merge !== a) return { reason: 'xlsx-format-outline-merged-ring-refused', cell: a, mergeArea: cell.merge };
+    // X-B10: a merged area INSIDE the range is a legitimate outline target (isMergeSafeOutline, LIVE-measured); a merged
+    // cell in the RING (outside the range) shares an edge whose facing side is not measured and stays refused.
+    if (cell.merge && cell.merge !== a && !(isMergeSafeOutline(op) && inGrid(op, a))) return { reason: 'xlsx-format-outline-merged-ring-refused', cell: a, mergeArea: cell.merge };
   }
   return null;
 }
@@ -480,7 +635,7 @@ function classify(primary, op) {
   const g = gate(primary, op);
   if (!g.ok) return { state: 'FAIL_CLOSED', evidence: g };
   const where = { sheet: op.selector.sheet, range: op.selector.range, keys: op.want.map(w => w.key), ...(op.outline ? { outline: op.outline.sides, inside: op.inside } : {}), ...(op.remove ? { remove: op.remove.sides } : {}) };
-  if (op.cells.every(({ a }) => wantsAt(op, a).every(w => holds(g.cells[a], w))) && (!(op.outline || op.remove) || !ringMisses(op, primary).length)) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-every-cell-every-key' } };
+  if (op.cells.every(({ a }) => wantsAt(op, a, g.cells[a]).every(w => holds(g.cells[a], w))) && (!(op.outline || op.remove) || !ringMisses(op, primary).length)) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-every-cell-every-key' } };
   const runtime = primary.runtime ? primary.runtime.identity : null;
   if (wantsAlignExtWrite(op) && !B05_BRIDGE_WRITE_RUNTIMES.includes(runtime)) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-align-ext-bridge-write-runtime-not-proven', runtime, proven: B05_BRIDGE_WRITE_RUNTIMES } };
   return { state: 'APPLY', evidence: where };
@@ -498,13 +653,37 @@ const outlineEdges = op => op.cells.map(({ a }) => [a, edgeSides(op, a).map(x =>
 /** Outline: the batched per-edge-cell SetBorders loop of the command body ('' without an outline). */
 const outlineLine = (op, colour) => (op.outline ? `for (const [a, sides] of ${JSON.stringify(outlineEdges(op))}) { const c = ws.GetRange(a); for (const x of sides) c.SetBorders(x, ${JSON.stringify(API_STYLE[op.spec.border.style])}, ${colour(op.spec.border.color)}); }` : '');
 
+/** GH #83: 'cells' mode's address -> [API side names] map -- merge-aware (mergeAwareSides): a non-merged cell
+ * keeps every requested side; a merge member keeps only the sides on ITS OWN perimeter. A member whose result
+ * is EMPTY (fully interior to a larger block) is simply omitted -- no call, nothing written there. `target.before`
+ * is the cell's pre-write read (its `.merge` names the merge, if any -- `resolve()`'s `g.cells`); missing/absent
+ * (a caller with no `target`, e.g. a unit test of `lower()` alone) falls back to the unfiltered sides for every
+ * cell, same as this family's behaviour before GH #83. */
+function cellsSidesByAddr(op, target) {
+  const out = {};
+  for (const { a } of op.cells) {
+    const sides = mergeAwareSides(op, a, target && target.before && target.before[a]).map(x => API_SIDE[x]);
+    if (sides.length) out[a] = sides;
+  }
+  return out;
+}
+
 /** One callCommand: exact-name sheet check; range-level public setters (W4a / W4a2), per-cell alignment / borders (W4c). */
-/** lower()'s per-cell border calls: the diagonal line(s), or the plain sides of a 'cells' border; none for the edge modes. */
+/** lower()'s per-cell border calls: the diagonal line(s), or the plain sides of a 'cells' border -- UNLESS this
+ * op is border-ONLY (`isBorderCellsModeOnly`), in which case the merge-aware per-cell lookup (`cellsSidesSnippet`
+ * below) handles it instead: the family ALSO allows border combined with other format keys in one step (only
+ * the PRODUCT surface restricts border to the sole key, write-tools.cjs CONSTRAINTS) -- GH #83's merge-awareness
+ * was designed and LIVE-measured for that border-only shape, so a combined request keeps the UNCHANGED, uniform
+ * per-cell write (same as before GH #83; a merge in that case is still refused by cellRefusal as before). */
 function borderLines(op, s, colour) {
   if (op.diagonal) return [diagonalLine(op, colour)];
-  if (!s.border || op.outline || op.remove) return [];
+  if (!s.border || op.outline || op.remove || isBorderCellsModeOnly(op)) return [];
   return s.border.sides.map(x => `c.SetBorders(${JSON.stringify(API_SIDE[SIDE[x]])}, ${JSON.stringify(API_STYLE[s.border.style])}, ${colour(s.border.color)});`);
 }
+
+/** GH #83: the per-cell snippet appended INSIDE the main per-cell loop for border.mode 'cells' ('' for every
+ * other mode/key) -- looks up `a` in the once-declared `CELLS_SIDES` map (see `cellsSidesLine`'s caller). */
+const cellsSidesSnippet = (op, colour) => (isBorderCellsModeOnly(op) ? `for (const x of (CELLS_SIDES[a] || [])) c.SetBorders(x, ${JSON.stringify(API_STYLE[op.spec.border.style])}, ${colour(op.spec.border.color)});` : '');
 
 /** B05: the Bridge WRITE args of one cell -- ONLY the requested keys, in bridge order (indent, then shrink); null if none. */
 function b05Args(al) {
@@ -517,10 +696,12 @@ function b05Args(al) {
 function lower(op, target) {
   const { sheet, range } = op.selector;
   const s = op.spec;
-  const colour = hex => `Api.CreateColorFromRGB(${rgbOf(hex).join(', ')})`;
+  const colour = hex => (hex === 'auto' ? 'Api.AutoColor()' : `Api.CreateColorFromRGB(${rgbOf(hex).join(', ')})`);
   const J = JSON.stringify;
   const onRange = [];
+  const noFill = noFillPath(op, target && target.before);
   if ('fill' in s && s.fill !== 'none') onRange.push(`r.SetFillColor(${colour(s.fill)});`);
+  if (noFill) onRange.push("r.SetFillColor('No Fill');");
   if ('wrap' in s) onRange.push(`r.SetWrap(${J(s.wrap)});`);
   if ('numberFormat' in s) onRange.push(`r.SetNumberFormat(${J(s.numberFormat)});`);
   const f = s.font || {};
@@ -554,6 +735,8 @@ function lower(op, target) {
   if (b05) onCell.push(`{ const w = __eoB05Write(a, ${J(b05.args)}, ${J(b05.requested)}); if (!w.ok) return __eoB05Fail(a, w); }`);
   if ('subscript' in f || 'superscript' in f) onCell.push(`{ const text = String(c.GetValue()); const cf = c.GetCharacters(1, text.length).GetFont(); ${scriptCalls(f, J)} }`);
   onCell.push(...borderLines(op, s, colour));
+  const cellsSides = isBorderCellsModeOnly(op) ? cellsSidesByAddr(op, target) : null;
+  if (cellsSides) onCell.push(cellsSidesSnippet(op, colour));
   return {
     kind: 'callCommand',
     body: `
@@ -564,14 +747,15 @@ try {
   ${b05 ? 'const g05 = __eoB05Gate(name); if (!g05.ok) return g05;' : ''}
   const r = ws.GetRange(${J(range)});
   ${onRange.join('\n  ')}
+  ${cellsSides ? `const CELLS_SIDES = ${J(cellsSides)};` : ''}
   ${onCell.length ? `for (const a of ${J(op.cells.map(c => c.a))}) { const c = ws.GetRange(a); ${onCell.join(' ')} }` : ''}
   ${outlineLine(op, colour)}
   ${removeLine(op, target)}
-  ${fillClearLine(op, target)}
+  ${noFill ? '' : fillClearLine(op, target)}
   return { ok: true };
 } catch (err) { return { ok: false, stage: 'threw', error: String(err) }; }
 `,
-    meta: Object.freeze({ family: 'format', sheet, range, cells: op.cells.map(c => c.a), spec: s, bridgeAlignExtWrite: wantsAlignExtWrite(op), ...(op.outline ? { edges: outlineEdges(op) } : {}), ...removeMeta(op, target), ...fillClearMeta(op, target) }),
+    meta: Object.freeze({ family: 'format', sheet, range, cells: op.cells.map(c => c.a), spec: s, bridgeAlignExtWrite: wantsAlignExtWrite(op), ...(op.outline ? { edges: outlineEdges(op) } : {}), ...(cellsSides ? { cellsSides } : {}), ...removeMeta(op, target), ...(noFill ? { fillClearCells: op.cells.map(c => c.a), fillClearMode: 'no-fill' } : fillClearMeta(op, target)) }),
   };
 }
 
@@ -607,9 +791,17 @@ const tolerated = (k, n, requested) => SHADOW_TOLERANCE.some(([key, other, val])
  * may change, but only to true.
  */
 function driftOf(op, a, was, now, requested) {
-  const b = styleKeysOf(was);
-  const n = styleKeysOf(now);
-  return STYLE_KEYS.filter(k => b[k] !== n[k] && !requested.has(k) && !tolerated(k, n, requested) && !(k.startsWith('border.') && sideMayChange(op, a, k.slice(7))));
+  const blackIsNull = !!(op.remove || op.fillClear);
+  const b = styleKeysOf(was, blackIsNull);
+  const n = styleKeysOf(now, blackIsNull);
+  // GH #90: a non-anchor merge member of a font-only op carries no requirement (wantsAt returns []), but the
+  // range-level font write still reaches its underlying storage the same way it reaches the anchor's -- only
+  // the READ side is unobservable there (blanked value). A font-axis key changing on such a member (inside
+  // op's OWN requested grid, never a ring cell of an unrelated merge elsewhere) is this, not a leak.
+  const nonAnchorFontMember = isFontOnly(op) && inGrid(op, a) && now && now.merge && now.merge !== a && !isMergeAnchor(now, a);
+  return STYLE_KEYS.filter(k => b[k] !== n[k] && !requested.has(k) && !tolerated(k, n, requested)
+    && !(k.startsWith('border.') && sideMayChange(op, a, k.slice(7), now))
+    && !(nonAnchorFontMember && FONT_WANT_KEYS.has(k)));
 }
 
 /** L1: every requested key holds on every target cell; every other style key and the content unchanged. */
@@ -619,21 +811,25 @@ function verifyPrimitive(op, before, after) {
   const wrong = [];
   const drift = [];
   const content = [];
+  const mergeChanged = [];
   for (const { a: at } of op.cells) {
     const now = cellAt(a, op.selector.sheet, at);
-    const requested = new Set(wantsAt(op, at).map(w => w.key));
-    const miss = expectationsAt(op, at).filter(w => !holds(now, w)).map(w => w.key);
+    const requested = new Set(wantsAt(op, at, now).map(w => w.key));
+    const miss = expectationsAt(op, at, now).filter(w => !holds(now, w)).map(w => w.key);
     if (miss.length) wrong.push({ cell: at, keys: miss });
     const was = cellAt(b, op.selector.sheet, at);
     if (!was || !now) continue;
     const d = driftOf(op, at, was, now, requested);
     if (d.length) drift.push({ cell: at, keys: d });
     if (was.f !== now.f || (was.f === '' && JSON.stringify(was.v) !== JSON.stringify(now.v))) content.push(at);
+    // X-B10: a format write never changes a merge. LIVE, ClearFormats() dissolved one (members read as separate cells).
+    if (inMerge(was, at) && now.merge !== was.merge) mergeChanged.push({ cell: at, was: was.merge, now: now.merge });
   }
-  return { ok: wrong.length === 0 && drift.length === 0 && content.length === 0, evidence: { sheet: op.selector.sheet, range: op.selector.range, wrong: wrong.slice(0, 20), otherKeysChanged: drift.slice(0, 20), contentChanged: content.slice(0, 20), proof: 'fresh-live-per-cell-per-key' } };
+  return { ok: wrong.length === 0 && drift.length === 0 && content.length === 0 && mergeChanged.length === 0, evidence: { sheet: op.selector.sheet, range: op.selector.range, wrong: wrong.slice(0, 20), otherKeysChanged: drift.slice(0, 20), contentChanged: content.slice(0, 20), mergeChanged: mergeChanged.slice(0, 20), proof: 'fresh-live-per-cell-per-key' } };
 }
 
-/** L3: every other cell's content (all sheets) and, on the target sheet, every other read cell's style. */
+/** L3: every other cell's content (all sheets) and, on the target sheet, every other read cell's style -- and its MERGE (L-16/3 (a): a format write never changes a merge, and L1 only
+ * compares it on op.cells; a merge dissolving on a ring / neighbour cell was invisible to both layers). Only a definite change counts: both reads carry a merge text and they differ. */
 function verifyPreservation(op, before, after) {
   const rest = cells.verifyPreservation(op, before, after);
   if (!rest.ok && rest.evidence && rest.evidence.reason) return rest;
@@ -642,8 +838,13 @@ function verifyPreservation(op, before, after) {
   const target = new Set(op.cells.map(c => key(op.selector.sheet, c.a)));
   const prefix = key(op.selector.sheet, '');
   const changed = [];
+  const mergeChanged = [];
   let compared = 0;
   for (const [k, was] of Object.entries(b.cells)) {
+    if (!target.has(k) && k.startsWith(prefix) && typeof was.merge === 'string') {
+      const nowMerge = a.cells[k] && a.cells[k].merge;
+      if (typeof nowMerge === 'string' && nowMerge !== was.merge) mergeChanged.push({ cell: k.slice(prefix.length), was: was.merge, now: nowMerge });
+    }
     if (target.has(k) || !k.startsWith(prefix) || !('wrap' in was)) continue;
     const now = a.cells[k];
     const at = k.slice(prefix.length);
@@ -654,12 +855,26 @@ function verifyPreservation(op, before, after) {
     const mismatch = sharedEdgeMismatch(op, at, now);
     if (mismatch) changed.push(mismatch);
   }
-  return { ok: rest.ok && changed.length === 0, evidence: { ...rest.evidence, styleCompared: compared, styleChanged: changed.slice(0, 20), styleChangedCount: changed.length } };
+  return { ok: rest.ok && changed.length === 0 && mergeChanged.length === 0, evidence: { ...rest.evidence, styleCompared: compared, styleChanged: changed.slice(0, 20), styleChangedCount: changed.length, mergeChanged: mergeChanged.slice(0, 20), mergeChangedCount: mergeChanged.length, ...scopeOf(b) } };
+}
+
+/**
+ * X-N01b: what this L3 proves, machine-readable. FULL: the target sheet's every read cell's style (the sheet-wide
+ * style read). BOUNDED (the reduced observation above the read bound, owner decision A): the style of the target and
+ * its ring only; values and number formats of the rest from the digest. A BOUNDED pass is never a full style proof.
+ */
+function scopeOf(b) {
+  if (!(b && b.bounded === true)) return { preservationScope: 'FULL' };
+  return {
+    preservationScope: 'BOUNDED',
+    proven: ['target-value', 'target-requested-number-format', 'target-other-style', 'ring-style-and-value', 'sheet-values-outside-windows-digest', 'sheet-number-formats-outside-windows-digest'],
+    notProven: ['style-outside-target-and-ring'],
+  };
 }
 
 function wholeTaskChecks(op, finalObservation) {
   const p = finalObservation && finalObservation.primary;
-  const wrong = op.cells.filter(({ a }) => !wantsAt(op, a).every(w => holds(cellAt(p, op.selector.sheet, a), w))).map(({ a }) => a);
+  const wrong = op.cells.filter(({ a }) => { const now = cellAt(p, op.selector.sheet, a); return !wantsAt(op, a, now).every(w => holds(now, w)); }).map(({ a }) => a);
   const ring = (op.outline || op.remove) ? ringMisses(op, p) : [];
   const what = [...op.want.map(w => w.key), ...(op.outline ? [`the outline ${op.outline.sides.join('')}${op.inside ? ' + inside' : ''} with its shared ring edges`] : []), ...(op.remove ? [`the removed ${op.remove.sides.join('')} gone on both cells of every shared edge`] : [])].join(', ');
   return [{ name: `every cell of ${op.selector.sheet}!${op.selector.range} holds ${what}`, ok: wrong.length === 0 && ring.length === 0, detail: wrong.length || ring.length ? { wrong: wrong.slice(0, 20), ring: ring.slice(0, 20) } : null }];
@@ -669,4 +884,26 @@ function wholeTaskChecks(op, finalObservation) {
 const windowsOf = op => [{ sheet: op.selector.sheet, range: op.ring, style: true }];
 const liveExtras = op => ({ styleSheets: [op.selector.sheet] });
 
-module.exports = { INTENTS, B05_BRIDGE_WRITE_RUNTIMES, b05Args, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras, expectationsOf, holds, H, V, STYLE, MAX_CELLS };
+/**
+ * X-N01b (owner decision A) + X-L13/8 (the (b)-group BOUNDED classification, owner decision --
+ * see docs/X-L13-LARGE-BOOK-MATRIX-20261013.md): a step whose ONLY cell-level effect is one or
+ * more PLAIN style fields (any `want` keys, including number format) may be observed in the BOUNDED
+ * tier when the full observation does not fit the documented read bound. The extras that replace
+ * the sheet-wide style read: the sheet's number formats in the digest (formatSheets). The target +
+ * ring window stays read WITH style -- tier-independent, so the target + its ring remain fully
+ * proven either way. Below the bound the request above is used unchanged (full L3).
+ *
+ * GH #86 (b) (owner GO, "igen"): the shared-edge border modes (`outline` / `inside` /
+ * `all` / `remove`), kept out by X-L13/8 ("not proven unsafe", not measured LIVE), are ELIGIBLE now. Every cell
+ * their checks reach -- the target, and the ring cell across each shared edge that `sharedEdgeMismatch()` /
+ * `ringMisses()` / the outline+remove window gates read -- is inside the target + one-cell ring window, which the
+ * bounded request still reads WITH style (`windowsOf`, tier-independent). What BOUNDED gives up is the same as for
+ * every other format key: the style of cells outside the target and ring (scopeOf: notProven). An outline-only op
+ * carries no `want` key of its own (its expectation lives on op.outline), hence the explicit `op.outline` term.
+ *
+ * null = this step has no bounded variant.
+ */
+const boundedEligible = op => op.want.length > 0 || !!op.outline;
+const boundedExtras = op => (boundedEligible(op) ? { formatSheets: [op.selector.sheet] } : null);
+
+module.exports = { INTENTS, B05_BRIDGE_WRITE_RUNTIMES, b05Args, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras, boundedExtras, expectationsOf, holds, H, V, STYLE, MAX_CELLS };

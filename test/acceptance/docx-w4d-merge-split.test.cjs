@@ -153,23 +153,37 @@ test('MULTI_TABLE_TARGETING: the same texts in two tables -- the anchor picks on
   assert.equal(driver.calls.dispatch, 0);
 });
 
+test('GH #291 T-07: a region that wholly contains a vertical merge (rows 0-1 x cols 0-1, and rows 0-2 x col 0) -> APPLIED, one owner of the region span, the paragraphs in row-major owner order; retry SATISFIED 0/0', async () => {
+  const vInside = () => { const t = grid('V', 3); t.rows[0][0] = owner(['V r0c0', 'V r1c0'], 1, 2); t.rows[1][0] = cont(1); return t; };
+  for (const [end, merged, rows, cols] of [['V r1c1', 'V r0c0 V r1c0 V r0c1 V r1c1', 2, 2], ['V r2c0', 'V r0c0 V r1c0 V r2c0', 3, 1]]) {
+    const s = store([vInside()]);
+    await firstAndSecond(s, task(mg('V r0c0 V r1c0', end, merged, rows, cols, 'V r2c2')));
+    const owner = s.durableDoc.tables[0].rows[0][0];
+    assert.deepEqual([owner.span || 1, owner.rowspan || 1, owner.paras.map(p => p.text).join(' ')], [cols, rows, merged], end);
+  }
+});
+
 test('negatives before dispatch -> FAIL_CLOSED or plan-failed, 0 dispatch, nothing written', async () => {
   const withColspan = () => { const t = grid('C', 3); t.rows[0] = [owner(['C r0c0', 'C r0c1'], 2), cell('C r0c2')]; return t; };
-  const vInside = () => { const t = grid('V', 3); t.rows[0][0] = owner(['V r0c0', 'V r1c0'], 1, 2); t.rows[1][0] = cont(1); return t; };
   const dup = () => { const t = grid('A', 3); t.rows[2][1] = cell('A r1c0'); return t; };
   const failed = [
     // corners r0c2 .. r1c1: the box (rows 0-1, cols 1-2) cuts through the colspan cell (cols 0-1) of row 0
     [task(mg('C r0c2', 'C r1c1', 'C r0c2 C r1c1', 2, 2, 'C r2c2')), [withColspan()], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:merge-region-partially-covers-a-merged-cell'],
-    [task(mg('V r0c0 V r1c0', 'V r1c1', 'V r0c0 V r1c0 V r0c1 V r1c1', 2, 2, 'V r2c2')), [vInside()], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:merge-region-contains-a-vertical-merge'],
+    // GH #291 T-07: a region WHOLLY containing a vertical merge is no longer a failure (positive test below)
     [task(mg('A r0c0', 'A r1c1', 'A r0c0 A r0c1 A r1c0 A r1c1', 2, 2, 'A r0c1')), [grid('A', 3)], 'table-anchor-in-merge-region'],
     [task(mg('A r1c0', 'A r1c1', 'A r1c0 A r1c1 WRONG', 1, 2, 'A r2c2')), [grid('A', 3)], 'merge-terminal-contract-mismatch'],
     [task(mg('A r1c0', 'A r1c1', 'A r1c0 A r1c1', 2, 2, 'A r2c2')), [grid('A', 3)], 'merge-terminal-contract-mismatch'],
     [task(mg('A r1c0', 'A r1c1', 'A r1c0 A r1c1', 1, 2, 'A r2c2')), [dup()], 'merge-cell-ambiguous'],
     [task(mg('A r1c0', 'nowhere', 'A r1c0 nowhere', 1, 2, 'A r2c2')), [grid('A', 3)], 'merge-terminal-unprovable'],
     [task(sp('C r0c0 C r0c1', 1, 3, 'C r2c2')), [withColspan()], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-shape-is-not-the-cell-span'],
-    [task(sp('A r1c1', 1, 2, 'A r0c0')), [grid('A', 3)], 'split-target-not-merged'],
+    // W05-3: 'split-target-not-merged' is GONE -- a never-merged (1x1) cell now has its
+    // own APPLY path (docx-w4d-merge-split.test.cjs's own new positive tests, below). What is
+    // STILL refused for a never-merged target is an UNMEASURED geometry (same measured sets as
+    // the restore case): 1x7 columns here (1-6 measured, GH #291 S2x).
+    [task(sp('A r1c1', 1, 7, 'A r0c0')), [grid('A', 3)], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-boundary-model-not-measured-for-7-columns'],
     [task(sp('nowhere', 1, 2, 'A r0c0')), [grid('A', 3)], 'split-target-not-found'],
-    [task(mg('A r1c0', 'A r1c1', 'A r1c0 A r1c1', 1, 2, 'A r2c2')), [{ rows: [...grid('A', 3).rows.slice(0, 2), [cell('A r2c0'), cell('A r2c2')]] }], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:uneven-logical-width'],
+    // GH #291 H5m: a row short WITHOUT a marker is an implicit trailing gap now -- a region reaching into the short row's gap is not one rectangle of cells
+    [task(mg('A r0c1', 'A r1c2', 'A r0c1 A r1c1 A r1c2', 2, 2, 'A r2c2')), [{ rows: [[cell('A r0c0'), cell('A r0c1')], ...grid('A', 3).rows.slice(1)] }], 'FAIL_CLOSED_UNSUPPORTED_SHAPE:merge-region-covers-a-grid-gap'],
   ];
   for (const [t, tables, want] of failed) {
     const s = store(tables);
@@ -252,6 +266,211 @@ test('lossless lowering (MERGE_ARGS_PRESERVED / SPLIT_ARGS_PRESERVED); the comma
   await driver.dispatch(null, low);
   const now = normalizeInventory((await driver.readLive()).payload);
   assert.ok(now.document.tables[0].rows[1].map(c => c.text).includes('A r0c0'), 'the merge did not happen on the stale coordinates');
+});
+
+test('W05-3: split on a NEVER-MERGED cell grows the grid -- 1x2, 1x3, 2x1, 2x2 (measured on the fake transport, matching W05-1a/1b); SECOND 0/0', async () => {
+  // MEASURED shapes (live-reproduced via a throwaway diagnostic against this same fake driver,
+  // not guessed): a column split shifts same-row cells to the right and widens the untouched
+  // rows' aligned cell by (cols-1); a row split inserts new row(s) with vContinue placeholders
+  // for same-row neighbours (rowspan grown to cover them) and a fresh, independent blank cell at
+  // the target's own column in each inserted row.
+  const cases = [
+    ['1x2', 1, 2,
+      [['A r0c0', 'A r0c1', 'A r0c2'], ['A r1c0', 'A r1c1', '', 'A r1c2'], ['A r2c0', 'A r2c1', 'A r2c2']],
+      [['1x1', '1x2', '1x1'], ['1x1', '1x1', '1x1', '1x1'], ['1x1', '1x2', '1x1']]],
+    ['1x3', 1, 3,
+      [['A r0c0', 'A r0c1', 'A r0c2'], ['A r1c0', 'A r1c1', '', '', 'A r1c2'], ['A r2c0', 'A r2c1', 'A r2c2']],
+      [['1x1', '1x3', '1x1'], ['1x1', '1x1', '1x1', '1x1', '1x1'], ['1x1', '1x3', '1x1']]],
+    ['2x1', 2, 1,
+      [['A r0c0', 'A r0c1', 'A r0c2'], ['A r1c0', 'A r1c1', 'A r1c2'], ['^', '', '^'], ['A r2c0', 'A r2c1', 'A r2c2']],
+      [['1x1', '1x1', '1x1'], ['2x1', '1x1', '2x1'], ['1x1', '1x1', '1x1'], ['1x1', '1x1', '1x1']]],
+    ['2x2', 2, 2,
+      [['A r0c0', 'A r0c1', 'A r0c2'], ['A r1c0', 'A r1c1', '', 'A r1c2'], ['^', '', '', '^'], ['A r2c0', 'A r2c1', 'A r2c2']],
+      [['1x1', '1x2', '1x1'], ['2x1', '1x1', '1x1', '2x1'], ['1x1', '1x1', '1x1', '1x1'], ['1x1', '1x2', '1x1']]],
+  ];
+  for (const [label, rows, cols, wantTexts, wantSpans] of cases) {
+    const s = store([grid('A', 3)]);
+    const { first } = await firstAndSecond(s, task(sp('A r1c1', rows, cols, 'A r0c0')));
+    assert.deepEqual(texts(s), wantTexts, label);
+    assert.deepEqual(spans(s), wantSpans, label);
+    assert.equal(first.x.primitiveVerification[0].evidence.evidence.wasMerged, false, label);
+    assert.equal(first.x.preservationVerification[0].evidence.evidence.wasMerged, false, label);
+  }
+});
+
+test('GH #291 S2 (LIVE, gh291-s-split-probe-20261022.json): 4 columns and 3 rows -- a restore of a 1x4 / 3x1 merged cell and a split of a plain cell APPLY; SECOND 0/0', async () => {
+  const m14 = () => { const t = grid('M', 2, 4); t.rows[0] = [owner(['M r0c0', 'M r0c1', 'M r0c2', 'M r0c3'], 4)]; return t; };
+  const m31 = () => { const t = grid('N', 4, 2); t.rows[0][0] = owner(['N r0c0', 'N r1c0', 'N r2c0'], 1, 3); t.rows[1][0] = cont(1); t.rows[2][0] = cont(1); return t; };
+  const r14 = store([m14()]);
+  await firstAndSecond(r14, task(sp('M r0c0 M r0c1 M r0c2 M r0c3', 1, 4, 'M r1c3')));
+  assert.deepEqual(texts(r14)[0], ['M r0c0/M r0c1/M r0c2/M r0c3', '', '', ''], '1x4 restore: the content top-left, the grid unchanged');
+  const r31 = store([m31()]);
+  await firstAndSecond(r31, task(sp('N r0c0 N r1c0 N r2c0', 3, 1, 'N r3c1')));
+  assert.deepEqual(texts(r31).map(r => r[0]), ['N r0c0/N r1c0/N r2c0', '', '', 'N r3c0'], '3x1 restore');
+  assert.deepEqual(spans(r31).map(r => r[0]), ['1x1', '1x1', '1x1', '1x1']);
+  const n14 = store([grid('A', 3)]);
+  await firstAndSecond(n14, task(sp('A r1c1', 1, 4, 'A r0c0')));
+  assert.deepEqual(texts(n14)[1], ['A r1c0', 'A r1c1', '', '', '', 'A r1c2'], '1x4 split of a plain cell: the grid grows');
+  assert.deepEqual(spans(n14)[0], ['1x1', '1x4', '1x1'], 'the other rows\' cell of that column spans the new columns');
+  const n31 = store([grid('A', 3)]);
+  await firstAndSecond(n31, task(sp('A r1c1', 3, 1, 'A r0c0')));
+  assert.deepEqual(texts(n31).map(r => r[1]), ['A r0c1', 'A r1c1', '', '', 'A r2c1'], '3x1 split of a plain cell: two new rows');
+  assert.equal(spans(n31)[1][0], '3x1', 'the same-row neighbours span the new rows');
+});
+
+test('GH #291 S3 (LIVE, gh291-s-split-probe-20261022.json): a 2x2 merged cell split 1x2 / 2x1 gives two equal pieces (2x1 / 1x2), the content top-left, the grid unchanged; SECOND 0/0; a 1x3 cell -> 1x2 (a new grid line) stays refused', async () => {
+  const m22 = tag => { const t = grid(tag, 3, 3); t.rows[0] = [owner([`${tag} r0c0`, `${tag} r0c1`, `${tag} r1c0`, `${tag} r1c1`], 2, 2), cell(`${tag} r0c2`)]; t.rows[1] = [cont(2), cell(`${tag} r1c2`)]; return t; };
+  const target = tag => `${tag} r0c0 ${tag} r0c1 ${tag} r1c0 ${tag} r1c1`;
+  const a = store([m22('P')]);
+  const { first, second } = await firstAndSecond(a, task(sp(target('P'), 1, 2, 'P r2c2')));
+  assert.equal(status(first.x), OPERATION_STATUS.APPLIED);
+  assert.equal(status(second.x), OPERATION_STATUS.SATISFIED, 'the retry finds the measured piece block');
+  assert.deepEqual(texts(a).slice(0, 2), [['P r0c0/P r0c1/P r1c0/P r1c1', '', 'P r0c2'], ['^', '^', 'P r1c2']]);
+  assert.deepEqual(spans(a).slice(0, 2), [['2x1', '2x1', '1x1'], ['1x1', '1x1', '1x1']]);
+  const b = store([m22('Q')]);
+  await firstAndSecond(b, task(sp(target('Q'), 2, 1, 'Q r2c2')));
+  assert.deepEqual(texts(b).slice(0, 2), [['Q r0c0/Q r0c1/Q r1c0/Q r1c1', 'Q r0c2'], ['', 'Q r1c2']]);
+  assert.deepEqual(spans(b).slice(0, 2), [['1x2', '1x1'], ['1x2', '1x1']]);
+  // not measured / measured unsafe: a 1x3 cell -> 1x2 (a half cut off the grid lines), a 2x2 cell -> 1x4
+  for (const [tables, st] of [
+    [[(() => { const t = grid('R', 2, 3); t.rows[0] = [owner(['R r0c0', 'R r0c1', 'R r0c2'], 3)]; return t; })()], sp('R r0c0 R r0c1 R r0c2', 1, 2, 'R r1c2')],
+    [[m22('S')], sp(target('S'), 1, 4, 'S r2c2')],
+  ]) {
+    const s = store(tables);
+    const before = JSON.stringify(texts(s));
+    const { x, driver } = await run(s, task(st));
+    assert.equal(reason(x), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-shape-is-not-the-cell-span');
+    assert.equal(driver.calls.dispatch, 0);
+    assert.equal(JSON.stringify(texts(s)), before);
+  }
+});
+
+test('GH #291 S2x (LIVE, gh291-split-remaining-probe-20261023.json): 5 / 6 columns and 4 rows -- 1x5 / 1x6 / 2x5 / 4x1 restores and plain-cell splits APPLY; SECOND 0/0', async () => {
+  const wide = (tag, rs, cs) => { const t = grid(tag, rs + 1, 6); const texts = []; for (let r = 0; r < rs; r += 1) for (let c = 0; c < cs; c += 1) texts.push(`${tag} r${r}c${c}`);
+    t.rows[0] = [owner(texts, cs, rs), ...t.rows[0].slice(cs)]; for (let r = 1; r < rs; r += 1) t.rows[r] = [cont(cs), ...t.rows[r].slice(cs)]; return t; };
+  const joined = (tag, rs, cs) => { const x = []; for (let r = 0; r < rs; r += 1) for (let c = 0; c < cs; c += 1) x.push(`${tag} r${r}c${c}`); return x; };
+  for (const [tag, rs, cs] of [['X5', 1, 5], ['X6', 1, 6], ['XF', 2, 5], ['XB', 4, 1]]) {
+    const s = store([wide(tag, rs, cs)]);
+    await firstAndSecond(s, task(sp(joined(tag, rs, cs).join(' '), rs, cs, `${tag} r${rs}c5`)));
+    assert.equal(texts(s)[0][0], joined(tag, rs, cs).join('/'), `${tag}: the content top-left`);
+    assert.ok(spans(s).slice(0, rs).every(r => r.slice(0, cs).every(x => x === '1x1')), `${tag}: every piece 1x1 on the existing grid`);
+  }
+  const n15 = store([grid('A', 3)]);
+  await firstAndSecond(n15, task(sp('A r1c1', 1, 5, 'A r0c0')));
+  assert.deepEqual(spans(n15)[0], ['1x1', '1x5', '1x1'], '1x5 split of a plain cell: the grid grows the W05 way');
+  const n41 = store([grid('A', 3)]);
+  await firstAndSecond(n41, task(sp('A r1c1', 4, 1, 'A r0c0')));
+  assert.equal(spans(n41)[1][0], '4x1', '4x1 split of a plain cell: the same-row neighbours span the new rows');
+});
+
+test('GH #291 S3x (LIVE, gh291-split-remaining-probe-20261023.json): 2x3 -> 1x3 / 2x1, 3x2 -> 3x1 / 1x2 give equal pieces on the existing grid; SECOND 0/0; a column cut off the grid lines and a 1x4 -> 1x2 (each piece the request\'s own shape: the retry is ambiguous) are refused', async () => {
+  const block = (tag, rs, cs) => { const t = grid(tag, rs + 1, 4); const texts = []; for (let r = 0; r < rs; r += 1) for (let c = 0; c < cs; c += 1) texts.push(`${tag} r${r}c${c}`);
+    t.rows[0] = [owner(texts, cs, rs), ...t.rows[0].slice(cs)]; for (let r = 1; r < rs; r += 1) t.rows[r] = [cont(cs), ...t.rows[r].slice(cs)]; return { t, text: texts.join(' ') }; };
+  for (const [tag, rs, cs, r, c, piece] of [['PA', 2, 3, 1, 3, '2x1'], ['PB', 2, 3, 2, 1, '1x3'], ['PC', 3, 2, 3, 1, '1x2'], ['PD', 3, 2, 1, 2, '3x1']]) {
+    const { t, text } = block(tag, rs, cs);
+    const s = store([t]);
+    const { second } = await firstAndSecond(s, task(sp(text, r, c, `${tag} r${rs}c3`)));
+    assert.equal(status(second.x), OPERATION_STATUS.SATISFIED, `${tag}: the retry finds the measured piece block`);
+    assert.equal(spans(s)[0][0], piece, `${tag}: the top-left piece`);
+    assert.equal(texts(s)[0][0].split('/').length, rs * cs, `${tag}: all content in the top-left piece`);
+  }
+  // a 2x2 cell -> 1x2 (the released S3a) on UNEQUAL columns: the half cut is not the existing line -> refused, 0 dispatch (release 27)
+  const u = block('PU', 2, 2);
+  u.t.gridCalc = [30, 10, 10, 10];
+  for (const [tables, st, want] of [
+    [[u.t], sp(u.text, 1, 2, 'PU r2c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-would-cut-a-new-grid-line'],
+    [[block('PE', 1, 4).t], sp(block('PE', 1, 4).text, 1, 2, 'PE r1c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-shape-is-not-the-cell-span'],
+  ]) {
+    const s = store(tables);
+    const { x, driver } = await run(s, task(st));
+    assert.equal(reason(x), want, want);
+    assert.equal(driver.calls.dispatch, 0, want);
+  }
+});
+
+test('release 27 L1: a partial split whose pieces come out the wrong size (1x1) is not verified (the piece check)', async () => {
+  const t = grid('PW', 3, 4); t.rows[0] = [owner(['PW r0c0', 'PW r0c1', 'PW r1c0', 'PW r1c1'], 2, 2), ...t.rows[0].slice(2)]; t.rows[1] = [cont(2), ...t.rows[1].slice(2)];
+  const { x } = await run(store([t]), task(sp('PW r0c0 PW r0c1 PW r1c0 PW r1c1', 1, 2, 'PW r2c3')), { fault: 'split-partial-1x1-pieces' });
+  assert.notEqual(status(x), OPERATION_STATUS.APPLIED);
+  assert.equal(x.primitiveVerification[0].verdict, 'FAIL');
+});
+
+test('GH #291 H5m (LIVE, gh291-gap-remaining-probe-20261023.json): merge on a table with a short row (implicit or gridAfter gap) APPLIES -- inside the short row, in the full row over the missing column, vertically at the short row\'s last real column; SECOND 0/0; a region into the gap and the split of a merged cell on a gap table are refused', async () => {
+  const gapCell = () => ({ gap: true, span: 1, paras: [] });
+  const u1 = tag => ({ rows: [[cell(`${tag} r0c0`), cell(`${tag} r0c1`), cell(`${tag} r0c2`)], [cell(`${tag} r1c0`), cell(`${tag} r1c1`), cell(`${tag} r1c2`), cell(`${tag} r1c3`)], [cell(`${tag} r2c0`), cell(`${tag} r2c1`), cell(`${tag} r2c2`), cell(`${tag} r2c3`)]] });
+  const g1 = tag => { const t = u1(tag); t.rows[0].push(gapCell()); return t; };
+  for (const [tag, mk, st, row] of [
+    ['UM', u1, (t) => mg(`${t} r0c0`, `${t} r0c1`, `${t} r0c0 ${t} r0c1`, 1, 2, `${t} r2c3`), 0],
+    ['UN', u1, (t) => mg(`${t} r1c2`, `${t} r1c3`, `${t} r1c2 ${t} r1c3`, 1, 2, `${t} r2c3`), 1],
+    ['UO', u1, (t) => mg(`${t} r0c2`, `${t} r1c2`, `${t} r0c2 ${t} r1c2`, 2, 1, `${t} r2c3`), 0],
+    ['GM', g1, (t) => mg(`${t} r0c0`, `${t} r0c1`, `${t} r0c0 ${t} r0c1`, 1, 2, `${t} r2c3`), 0],
+    ['GN', g1, (t) => mg(`${t} r1c2`, `${t} r1c3`, `${t} r1c2 ${t} r1c3`, 1, 2, `${t} r2c3`), 1],
+    ['GO', g1, (t) => mg(`${t} r0c2`, `${t} r1c2`, `${t} r0c2 ${t} r1c2`, 2, 1, `${t} r2c3`), 0],
+  ]) {
+    const s = store([mk(tag)]);
+    await firstAndSecond(s, task(st(tag)));
+    assert.ok(texts(s)[row].some(x => x.includes('/')), `${tag}: one merged owner holds both paragraphs`);
+  }
+  const lead = tag => ({ rows: [[gapCell(), cell(`${tag} r0c1`), cell(`${tag} r0c2`), cell(`${tag} r0c3`)], [cell(`${tag} r1c0`), cell(`${tag} r1c1`), cell(`${tag} r1c2`), cell(`${tag} r1c3`)]] });
+  // run r2 (gh291-gap-remaining-probe-r2-20261023.json): a leading gap merges the same way; a NEW split (a 1x1 cell) on any short-row
+  // table grows the grid the W05 way, aligned in every row
+  for (const [tag, mk, st] of [
+    ['LM', lead, t => mg(`${t} r1c1`, `${t} r1c2`, `${t} r1c1 ${t} r1c2`, 1, 2, `${t} r1c3`)],
+    ['LN', lead, t => mg(`${t} r0c1`, `${t} r1c1`, `${t} r0c1 ${t} r1c1`, 2, 1, `${t} r1c3`)],
+    ['SU', u1, t => sp(`${t} r1c1`, 1, 2, `${t} r2c3`)],
+    ['SG', g1, t => sp(`${t} r1c1`, 1, 2, `${t} r2c3`)],
+    ['SL', lead, t => sp(`${t} r1c1`, 1, 2, `${t} r1c3`)],
+  ]) {
+    const s = store([mk(tag)]);
+    await firstAndSecond(s, task(st(tag)));
+  }
+  const mergedOnGap = (() => { const t = g1('SM'); t.rows[1] = [cell('SM r1c0'), owner(['SM r1c1', 'SM r1c2'], 2), cell('SM r1c3')]; return t; })();
+  for (const [tables, st, want] of [
+    [[g1('GX')], mg('GX r0c2', 'GX r1c3', 'GX r0c2 GX r1c2 GX r1c3', 2, 2, 'GX r2c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:merge-region-covers-a-grid-gap'],
+    [[mergedOnGap], sp('SM r1c1 SM r1c2', 1, 2, 'SM r2c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-of-a-merged-cell-on-a-table-with-a-grid-gap'],
+  ]) {
+    const s = store(tables);
+    const before = JSON.stringify(texts(s));
+    const { x, driver } = await run(s, task(st));
+    assert.equal(reason(x), want, want);
+    assert.equal(driver.calls.dispatch, 0, want);
+    assert.equal(JSON.stringify(texts(s)), before);
+  }
+});
+
+test('W05-3: a NEVER-MERGED target rejects unmeasured geometries -- 5 rows and 7 columns are not generalized (GH #291 S2x measured 4 rows / 6 columns)', async () => {
+  for (const [rows, cols, want] of [
+    [5, 1, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-boundary-model-not-measured-for-5-rows'],
+    [1, 7, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-boundary-model-not-measured-for-7-columns'],
+  ]) {
+    const s = store([grid('A', 3)]);
+    const before = JSON.stringify(texts(s));
+    const { x, driver } = await run(s, task(sp('A r1c1', rows, cols, 'A r0c0')));
+    assert.equal(status(x), OPERATION_STATUS.FAILED, want);
+    assert.equal(reason(x), want);
+    assert.equal(driver.calls.dispatch, 0, want);
+    assert.equal(JSON.stringify(texts(s)), before, `${want}: nothing written`);
+  }
+});
+
+test('W05-3 L3 fault: a new-split reformat is caught (the text-only, position-independent "outside" check still catches corruption)', async () => {
+  const { x } = await run(store([grid('A', 3)]), task(sp('A r1c1', 1, 2, 'A r0c0')), { fault: 'split-reformat' });
+  assert.equal(x.primitiveVerification[0].verdict, 'PASS', 'the structure itself is right');
+  assert.equal(x.preservationVerification[0].verdict, 'FAIL');
+  assert.equal(x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.INTEGRAL_PRESERVATION_NOT_PROVEN);
+});
+
+// W05-5 (#ref, a maintainer's dispatch): FIXED -- the new-split L3 check is now POSITION-RESPECTING
+// (verifyPreservation maps each outside owner to its MEASURED expected after-position/span/
+// rowspan, point 0/6 of the design doc), replacing W05-3/W05-4's text-only multiset. This test
+// WAS the W05-4 canary documenting the weakness (the swap went undetected, L3 PASSed); it now
+// asserts the OPPOSITE, permanently, as a regression guard: if this ever flips back to PASS, the
+// position-respecting check regressed to a text-only one, which must not happen silently.
+test('W05-5: a new-split\'s position-respecting L3 catches two outside cells swapping text', async () => {
+  const { x } = await run(store([grid('A', 3)]), task(sp('A r1c1', 1, 2, 'A r0c0')), { fault: 'outside-swap' });
+  assert.equal(x.primitiveVerification[0].verdict, 'PASS', 'the structure itself is right');
+  assert.equal(x.preservationVerification[0].verdict, 'FAIL', 'the outside text-swap is now caught');
+  assert.equal(x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.INTEGRAL_PRESERVATION_NOT_PROVEN);
 });
 
 test('a merge whose L2 names a successor: annotateTask pairs the merge with the later split of its result only (same anchor, same text)', () => {

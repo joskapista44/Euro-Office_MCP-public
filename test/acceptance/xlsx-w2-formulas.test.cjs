@@ -108,6 +108,25 @@ test('refused BEFORE dispatch: a DIFFERENT formula over an existing one', async 
   assert.equal(same.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED, 'the same formula, re-rendered, is already there');
 });
 
+test('GH79a: replaceFormulas:true -- a DIFFERENT formula over an existing one is accepted, written, verified', async () => {
+  const store = createStore(book());
+  const { result, driver } = await run(store, task({ ...step('C2', [['=B1*5']]), replaceFormulas: true }), { formulaValues: { C2: 15 } });
+  assert.equal(result.ok, true, JSON.stringify(result.execution));
+  assert.equal(driver.calls.dispatch, 1);
+  assert.equal(result.execution.appliedOperations[0].status, OPERATION_STATUS.APPLIED);
+  assert.equal(result.execution.preservationVerification[0].verdict, 'PASS');
+  assert.equal(store.durable.find(s => s.name === 'Data').cells.C2.f, '= B1*5');
+});
+
+test('GH79a: replaceFormulas:true does NOT widen `values` -- a plain value over an existing formula stays refused', async () => {
+  const store = createStore(book());
+  const { result, driver } = await run(store, { id: 'm6-w2', steps: [{ intent: 'write_range', sheet: 'Data', range: 'C2', values: [[5]], replaceFormulas: true }] });
+  assert.equal(result.ok, false);
+  assert.equal(driver.calls.dispatch, 0);
+  assert.equal(result.execution.appliedOperations[0].evidence.evidence.reason, 'xlsx-write-over-formula-refused');
+  assert.deepEqual(store.durable, book());
+});
+
 test('planner: formula shape, value+formula conflict, literals, external refs, formulas-only', () => {
   const refuse = (t, re) => { const p = planOperations(t); assert.equal(p.ok, false); assert.match(p.detail, re); };
   refuse(task(step('D1', [['B1*3']])), /must be a string starting with =/);

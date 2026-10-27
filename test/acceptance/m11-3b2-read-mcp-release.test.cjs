@@ -90,38 +90,53 @@ function mcp(tools) {
 
 const result = m => m.result.structuredContent;
 
-test('MCP initialize + tools/list: the READ tools keep their schema next to xlsx_execute_task (M11.4b.1); docx_execute_task is Unknown tool', async () => {
+test('MCP initialize + tools/list: the READ tools keep their schema next to xlsx_execute_task (M11.4b.1) and docx_execute_task (GH #228 proposed state)', async () => {
   const p = product();
   const s = mcp(p.tools);
   const init = await s.send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   assert.equal(init.result.serverInfo.name, 'euro-office-product');
   const list = await s.send('tools/list', {});
-  assert.deepEqual(list.result.tools.map(t => t.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task']);
+  assert.deepEqual(list.result.tools.map(t => t.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
   for (const t of list.result.tools.filter(x => x.name === 'xlsx_read' || x.name === 'docx_read')) {
     assert.equal(t.inputSchema.additionalProperties, false);
     assert.deepEqual(t.inputSchema.required, ['fileId', 'operation']);
   }
   for (const name of ['docx_execute_task']) {
     const r = await s.call(name, { fileId: DOCX_FILE, operation: 'write_range' });
-    assert.match(r.error.message, new RegExp(`Unknown tool: ${name}`));
+    assert.equal(r.error, undefined, `${name} is served (GH #228 proposed state); the READ-shaped call is refused by its own schema`);
+    assert.equal(r.result.structuredContent.ok, false);
+    assert.equal(r.result.structuredContent.dispatched, false);
   }
   await s.end();
   assert.equal(p.b.calls.length, 0);
   assert.equal(p.launches(), 0);
 });
 
-test('ACCEPTED_INTENTS: the allowlist is exactly xlsx 3 + docx 5 and the MCP schema offers only those', () => {
+test('ACCEPTED_INTENTS: the allowlist is exactly xlsx 5 + docx 5 and the MCP schema offers only those', () => {
   const acc = f => Object.entries(OPERATIONS[f]).filter(([, o]) => o.status === 'ACCEPTED').map(([k]) => k);
-  assert.deepEqual(acc('xlsx'), ['workbook_overview', 'read_range', 'read_validations']);
-  assert.deepEqual(acc('docx'), ['read_text', 'read_formatting', 'read_tables', 'read_headers_footers', 'read_bookmarks']);
+  // X-O05/4: read_charts PARTIAL -> ACCEPTED (effectiveLabels via chart.dataLabels.effective.read/v1).
+  // X-O08 (/14): read_drawings; L-08 unit 2: read_conditional_formats; L-09 unit 1: read_layout -> ACCEPTED; L-10: read_freeze_panes -> ACCEPTED; L-10b: read_page_setup / read_filter -> ACCEPTED.
+  // GH #137 U1: read_runs -> ACCEPTED (the product READ mirror of format_run, released before that family's WRITE).
+  // GH #140 U2: read_pivots -> ACCEPTED (name-decision: a dedicated projection, read_charts.pivots[] unchanged).
+  // GH #133: read_sheet_state (sheet visibility + the active sheet) -> ACCEPTED, a field-select over the existing sheetVisibility / panes axes.
+  // GH #224: read_styles (new, dedicated) -> ACCEPTED (style definitions by name, GetAllStyles scope).
+  // GH #225: read_numbering -> ACCEPTED (present/type/numId/level/levelFormats + ToJSON format fields).
+  // GH #227: read_section_flags -> ACCEPTED (titlePage/evenAndOdd through the B21 Bridge READ, runtime-gated).
+  assert.deepEqual(acc('xlsx'), ['workbook_overview', 'read_range', 'read_validations', 'read_charts', 'read_pivots', 'read_drawings', 'read_conditional_formats', 'read_layout', 'read_freeze_panes', 'read_sheet_state', 'read_page_setup', 'read_filter', 'read_comments', 'read_print_area', 'read_defined_names', 'read_runs']);
+  assert.deepEqual(acc('docx'), ['read_text', 'read_formatting', 'read_tables', 'read_headers_footers', 'read_page_setup', 'read_bookmarks', 'read_numbering', 'read_styles', 'read_notes', 'read_images', 'read_comments', 'read_section_flags']);
   assert.deepEqual(inputSchema('xlsx').properties.operation.enum, acc('xlsx'));
   assert.deepEqual(inputSchema('docx').properties.operation.enum, acc('docx'));
 });
 
-test('XLSX_ACCEPTED_OFFLINE: the three accepted operations through tools/call -- real driver/adapter, non-mutating', async () => {
+test('XLSX_ACCEPTED_OFFLINE: the eleven accepted operations through tools/call -- real driver/adapter, non-mutating', async () => {
   const p = product();
   const s = mcp(p.tools);
-  const cases = [['workbook_overview', {}], ['read_range', { sheet: 'Budget', range: 'A1:B3' }], ['read_validations', { sheet: 'Budget', range: 'B2:B3' }]];
+  // X-O08 (/14) + L-08 + L-09: read_drawings, read_conditional_formats, read_layout ACCEPTED (see REFUSALS below).
+  // GH #137 U1: read_runs -- the fake editor has no GetCharacters support, so the run-map axis itself throws and
+  // is caught by the driver's own axis() wrapper (xlsx-driver.cjs), surfacing as a NAMED runMap gap string; the
+  // tool call itself still succeeds (ok:true), the SAME pattern read_freeze_panes/read_page_setup already show here.
+  // GH #140 U2: read_pivots, same optional-sheet shape as read_charts/read_drawings.
+  const cases = [['workbook_overview', {}], ['read_range', { sheet: 'Budget', range: 'A1:B3' }], ['read_validations', { sheet: 'Budget', range: 'B2:B3' }], ['read_charts', {}], ['read_pivots', {}], ['read_drawings', {}], ['read_conditional_formats', { sheet: 'Budget', range: 'B2:B3' }], ['read_layout', { sheet: 'Budget', range: 'B2:C3' }], ['read_freeze_panes', { sheet: 'Budget' }], ['read_page_setup', { sheet: 'Budget' }], ['read_filter', { sheet: 'Budget' }], ['read_runs', { sheet: 'Budget', cell: 'A1' }]];
   for (const [operation, extra] of cases) {
     const r = result(await s.call('xlsx_read', { fileId: XLSX_FILE, operation, ...extra }));
     assert.equal(r.ok, true, `${operation}: ${JSON.stringify(r)}`);
@@ -129,38 +144,37 @@ test('XLSX_ACCEPTED_OFFLINE: the three accepted operations through tools/call --
     NON_MUTATION(p.eds.xlsx, r);
   }
   await s.end();
-  assert.equal(p.b.calls.length, 3, 'one broker request per call');
+  assert.equal(p.b.calls.length, 12, 'one broker request per call');
   assert.ok(p.b.calls.every(c => c.fileId === XLSX_FILE));
-  assert.equal(p.eds.xlsx.launches(), 3, 'one browser per call, never two at once');
+  assert.equal(p.eds.xlsx.launches(), 12, 'one browser per call, never two at once');
 });
 
-test('DOCX_ACCEPTED_OFFLINE: the five accepted operations through tools/call -- real driver/adapter, non-mutating', async () => {
+test('DOCX_ACCEPTED_OFFLINE: the six accepted operations through tools/call -- real driver/adapter, non-mutating', async () => {
   const p = product();
   const s = mcp(p.tools);
-  for (const operation of ['read_text', 'read_formatting', 'read_tables', 'read_headers_footers', 'read_bookmarks']) {
+  for (const operation of ['read_text', 'read_formatting', 'read_tables', 'read_headers_footers', 'read_page_setup', 'read_bookmarks']) {
     const r = result(await s.call('docx_read', { fileId: DOCX_FILE, operation }));
     assert.equal(r.ok, true, `${operation}: ${JSON.stringify(r)}`);
     NON_MUTATION(p.eds.docx, r);
   }
   await s.end();
-  assert.equal(p.b.calls.length, 5);
-  assert.equal(p.eds.docx.launches(), 5);
+  assert.equal(p.b.calls.length, 6);
+  assert.equal(p.eds.docx.launches(), 6);
 });
 
 // ---- the refusal matrix: every refusal is PRE-DISPATCH with BROKER_CALL=0 BROWSER_LAUNCH=0 DRIVER_OPEN=0 -------------
 
 const REFUSALS = [
-  ['xlsx_read', { operation: 'read_charts' }, 'REFUSED_PARTIAL'],
-  ['xlsx_read', { operation: 'read_pivots' }, 'REFUSED_PARTIAL'],
-  ['xlsx_read', { operation: 'read_drawings' }, 'REFUSED_PARTIAL'],
-  ['xlsx_read', { operation: 'read_conditional_formats' }, 'REFUSED_PARTIAL'],
+  // X-O05/4: read_charts moved to ACCEPTED (see ACCEPTED_INTENTS / XLSX_ACCEPTED_OFFLINE above).
+  // X-O08 (/14) + L-08: read_drawings and read_conditional_formats moved to ACCEPTED too (SAME section).
+  // GH #140 U2: read_pivots ALSO moved to ACCEPTED -- xlsx has no PARTIAL operation left; the
+  // REFUSED_PARTIAL path is covered by the docx rows below.
   ['xlsx_read', { operation: 'read_print_rendering' }, 'REFUSED_NOT_MEASURED'],
-  ['docx_read', { operation: 'read_numbering' }, 'REFUSED_PARTIAL'],
+  // GH #225: read_numbering moved to ACCEPTED too -- read_table_grid is the PARTIAL row left (GH #226 3: read_notes moved to ACCEPTED).
   ['docx_read', { operation: 'read_table_grid' }, 'REFUSED_PARTIAL'],
-  ['docx_read', { operation: 'read_notes' }, 'REFUSED_PARTIAL'],
-  ['docx_read', { operation: 'read_images' }, 'REFUSED_NOT_MEASURED'],
-  ['docx_read', { operation: 'read_comments' }, 'REFUSED_NOT_MEASURED'],
-  ['docx_read', { operation: 'read_section_flags' }, 'REFUSED_INTERNAL'],
+  // GH #227: read_section_flags moved to ACCEPTED too -- it was the last docx:INTERNAL operation,
+  // so no live REFUSED_INTERNAL row remains (checkOperation's generic `REFUSED_${op.status}` is
+  // unchanged, and would fire again the moment any operation is next marked INTERNAL).
   ['xlsx_read', { operation: 'write_range' }, 'REFUSED_WRITE'],
   ['docx_read', { operation: 'drop_everything' }, 'REFUSED_UNKNOWN'],
   ['xlsx_read', { operation: 'drop_everything' }, 'REFUSED_UNKNOWN'],

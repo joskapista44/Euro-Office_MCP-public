@@ -38,7 +38,7 @@ async function seedChart(store) {
  * harness({ store, script, wrap, gate, persistence }) -> { tool, gate, n, drivers, opens }
  * n: { runtime, drivers, open, dispatch, forceSave, close } summed over every driver this harness created.
  */
-function harness({ store = createStore(book()), script = {}, wrap = null, gate = createSessionGate(), persistence = null, configSource = { kind: 'BROKER' } } = {}) {
+function harness({ store = createStore(book()), script = {}, wrap = null, gate = createSessionGate(), persistence = null, configSource = { kind: 'BROKER' }, onTiming = null, keyRotation = null, reuse = null } = {}) {
   const drivers = [];
   const opens = [];
   const n = { runtime: 0, drivers: 0 };
@@ -54,8 +54,10 @@ function harness({ store = createStore(book()), script = {}, wrap = null, gate =
   };
   const runtime = { check: () => { n.runtime += 1; return { ok: true }; }, load: () => ({ ok: false, detail: 'unused by the fake' }) };
   let t = 0;
-  const session = { ready: { wait: async () => {} }, persistence: persistence || { wait: async () => {} }, now: () => (t += 1) };
-  const tool = createWriteTool('xlsx', { configSource, gate, runtime, createDriver, session });
+  // GH #76 MODEL 1: keyRotation overrides verifyStoredContent's bounded poll (timeoutMs/pollMs/now/wait) so a test
+  // never actually waits real wall-clock time.
+  const session = { ready: { wait: async () => {} }, persistence: persistence || { wait: async () => {} }, now: () => (t += 1), ...(keyRotation ? { keyRotation } : {}) };
+  const tool = createWriteTool('xlsx', { configSource, gate, runtime, createDriver, session, ...(onTiming ? { onTiming } : {}), ...(reuse ? { reuse } : {}) });
   const sum = k => drivers.reduce((a, d) => a + d.calls[k], 0);
   return { tool, gate, n, drivers, opens, store, calls: () => ({ open: sum('open'), dispatch: sum('dispatch'), forceSave: sum('forceSave'), close: sum('close') }) };
 }

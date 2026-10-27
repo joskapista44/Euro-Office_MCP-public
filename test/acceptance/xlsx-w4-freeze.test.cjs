@@ -155,7 +155,8 @@ test('planner: the only step of its task, shapes', () => {
   refuse(task({ intent: 'freeze_panes' }), /requires rows and \/ or columns/);
   refuse(task({ intent: 'freeze_panes', rows: 0 }), /rows must be an integer/);
   refuse(task({ intent: 'freeze_panes', rows: 1.5 }), /rows must be an integer/);
-  refuse(task({ intent: 'freeze_panes', columns: 101 }), /columns must be an integer/);
+  // X-L09 (owner GO 36696): the ceiling is 100000 rows / 1000 columns (LIVE-measured), see xl09-freeze-ceiling.test.cjs for the boundary
+  refuse(task({ intent: 'freeze_panes', columns: 1001 }), /columns must be an integer/);
   refuse(task({ intent: 'unfreeze_panes', rows: 1 }), /does not support field/);
   refuse(task({ intent: 'freeze_panes', rows: 1, at: 'B2' }), /does not support field/);
   refuse({ id: 'x', steps: [{ intent: 'freeze_panes', sheet: 'Data', rows: 1 }, { intent: 'write_range', sheet: 'Other', range: 'C9', values: [['v']] }] }, /LAST step/); // M7 S5 S23: last, not alone
@@ -185,4 +186,29 @@ test('the command body: activate (checked), the public freeze call, restore the 
   const s = run1({ intent: 'freeze_panes', rows: 2 }, { stuck: true });
   assert.equal(s.r.stage, 'activate');
   assert.equal(s.log.some(x => x[0] === 'FreezeRows'), false, 'no freeze when the activation did not take');
+});
+
+// X-L10 (LIVE-measured: the saved activeTab follows the freeze TARGET): a HIDDEN target would open as the shown,
+// active sheet -- refused before any write; an unread visibility is never "visible".
+for (const intent of ['freeze_panes', 'unfreeze_panes']) {
+  test(`X-L10: ${intent} on a HIDDEN sheet is refused before dispatch (0 commands), nothing persisted`, async () => {
+    const b = book(); b.find(s => s.name === 'Data').hidden = true;
+    const store = createStore(b);
+    const before = JSON.stringify(store.durable);
+    const step = intent === 'freeze_panes' ? { intent, rows: 2 } : { intent };
+    const { result, driver } = await run(store, task(step));
+    assert.equal(result.ok, false);
+    assert.equal(reason(result), 'xlsx-freeze-hidden-sheet-refused');
+    assert.equal(driver.calls.dispatch, 0);
+    assert.equal(JSON.stringify(store.durable), before);
+  });
+}
+
+test('X-L10: an unreadable sheet visibility refuses the freeze (never read as visible); POS. KONTROLL: a visible target still applies', async () => {
+  const refused = await run(createStore(book()), task({ intent: 'freeze_panes', rows: 2 }), { visibilityUnreadable: true });
+  assert.equal(refused.result.ok, false);
+  assert.equal(reason(refused.result), 'xlsx-freeze-sheet-visibility-unobservable');
+  assert.equal(refused.driver.calls.dispatch, 0);
+  const ok = await run(createStore(book()), task({ intent: 'freeze_panes', rows: 2 }));
+  assert.equal(ok.result.ok, true);
 });

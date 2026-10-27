@@ -1,0 +1,37 @@
+{
+  "_comment": "DS v9.3.5 (build:0) fresh install plan. cell = euro-office-bridge-v1 only (the own chart read layer, euro-office-chart-read-v1, is a LATER unit per docs/DS-9.3.5-PORTING-PLAN.md D)3, because its own identity string ('runtime: 9.3.4.60') needs its own text change first). word = euro-office-bridge-word-v1 (the ds935-word-bridge-20261018 unit, D)2 -- added in this plan). Both blocks' own EO_BRIDGE_MANIFEST identity fields (documentServerVersion / documentServerBuild / patchVersion) were rewritten to 9.3.5: cell by the ds935-cell-bridge-identity-runtime-20261018 unit (docs/DS-9.3.5-CELL-BRIDGE-IDENTITY-RUNTIME-20261018.md), word in the SAME unit as this fresh-install entry (ds935-word-bridge-20261018) -- exactly 3 literal fields differ in each block from the LIVE MEASURED accepted 9.3.4.60 revision per src/core/runtime-identity.cjs ACCEPTED_RUNTIMES (euro-office-bridge-v1 rev16-candidate for cell, euro-office-bridge-word-v1 rev3-candidate for word); every other byte, including all capability entries, is unchanged.",
+  "cell": {
+    "file": "sdkjs/cell/sdk-all.js",
+    "input_sha256": "5e1e7d6df5a0868ef08d9adea1e18d8b18a11cb2ce21c1ace94f5bc36bcd7b49",
+    "anchor": "Api.GetSheets=function(){",
+    "blocks": [
+      {
+        "file": "euro-office-chart-read-v1/chart-read-block.js",
+        "sha256": "20d06243532ccd40ee139e738da48b9afbc7baa160d57ced4f2545b647a678b1",
+        "layer": "euro-office-chart-read-v1/9.3.5.0/1",
+        "anchor": "AscBuilder.Cell.init=function("
+      },
+      {
+        "file": "euro-office-bridge-v1/bridge-block.js",
+        "sha256": "2686705c45e49ae3c40b8a5b4127f9242abb5484b7efd5ed623ae492b21b59f6",
+        "layer": "euro-office-bridge-v1/9.3.5.0/16"
+      }
+    ],
+    "output_sha256": "d9c78e863d8cfbf8416541263697ecec827b48164b574322cee65b25dcf2df83",
+    "patchVersion": "euro-office-bridge-v1/9.3.5.0/16"
+  },
+  "word": {
+    "file": "sdkjs/word/sdk-all.js",
+    "input_sha256": "4392397b3b3544d013108515374c60b35f42f97326694033dc9a60a2a9bd854e",
+    "anchor": "Api.attachEvent=function(eventName,callback){",
+    "blocks": [
+      {
+        "file": "euro-office-bridge-word-v1/bridge-block.js",
+        "sha256": "55795f6c07d09ba290094c1b2e426cdfad9ed4b31b5417bc755898ef291eb8b0",
+        "layer": "euro-office-bridge-word-v1/9.3.5.0/3"
+      }
+    ],
+    "output_sha256": "4afc854de1356d62be533e9e4d4fe766dd4ef4b3f9f32915d163fd15ce9a10ca",
+    "patchVersion": "euro-office-bridge-word-v1/9.3.5.0/3"
+  }
+}

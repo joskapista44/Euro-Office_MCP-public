@@ -47,7 +47,15 @@ async function executeTask({ handle, adapter, task, strategy = 'sequential', app
   if (!appliedOperations) throw new Error('executeTask requires the lifecycle-owned register');
 
   const metrics = handle.metrics;
-  const observeRequest = options.observation || {};
+  // W-10-8: an explicit `options.observation` always wins (a caller-side override);
+  // otherwise an OPTIONAL adapter hook derives it from the task itself, so a family whose read
+  // needs more than the default observation (e.g. DOCX style-definition's targeted style names,
+  //) does not require every caller to know its internal observation shape.
+  // An adapter without the hook gets `{}`, exactly as before this change -- no other family's
+  // behavior moves.
+  const observeRequest = options.observation
+    || (typeof adapter.observationRequestFor === 'function' ? adapter.observationRequestFor(task) : null)
+    || {};
   const primitiveVerification = [];
   const preservationVerification = [];
   const results = new Map(); // operationId -> semantic result, the only thing a ref may name
@@ -110,6 +118,26 @@ async function executeTask({ handle, adapter, task, strategy = 'sequential', app
     classification = taskClass.state;
   }
 
+  // ---- pre-mutation refusal (X-M01) ------------------------------------------------------------
+  // A per-operation FAIL_CLOSED that NO earlier step can change (the adapter's optional preflightDecisive hook says so)
+  // is final on the planning observation: the whole task is refused before ANY dispatch -- no applied prefix, nothing to
+  // persist. Without the hook (or when it says no) the operation is classified at its turn, as before.
+  if (perOperation && typeof adapter.preflightDecisive === 'function') {
+    for (const [k, op] of operations.entries()) {
+      const st = classifyOne(adapter, observation, op, task, perOperation, taskClass);
+      if (st.state !== CLASSIFICATION.FAIL_CLOSED) continue;
+      let decisive = false;
+      try { decisive = adapter.preflightDecisive(operations.slice(0, k), op, st.evidence || null) === true; } catch { decisive = false; }
+      if (!decisive) continue;
+      for (const o of operations) {
+        appliedOperations.record(o === op
+          ? { operationId: o.id, status: OPERATION_STATUS.FAILED, evidence: { stage: 'preflight', state: st.state, evidence: st.evidence || null, blocking: true } }
+          : { operationId: o.id, status: OPERATION_STATUS.SKIPPED_DUE_TO_PRIOR_FAILURE, evidence: { stoppedAt: op.id } });
+      }
+      return finish({ executionOk: false, outcome: 'preflight-fail-closed', authority: AUTHORITY.PLAN_ONLY, detail: { operationId: op.id, evidence: st.evidence || null } });
+    }
+  }
+
   groupsInfo = strat.groups(operations, options.batch || {});
 
   // ---- groups -------------------------------------------------------------------------------------
@@ -135,7 +163,12 @@ async function executeTask({ handle, adapter, task, strategy = 'sequential', app
     const queue = [];
     for (const op of group) {
       const index = operations.indexOf(op);
-      const state = classifyOne(adapter, groupObservation, op, task, perOperation, taskClass);
+      // L-19 C: the adapter's own invariant that a SATISFIED verdict following an operation this
+      // SAME run already had to dispatch (APPLIED) is suspect (a chained structure op whose anchor
+      // coincidentally already sits at its terminal position) needs this fact, and only the executor
+      // has it -- `appliedOperations` is private to this function.
+      const priorAppliedThisRun = appliedOperations.countBy(OPERATION_STATUS.APPLIED) > 0;
+      const state = classifyOne(adapter, groupObservation, op, task, perOperation, taskClass, priorAppliedThisRun);
 
       if (state.state === CLASSIFICATION.SATISFIED) {
         // SATISFIED: dispatch 0, writes 0. The current state already carries the intended result,
@@ -220,7 +253,11 @@ async function executeTask({ handle, adapter, task, strategy = 'sequential', app
     let post = null;
     if (anyDispatched) post = await observeFresh(handle, adapter, observeRequest);
 
+    // GH #99: the operations of this round whose dispatch moved the session generation -- each one's L3 excludes
+    // the others' windows (their own L1 proves those); a round of one has none.
+    const dispatchedOps = attempts.list.filter(x => x.generationAfter > x.generationBefore).map(x => x.op);
     for (const a of attempts.list) {
+      const siblings = dispatchedOps.filter(o => o !== a.op);
       let l1 = null;
       const returnedOk = !a.threw && a.dispatchResult && a.dispatchResult.ok === true && a.dispatchResult.partiallyApplied !== true;
       if (returnedOk && post && post.ok) {
@@ -232,7 +269,7 @@ async function executeTask({ handle, adapter, task, strategy = 'sequential', app
       const mode = preservationModeOf(a.op);
       let integral = null;
       if (mode === PRESERVATION_MODE.PRIMITIVE_INTEGRAL && l1 && l1.verdict === VERDICT.PASS) {
-        integral = await verifyPreservation({ handle, adapter, operation: a.op, before: groupObservation, after: post, required: true });
+        integral = await verifyPreservation({ handle, adapter, operation: a.op, before: groupObservation, after: post, required: true, siblings });
         preservationVerification.push(integral);
       }
       const c = classifyDispatchAttempt({
@@ -259,7 +296,7 @@ async function executeTask({ handle, adapter, task, strategy = 'sequential', app
         const semantic = l1.evidence && l1.evidence.evidence !== undefined ? l1.evidence.evidence : l1.evidence;
         results.set(a.op.id, Object.freeze({ operationId: a.op.id, status: OPERATION_STATUS.APPLIED, evidence: semantic, identity }));
         if (mode === PRESERVATION_MODE.POST_PRIMITIVE) {
-          const l3 = await verifyPreservation({ handle, adapter, operation: a.op, before: groupObservation, after: post, required: true });
+          const l3 = await verifyPreservation({ handle, adapter, operation: a.op, before: groupObservation, after: post, required: true, siblings });
           preservationVerification.push(l3);
           if (!isSatisfied(l3.verdict)) stop(a.op.id, 'preservation-failed', l3.verdict);
         }
@@ -359,10 +396,10 @@ async function executeTask({ handle, adapter, task, strategy = 'sequential', app
   }
 }
 
-function classifyOne(adapter, observation, op, task, perOperation, taskClass) {
+function classifyOne(adapter, observation, op, task, perOperation, taskClass, priorAppliedThisRun = false) {
   if (!perOperation) return taskClass;
   try {
-    const out = adapter.classifyOperation(observation.primary, op, { task });
+    const out = adapter.classifyOperation(observation.primary, op, { task, priorAppliedThisRun });
     return out && typeof out.state === 'string' ? out : { state: CLASSIFICATION.FAIL_CLOSED, evidence: { reason: 'classifier returned no state' } };
   } catch (err) {
     return { state: CLASSIFICATION.FAIL_CLOSED, evidence: { threw: true, detail: err.message } };

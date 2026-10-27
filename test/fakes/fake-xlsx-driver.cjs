@@ -1,6 +1,8 @@
 'use strict';
 
 const { XLSX_RUNTIME_ID } = require('../../src/core/runtime-identity.cjs');
+const { translateFormula } = require('../../src/adapters/xlsx/shift.cjs');
+const { parseRange: parseA1Range, addr: a1Addr } = require('../../src/adapters/xlsx/a1.cjs');
 /**
  * A fake XLSX editor transport (M6). Same DURABLE / LIVE split as the fake DOCX transport:
  *   open        LIVE := copy of DURABLE
@@ -66,7 +68,9 @@ const { XLSX_RUNTIME_ID } = require('../../src/core/runtime-identity.cjs');
  * Range (wave 5, meta.family 'range'): copy_range copies each source cell (a formula translated by the delta,
  * the reference-aware translation) with its format; move_range moves it unchanged and clears the source. Faults
  * 'ignore', 'partial' (the first cell only), 'copy-no-translate', 'move-keeps-source', 'side-effect',
- * 'copy-corrupts-source' (a correct copy, then the source's first cell is overwritten); M7 S1 L3 controls
+ * 'copy-corrupts-source' (a correct copy, then the source's first cell is overwritten); L-06 'copy-saves-literal' (the DS
+ * Copy shows the TRANSLATED formula in session but the SAVED file carries the source's LITERAL text and stale value --
+ * a maintainer's l064/l065 probe; 'cross-copy-delayed': an editor Copy onto another sheet is overwritten at the next save even after an explicit formula write (l068); 'copy-xsheet-shows-literal': onto another sheet the formula is shown untranslated, l066; a command whose meta.explicitFormulaWrite is true re-wrote the target formulas, so they save as shown); M7 S1 L3 controls
  * 'range-side-name' (a workbook name appears), 'range-side-rule' (the first rule of the first sheet with rules
  * changes), 'range-side-chart' (a chart series' values move a row), 'range-side-filter' (an AutoFilter appears/changes).
  *
@@ -111,6 +115,28 @@ const { XLSX_RUNTIME_ID } = require('../../src/core/runtime-identity.cjs');
  *
  * A cell may carry nf (number format, default 'General') and fill (default 'S:No Fill', the measured read of an unfilled cell, m7-s15-probe3); they are read only
  * for window cells requested with `format: true`, as the real driver does.
+ *
+ * Array formulas (GH #301 D4, meta.family 'array-formula'): a member cell carries `array` (the array's A1 ref) and `af`
+ * (its formula as GetFormulaArray returns it) next to its own f. Read only via `arrayCells` ({sheet, cell}), keyed
+ * `sheet!cell`, with the LIVE-measured raw GetFormulaArray semantics (docs/evidence/gh301-d4-array-formula-probe-
+ * 20261025.json): a member -> its array's formula, a plain formula -> null, a value -> the value, an empty cell -> ''.
+ * The write overwrites every area cell (the measured SetFormulaArray does, silently). Faults 'ignore', 'side-effect',
+ * 'array-formula-wrong-formula' (another formula is written -- L1 FAIL), 'array-formula-short' (the area's last cell is
+ * left out -- L1 FAIL), 'array-formula-spill-ring' (the array grows one row past the area -- the ring guard's L1 FAIL);
+ * script.arrayUnobservable -> every read 'UNOBSERVABLE:threw'.
+ *
+ * Per-run font (M7 backlog X-F04, meta.family 'format_run'): a cell may
+ * carry `runs` ([{start, length, font: {bold, italic, name, size, color}}], 1-based, contiguous,
+ * covering the whole text) -- absent means uniformly described by the cell's own `font` (the
+ * SAME default tuple the 'format' family's font reader uses, minus the X-F05 effects, which are
+ * out of this family's scope). Read only via `runCells` ({sheet, cell}), keyed `sheet!cell`, as
+ * the character-by-character run-map the real driver's PUBLIC reader also builds; 'UNOBSERVABLE:
+ * empty-cell' / 'UNOBSERVABLE:text-too-long' (256-char ceiling, TEMPORARY pending a LIVE timing
+ * measurement) mirror the real driver's own named gaps. Faults 'ignore', 'side-effect',
+ * 'format-run-wrong-axis' (the written bold value is flipped -- L1 FAIL), 'format-run-other-
+ * char-changed' (an UNTOUCHED character's font flips, `script.faultCharIndex` names which one --
+ * L3 FAIL), 'format-run-text-changed' (the cell's text grows -- L3 `run-map-length-changed`);
+ * script.runMapUnobservable -> every run-map read 'UNOBSERVABLE:threw'.
  */
 
 const { parseRange, cellsOf, addr, rangeText } = require('../../src/adapters/xlsx/a1.cjs');
@@ -179,6 +205,7 @@ function createFakeXlsxDriver(store, script = {}) {
   let live = null;
   let openedFileId = null;
   let dirty = false;
+  let literalOnSave = {}; // L-06 'copy-saves-literal': sheet\u0000addr -> the source's literal { f, v }, until a formula write replaces it
   let confirmedAt = null; // the dispatch count at the last confirmed forcesave (M7 save contract)
 
   /**
@@ -271,6 +298,24 @@ function createFakeXlsxDriver(store, script = {}) {
     }
     if (f === 'side-effect') ws.cells.Z99 = { v: 'side effect' };
     if (f === 'side-erase') for (const k of script.eraseCells || []) ws.cells[k] = { v: null };
+    dirty = true;
+  }
+
+  // L-14 / L-17 (LIVE-measured, zero): ClearFormats() puts every format axis back to base and KEEPS the value; Clear() also empties the value.
+  // Faults: 'ignore' (nothing happens), 'clear-formats-erases-value' (the formats scope also drops the value),
+  // 'clear-formats-keeps-axis' (script.keepAxis survives), 'side-effect' (Z99 appears).
+  function applyClearScope({ sheet, cells, action }) {
+    const ws = live.find(s => s.name === sheet);
+    if (!ws) return;
+    const f = script.fault;
+    if (f === 'ignore') return;
+    for (const a of cells) {
+      const c = ws.cells[a] || {};
+      const kept = f === 'clear-formats-keeps-axis' && script.keepAxis ? { [script.keepAxis]: c[script.keepAxis] } : {};
+      const value = action === 'clear-all' || f === 'clear-formats-erases-value' ? { v: null } : { v: c.v, ...(c.f ? { f: c.f } : {}) };
+      ws.cells[a] = { ...value, ...kept };
+    }
+    if (f === 'side-effect') ws.cells.Z99 = { v: 'side effect' };
     dirty = true;
   }
 
@@ -491,7 +536,7 @@ function createFakeXlsxDriver(store, script = {}) {
   // X-B06 (MEASURED, m7-b06-probe1): 9 additional styles, distinct codes, no collision.
   const STY = { thin: 7, medium: 12, thick: 13, dashed: 6, double: 1, hair: 2, dashDotDot: 3, dashDot: 4, dotted: 5, mediumDashDotDot: 8, slantDashDot: 9, mediumDashDot: 10, mediumDashed: 11 };
   const READING_ORDER = { context: 0, ltr: 1, rtl: 2 };
-  const hexInt = h => parseInt(h.slice(1), 16);
+  const hexInt = h => (h === 'auto' ? null : parseInt(h.slice(1), 16)); // X-B07: 'auto' reads as c: null (measured)
   function styleCell(ws, a, spec) {
     const c = { ...(ws.cells[a] || { v: null }) };
     if ('fill' in spec && spec.fill !== 'none') c.fill = hexInt(spec.fill);
@@ -510,6 +555,9 @@ function createFakeXlsxDriver(store, script = {}) {
       c.font = f;
     }
     if (spec.align) c.align = { ...(c.align || {}), ...('horizontal' in spec.align ? { h: H[spec.align.horizontal] } : {}), ...('vertical' in spec.align ? { v: V[spec.align.vertical] } : {}) };
+    // GH #93 (MEASURED, test/live/justify-text-cell-probe.live.cjs, session + reopen, text / number / empty cells):
+    // SetAlignHorizontal('justify') also turns the cell's wrap ON -- the engine's own coupling
+    if (spec.align && spec.align.horizontal === 'justify' && !('wrap' in spec)) c.wrap = true;
     if (spec.align && 'rotation' in spec.align) c.rot = spec.align.rotation;
     // X-F07b/c (owner GO 2026-10-05): readingOrder/indent/shrink, flat keys (same reasoning as `rot`).
     if (spec.align && 'readingOrder' in spec.align) c.readingOrder = READING_ORDER[spec.align.readingOrder];
@@ -592,13 +640,173 @@ function createFakeXlsxDriver(store, script = {}) {
    * ClearFormats() and restores it unchanged; simulating that restore as a no-op is faithful,
    * same reasoning as applyRemove's own comment above). Fault hooks: 'fillclear-fill-not-cleared'
    * (the fill stays, as if ClearFormats() never ran) | 'fillclear-kept-axis-lost' (the target's
-   * wrap is dropped, as if the restore silently skipped an axis).
+   * wrap is dropped, as if the restore silently skipped an axis) | 'fillclear-neighbour-leak'
+   * (script.leakCell's own border.b side flips to a different style -- simulates the shared-edge
+   * write disturbing a neighbour, the regression the format-fill-clear.cjs shared-edge refusal
+   * used to guard against before the LIVE measurement showed the restore cannot do this).
    */
   function applyFillClear(ws, m, f) {
+    // X-B10 RED mutant 'fillclear-merge-destroyed': the engine's ClearFormats() DISSOLVED the merge LIVE (xb10 v2,
+    // after save + reopen) -- every merge whose top-left is a cleared cell is gone, the members read as separate cells.
+    if (f === 'fillclear-merge-destroyed') ws.merges = (ws.merges || []).filter(x => !m.fillClearCells.includes(x.split(':')[0]));
     for (const a of m.fillClearCells) {
       const c = { v: null, ...(ws.cells[a] || {}) };
       if (f !== 'fillclear-fill-not-cleared') c.fill = 'S:No Fill';
       if (f === 'fillclear-kept-axis-lost') c.wrap = false;
+      ws.cells[a] = c;
+    }
+    if (f === 'fillclear-neighbour-leak' && script.leakCell) {
+      const n = { v: null, ...(ws.cells[script.leakCell] || {}) };
+      n.border = { ...(n.border || {}), b: { s: 13, c: 0 } }; // a DIFFERENT style than whatever it had
+      ws.cells[script.leakCell] = n;
+    }
+  }
+
+  // X-F04 (format_run): a cell may carry `runs` (an array of
+  // {start, length, font: {bold, italic, name, size, color}}, 1-based, contiguous, covering
+  // the WHOLE text) -- the per-character "ground truth" the run-map read/write mirrors. Absent
+  // `runs` means the cell is uniformly described by its existing `font` (today's whole-cell
+  // shape), matching the real engine's own state before any per-run write ever touched it.
+  const RUN_FONT_DEFAULT = Object.freeze({ bold: null, italic: null, name: 'Calibri', size: 11, color: 0 });
+  function runFontTupleAt(c, i) {
+    if (Array.isArray(c.runs)) {
+      const seg = c.runs.find(r => i >= r.start && i < r.start + r.length);
+      if (seg) return { ...RUN_FONT_DEFAULT, ...seg.font };
+    }
+    return { ...RUN_FONT_DEFAULT, ...(c.font ? { bold: c.font.bold, italic: c.font.italic, name: c.font.name, size: c.font.size, color: c.font.color } : {}) };
+  }
+  /** The SAME character-by-character merge the real driver's PUBLIC run-map read does (zero
+   * #ref's correction) -- 'UNOBSERVABLE:empty-cell' / 'UNOBSERVABLE:text-too-long' mirror the
+   * real driver's own named gaps (`RUN_MAP_CHAR_CEILING` there is 256, matched here). */
+  function runMapOf(ws, a) {
+    const c = ws.cells[a] || { v: '' };
+    const text = c.v === null || c.v === undefined ? '' : String(c.v);
+    if (text === '') return 'UNOBSERVABLE:empty-cell';
+    if (text.length > 256) return 'UNOBSERVABLE:text-too-long';
+    const runs = [];
+    let cur = null;
+    for (let i = 1; i <= text.length; i += 1) {
+      const ft = runFontTupleAt(c, i);
+      const k = JSON.stringify(ft);
+      if (cur && cur.key === k) cur.length += 1; else { cur = { start: i, length: 1, font: ft, key: k }; runs.push(cur); }
+    }
+    return { text, runs: runs.map(({ start, length, font }) => ({ start, length, font })) };
+  }
+  function arrayReadsOf(asked) {
+    const out = {};
+    for (const w of asked) {
+      if (script.arrayUnobservable) { out[`${w.sheet}!${w.cell}`] = 'UNOBSERVABLE:threw'; continue; }
+      const ws = live.find(x => x.name === w.sheet);
+      if (!ws) { out[`${w.sheet}!${w.cell}`] = 'UNOBSERVABLE:sheet-missing'; continue; }
+      const c = ws.cells[w.cell];
+      out[`${w.sheet}!${w.cell}`] = !c ? '' : (c.array ? c.af : (c.f ? null : (c.v === null || c.v === undefined ? '' : c.v)));
+    }
+    return out;
+  }
+  // GH #300 K2: comments -- a sheet's `comments` list of { cell, text, author, userId, timeUtc, solved, replies }, read only
+  // via `commentSheets` in row-major cell order (the driver's K1 read shape); script.commentsUnobservable -> 'UNOBSERVABLE:threw'.
+  // The session author is script.sessionUser (default { id: 'oc_fake_tester', name: 'Fake Tester' }); null = the session has
+  // none (the read says so, the dispatch refuses, as the real driver does). The write is AddComment + SetUserId; a second
+  // comment on a commented cell is a silent no-op (measured). Faults 'ignore', 'side-effect', 'comment-wrong-author' (another
+  // author name), 'comment-no-user-id' (SetUserId lost), 'comment-touches-other' (another comment's text changes).
+  const sessionUserOf = () => (script.sessionUser === undefined ? { id: 'oc_fake_tester', name: 'Fake Tester' } : script.sessionUser);
+  const rowMajor = (x, y) => { const a = parseRange(x.cell); const b = parseRange(y.cell); return a.r1 - b.r1 || a.c1 - b.c1; };
+  function commentReadsOf(asked) {
+    const out = {};
+    for (const n of asked) {
+      if (script.commentsUnobservable) { out[n] = 'UNOBSERVABLE:threw'; continue; }
+      const ws = live.find(x => x.name === n);
+      out[n] = ws ? { comments: clone(ws.comments || []).sort(rowMajor) } : 'UNOBSERVABLE:sheet-missing';
+    }
+    return out;
+  }
+  function applyComment(m) {
+    const f = script.fault;
+    const author = sessionUserOf();
+    if (f === 'ignore' || !author) return;
+    const ws = live.find(x => x.name === m.sheet);
+    if (!ws) return;
+    ws.comments = ws.comments || [];
+    if (ws.comments.some(c => c.cell === m.cell)) return; // the measured silent no-op
+    ws.comments.push({ cell: m.cell, text: m.text, author: f === 'comment-wrong-author' ? 'Someone Else' : author.name, userId: f === 'comment-no-user-id' ? '' : author.id, timeUtc: 0, solved: false, replies: [] });
+    if (f === 'comment-touches-other') { const o = ws.comments.find(c => c.cell !== m.cell); if (o) o.text += ' (changed)'; }
+    if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
+  }
+  function applyArrayFormula(m) {
+    const f = script.fault;
+    if (f === 'ignore') return;
+    const ws = live.find(x => x.name === m.sheet);
+    if (!ws) return;
+    const g = parseRange(m.range);
+    const r2 = f === 'array-formula-spill-ring' ? g.r2 + 1 : g.r2;
+    const ref = rangeText({ ...g, r2 });
+    const text = f === 'array-formula-wrong-formula' ? `${m.formula}+1` : m.formula;
+    for (let r = g.r1; r <= r2; r += 1) {
+      for (let c = g.c1; c <= g.c2; c += 1) {
+        if (f === 'array-formula-short' && r === g.r2 && c === g.c2) continue;
+        ws.cells[addr(c, r)] = { v: '', f: text, array: ref, af: text };
+      }
+    }
+    if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
+  }
+  function runReadsOf(asked) {
+    const out = {};
+    for (const w of asked) {
+      if (script.runMapUnobservable) { out[`${w.sheet}!${w.cell}`] = 'UNOBSERVABLE:threw'; continue; }
+      const ws = live.find(x => x.name === w.sheet);
+      out[`${w.sheet}!${w.cell}`] = ws ? runMapOf(ws, w.cell) : 'UNOBSERVABLE:sheet-missing';
+    }
+    return out;
+  }
+  /** Faults: 'ignore', 'side-effect' (Z99 written), 'format-run-wrong-axis' (the WRONG bold value
+   * applied -- L1 FAIL), 'format-run-other-char-changed' (an untouched character's font flips --
+   * L3 FAIL, `script.faultCharIndex` names which 1-based position), 'format-run-text-changed'
+   * (the cell's text itself grows -- L3 `run-map-length-changed`). */
+  function applyFormatRun(m) {
+    const ws = live.find(x => x.name === m.sheet);
+    if (!ws) return;
+    const f = script.fault;
+    if (f === 'ignore') return;
+    const c = { ...(ws.cells[m.cell] || { v: '' }) };
+    const text = c.v === null || c.v === undefined ? '' : String(c.v);
+    const before = runMapOf(ws, m.cell);
+    const existingRuns = typeof before === 'string' ? [{ start: 1, length: Math.max(text.length, 1), font: RUN_FONT_DEFAULT }] : before.runs;
+    const flat = [];
+    for (const r of existingRuns) for (let i = 0; i < r.length; i += 1) flat.push(r.font);
+    const runsToApply = f === 'format-run-wrong-axis' ? m.runs.map(r => ('bold' in r.want ? { ...r, want: { ...r.want, bold: !r.want.bold } } : r)) : m.runs;
+    for (const run of runsToApply) for (let i = run.start; i < run.start + run.length; i += 1) flat[i - 1] = { ...flat[i - 1], ...run.want };
+    if (f === 'format-run-other-char-changed') { const idx = (script.faultCharIndex || 1) - 1; if (flat[idx]) flat[idx] = { ...flat[idx], bold: !flat[idx].bold }; }
+    if (f === 'format-run-text-changed') c.v = `${text}X`;
+    const runs = [];
+    let cur = null;
+    for (let i = 0; i < flat.length; i += 1) {
+      const k = JSON.stringify(flat[i]);
+      if (cur && cur.key === k) cur.length += 1; else { cur = { start: i + 1, length: 1, font: flat[i], key: k }; runs.push(cur); }
+    }
+    c.runs = runs.map(({ start, length, font }) => ({ start, length, font }));
+    ws.cells[m.cell] = c;
+    if (f === 'side-effect') ws.cells.Z99 = { v: 'side effect' };
+    dirty = true;
+  }
+
+  /**
+   * GH #83: border.mode 'cells', merge-aware -- `m.cellsSides` (address -> API side names, the SAME map
+   * lower() embeds as CELLS_SIDES) replaces the uniform `spec.border.sides` write: each cell gets ONLY its
+   * own (possibly perimeter-reduced) sides, and a cell absent from the map (fully interior to a merge) is
+   * left untouched entirely -- no call, same as the real per-cell SetBorders loop never reaching it.
+   */
+  function applyCellsSidesBorder(ws, m, f) {
+    const SD = { Top: 't', Bottom: 'b', Left: 'l', Right: 'r' };
+    const prop = { s: STY[m.spec.border.style], c: hexInt(m.spec.border.color) };
+    // GH #83 RED mutant 'gh83-interior-leak': every target cell gets EVERY requested side, ignoring the
+    // per-cell perimeter filter -- proves L1/driftOf catches a write that bleeds onto a merge's interior edge.
+    const sidesOf = a => (f === 'gh83-interior-leak' ? m.spec.border.sides.map(x => ({ top: 'Top', bottom: 'Bottom', left: 'Left', right: 'Right' }[x])) : m.cellsSides[a]);
+    for (const a of f === 'gh83-interior-leak' ? m.cells : Object.keys(m.cellsSides)) {
+      const sides = sidesOf(a);
+      if (!sides || !sides.length) continue;
+      const c = { v: null, ...(ws.cells[a] || {}) };
+      c.border = { ...(c.border || {}) };
+      for (const x of sides.map(y => SD[y])) c.border[x] = prop;
       ws.cells[a] = c;
     }
   }
@@ -608,7 +816,8 @@ function createFakeXlsxDriver(store, script = {}) {
     if (!ws) return;
     const f = script.fault;
     if (f === 'ignore') return;
-    for (const a of f === 'partial' ? m.cells.slice(0, 1) : m.cells) styleCell(ws, a, m.spec);
+    if (m.cellsSides) applyCellsSidesBorder(ws, m, f);
+    else for (const a of f === 'partial' ? m.cells.slice(0, 1) : m.cells) styleCell(ws, a, m.spec);
     if (f === 'format-leaks') styleCell(ws, script.leakCell, m.spec);
     if (m.edges) applyOutline(ws, m, f);
     if (m.removeCells) applyRemove(ws, m, f);
@@ -660,7 +869,8 @@ function createFakeXlsxDriver(store, script = {}) {
     if (ws) {
       const own = (ws.objects && ws.objects.names) || [];
       const kept = own.filter(n => n.name.toLowerCase() !== m.name.toLowerCase());
-      ws.objects = { charts: [], pivots: [], ...ws.objects, names: m.action.startsWith('set_') ? [...kept, { name: m.name, refersTo: `=${ref}` }] : kept };
+      // X-P01 RED mutant 'name-repoint-duplicates': the engine KEEPS the old name and adds the new one (the LIVE probe measured the opposite: ONE Print_Area, replaced)
+      ws.objects = { charts: [], pivots: [], ...ws.objects, names: m.action.startsWith('set_') ? [...(f === 'name-repoint-duplicates' ? own : kept), { name: m.name, refersTo: `=${ref}` }] : kept };
     } else if (m.action.startsWith('set_')) liveNames = [...liveNames, { name: m.name, ref }];
     else liveNames = liveNames.filter(n => n.name.toLowerCase() !== m.name.toLowerCase());
     if (f === 'side-effect') live[0].cells.Z99 = { v: 'side effect' };
@@ -753,10 +963,21 @@ function createFakeXlsxDriver(store, script = {}) {
     for (const { from, to } of pairs) {
       const c = snap[from];
       if (!c) { delete dst.cells[to]; continue; }
-      const moved = { ...c };
+      // L-06 r8: a CROSS-SHEET copy dispatched WITHOUT the editor's Copy (meta.crossSheetWrite) writes values / formulas only -- the cell FORMAT is not carried
+      const moved = m.crossSheetWrite === true ? (c.f ? { v: c.v, f: c.f } : { v: c.v }) : { ...c };
       if (m.action === 'copy_range' && c.f && f !== 'copy-no-translate') moved.f = translateFormula(c.f, m.delta.dr, m.delta.dc).formula;
       if (repoint && c.f) moved.f = moveFormula(c.f, m.sheet, mv).formula;
+      // L-06 r6 'copy-xsheet-shows-literal': onto ANOTHER sheet the editor shows (and saves) the source text untranslated (zero l066: B4 '= B2+1')
+      if (m.action === 'copy_range' && c.f && f === 'copy-xsheet-shows-literal' && m.targetSheet !== m.sheet) moved.f = c.f;
       dst.cells[to] = moved;
+      // an explicit formula write after the Copy (meta.formulaWrites: the planner's translation) sets the cell's formula text as written
+      if (m.action === 'copy_range' && m.explicitFormulaWrite === true && m.formulaWrites && typeof m.formulaWrites[to] === 'string') dst.cells[to] = { ...dst.cells[to], f: m.formulaWrites[to] };
+      // L-06 r8 'cross-copy-delayed' (zero l068): an editor Copy onto ANOTHER sheet leaves a delayed state that overwrites a formula written after it at the next save
+      if (m.action === 'copy_range' && c.f && f === 'cross-copy-delayed' && m.targetSheet !== m.sheet && m.crossSheetWrite !== true) literalOnSave[`${dst.name}\u0000${to}`] = { f: c.f, v: c.v, shown: dst.cells[to].f };
+      if (m.action === 'copy_range' && c.f && f === 'copy-saves-literal') {
+        if (m.explicitFormulaWrite === true) delete literalOnSave[`${dst.name}\u0000${to}`];
+        else literalOnSave[`${dst.name}\u0000${to}`] = { f: c.f, v: c.v, shown: moved.f };
+      }
     }
     if (m.action === 'copy_range' && f === 'copy-corrupts-source') src.cells[pairs[0].from] = { v: 'CORRUPTED' };
     if (f === 'side-effect') { const o = live.find(x => x !== src) || src; o.cells.Z99 = { v: 'side effect' }; }
@@ -776,14 +997,19 @@ function createFakeXlsxDriver(store, script = {}) {
     const { c1, c2, first, r2 } = m.grid;
     const rows = [];
     for (let r = first; r <= r2; r += 1) { const t = []; for (let c = c1; c <= c2; c += 1) t.push(ws.cells[addr(c, r)]); rows.push(t); }
-    const k = m.key - c1;
-    const val = t => (t[k] && t[k].v !== null ? t[k].v : '');
-    const cmp = (a, b) => { const x = val(a); const y = val(b); if (typeof x === 'number' && typeof y === 'number') return x - y; return String(x) < String(y) ? -1 : String(x) > String(y) ? 1 : 0; };
+    const k = m.keyColumn - c1;
+    const valAt = (t, kk) => (t[kk] && t[kk].v !== null ? t[kk].v : '');
+    const val = t => valAt(t, k);
+    const cmpAt = kk => (a, b) => { const x = valAt(a, kk); const y = valAt(b, kk); if (typeof x === 'number' && typeof y === 'number') return x - y; return String(x) < String(y) ? -1 : String(x) > String(y) ? 1 : 0; };
     // M7 S5 R21 (W6 probe): blank keys go last; a formula moves with its row and points at its new row
     // (fault 'sort-formula-stays': it keeps its old row's references)
     const blank = t => val(t) === '';
     const desc = (m.order === 'desc') !== (f === 'sort-reverse');
-    const sorted = rows.map((t, i) => [t, i, first + i]).sort((a, b) => ((blank(a[0]) - blank(b[0])) * (f === 'sort-blanks-first' ? -1 : 1)) || (desc ? cmp(b[0], a[0]) : cmp(a[0], b[0])) || a[1] - b[1]);
+    // GH #301 D3: the secondary keys (m.keys[1..]) break the primary key's ties, in order (fault 'sort-primary-only':
+    // they are ignored -- ties stay in source order)
+    const rest = (m.keys || []).slice(1).filter(() => f !== 'sort-primary-only').map(x => ({ c: cmpAt(x.column - c1), desc: x.order === 'desc' }));
+    const tie = (a, b) => { for (const r of rest) { const c = r.desc ? r.c(b, a) : r.c(a, b); if (c) return c; } return 0; };
+    const sorted = rows.map((t, i) => [t, i, first + i]).sort((a, b) => ((blank(a[0]) - blank(b[0])) * (f === 'sort-blanks-first' ? -1 : 1)) || (desc ? cmpAt(k)(b[0], a[0]) : cmpAt(k)(a[0], b[0])) || tie(a[0], b[0]) || a[1] - b[1]);
     sorted.forEach(([t, , from], i) => {
       for (let c = c1; c <= c2; c += 1) {
         if (f === 'sort-key-only' && c - c1 !== k) continue;
@@ -798,6 +1024,24 @@ function createFakeXlsxDriver(store, script = {}) {
   }
 
   const vOverlap = (a, b) => { const x = parseRange(a); const y = parseRange(b); return !!x && !!y && x.c1 <= y.c2 && y.c1 <= x.c2 && x.r1 <= y.r2 && y.r1 <= x.r2; };
+  // L-22a: xlValidateTime's measured quirk (the probe, test/live/xlsx-l22-validation-types-probe.live.cjs) --
+  // the editor echoes formula1/formula2 back as LOCALE AM/PM TEXT, never the day fraction it was written with.
+  // The fake simulates exactly this one quirk (every other type's formula echoes back literally, unchanged).
+  const fractionToAmPmText = frac => {
+    const totalSec = Math.round(Number(frac) * 86400);
+    const h = Math.floor(totalSec / 3600) % 24;
+    const min = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    const pad = n => String(n).padStart(2, '0');
+    return `${h12}:${pad(min)}:${pad(s)} ${h < 12 ? 'AM' : 'PM'}`;
+  };
+  // L-22d: a date serial echoed back as the editor's LOCALE text N/N/YYYY (script.dateLocale 'MD' = the measured US shape, default; 'DM' = a day-first locale)
+  const serialToDateText = v => {
+    const d = new Date(Date.UTC(1899, 11, 30) + Number(v) * 86400000);
+    const mo = d.getUTCMonth() + 1; const da = d.getUTCDate(); const y = d.getUTCFullYear();
+    return script.dateLocale === 'DM' ? `${da}/${mo}/${y}` : `${mo}/${da}/${y}`;
+  };
   function applyValidation(m) {
     const f = script.fault;
     if (f === 'ignore') return;
@@ -805,20 +1049,72 @@ function createFakeXlsxDriver(store, script = {}) {
     if (!ws) return;
     ws.rules = (ws.rules || []).filter(r => !(r.kind === 'validation' && vOverlap(r.range, m.range)));
     if (m.action === 'set_validation') {
-      const add = range => ({ kind: 'validation', type: 1, range, formula: m.want.formula1, formula2: f === 'validation-wrong-bounds' ? String(Number(m.want.formula2) + 1) : m.want.formula2, api: { type: m.want.type, alertStyle: m.want.alertStyle, operator: m.want.operator } });
+      const isTime = m.want.type === 'xlValidateTime';
+      const isDate = m.want.type === 'xlValidateDate';
+      const encode = v => (isTime && v !== '' ? fractionToAmPmText(v) : (isDate && v !== '' ? serialToDateText(v) : v));
+      const formula2Want = f === 'validation-wrong-bounds' ? String(Number(m.want.formula2) + (isTime ? 1 / 86400 : 1)) : m.want.formula2;
+      // 'validation-date-garbled-echo': the editor's locale text is NOT the measured N/N/YYYY shape -- dateReadSerials() must name this a gap.
+      // 'validation-time-garbled-echo': the editor's locale text is NOT the measured AM/PM shape (e.g. a
+      // different locale) -- timeReadFraction() must name this a gap, never guess a match or a difference.
+      // L-22b 'validation-custom-formula-wrong': the stored formula1 differs from what was requested (a
+      // different absolute formula lands) -- sameFormula() must catch this via L1, same as every other type's
+      // wrong-value RED case.
+      // L-22d v2: date carries TWO independent encodings -- the public locale text (formula/formula2, what
+      // the real editor's GetFormula1/2 returns) and the bridge's own raw serial (bridgeFormula/bridgeFormula2,
+      // what the real DS Bridge range.validations.read/v1 row carries, dependents() below projects it). They
+      // are read from DIFFERENT fault knobs so a test can make either one wrong independently:
+      //   'validation-date-bridge-wrong'  the BRIDGE serial is off by one, the public text still matches the request
+      //   'validation-date-text-conflict' the PUBLIC text names a different date, the bridge serial still matches
+      //   'validation-date-garbled-echo'  (unchanged) only the public text is not the measured N/N/YYYY shape at all
+      const formula1 = f === 'validation-time-garbled-echo' ? 'not-a-time'
+        : f === 'validation-date-garbled-echo' && isDate ? 'not-a-date'
+        : f === 'validation-date-text-conflict' && isDate ? serialToDateText(Number(m.want.formula1) + 10)
+        : f === 'validation-custom-formula-wrong' && m.want.type === 'xlValidateCustom' ? '=$Z$99>0'
+        : encode(m.want.formula1);
+      const formula2 = f === 'validation-time-garbled-echo' && formula2Want !== '' ? 'not-a-time-2'
+        : f === 'validation-date-garbled-echo' && isDate && formula2Want !== '' ? 'not-a-date-2'
+        : f === 'validation-date-text-conflict' && isDate && formula2Want !== '' ? serialToDateText(Number(formula2Want) + 10)
+        : encode(formula2Want);
+      // the bridge mirrors whatever was ACTUALLY requested to be written, including 'validation-wrong-bounds'
+      // (formula2Want, not m.want.formula2) -- only 'validation-date-bridge-wrong' deliberately mis-stores it.
+      const bridgeFormula1 = f === 'validation-date-bridge-wrong' && isDate ? String(Number(m.want.formula1) + 1) : m.want.formula1;
+      const bridgeFormula2 = f === 'validation-date-bridge-wrong' && isDate && formula2Want !== '' ? String(Number(formula2Want) + 1) : formula2Want;
+      const add = range => ({ kind: 'validation', type: 1, range, formula: formula1, formula2, api: { type: m.want.type, alertStyle: m.want.alertStyle, operator: m.want.operator },
+        ...(isDate ? { bridgeFormula: bridgeFormula1, bridgeFormula2: bridgeFormula2 } : {}) });
       ws.rules.push(add(m.range));
       if (f === 'validation-leaks') ws.rules.push(add(script.leakRange));
     }
     if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
     dirty = true;
   }
+  const firstCellOf = range => { const g = parseA1Range(range); return g ? a1Addr(g.c1, g.r1) : range; };
   function validationReadsOf(asked) {
     const out = {};
     for (const w of asked) {
       if (script.validationReadUnobservable) { out[`${w.sheet}!${w.range}`] = 'UNOBSERVABLE:threw'; continue; }
       const ws = live.find(x => x.name === w.sheet);
       const r = ws && (ws.rules || []).find(x => x.kind === 'validation' && vOverlap(x.range, w.range));
-      out[`${w.sheet}!${w.range}`] = r ? { ...(r.api || { type: 'xlValidateList', alertStyle: 'xlValidAlertStop', operator: 'xlBetween' }), formula1: r.formula, formula2: r.formula2 || '' } : { absent: true };
+      if (!r) { out[`${w.sheet}!${w.range}`] = { absent: true }; continue; }
+      // L-22e: the editor shows a custom formula AS IF WRITTEN AT the rule's own sheet's CURRENT active
+      // cell (measured, xlsx-l22e-custom-relative-ref-probe.live.cjs r1-r3) -- the fake's own default is
+      // "no quirk" (activeCell happens to equal the rule's own anchor, so the echo is the exact stored
+      // text, unchanged from every other type). 'validation-custom-read-shifted-from-elsewhere' simulates
+      // the measured defect for real: the active cell is a FIXED, unrelated cell, and formula1 is shifted
+      // from the rule's own anchor to THAT cell, exactly as the real editor was measured to do -- so the
+      // RED/GREEN this exercises proves the adapter's reAnchoredFormula() un-shifts it correctly, not
+      // just that the fake happens to already agree with the stored text.
+      let formula1 = r.formula;
+      let activeCell = firstCellOf(r.range);
+      if (script.fault === 'validation-custom-read-shifted-from-elsewhere' && r.api && r.api.type === 'xlValidateCustom') {
+        const elsewhere = 'A1';
+        const from = parseA1Range(activeCell); const to = parseA1Range(elsewhere);
+        formula1 = translateFormula(formula1, to.r1 - from.r1, to.c1 - from.c1).formula;
+        activeCell = elsewhere;
+      }
+      // L-22e: GetActiveCell() itself unobservable (the driver's own UNOBSERVABLE: sentinel) -- the formula
+      // text is unaffected, only the reference cell needed to re-anchor it is missing.
+      if (script.fault === 'validation-custom-active-cell-unobservable' && r.api && r.api.type === 'xlValidateCustom') activeCell = 'UNOBSERVABLE:active-cell-threw';
+      out[`${w.sheet}!${w.range}`] = { ...(r.api || { type: 'xlValidateList', alertStyle: 'xlValidAlertStop', operator: 'xlBetween' }), formula1, formula2: r.formula2 || '', activeCell };
     }
     return out;
   }
@@ -829,10 +1125,17 @@ function createFakeXlsxDriver(store, script = {}) {
     xlAboveAverageCondition: ['aboveBelow', 'numStdDev'],
     xlTop10: ['rank', 'percent', 'topBottom'],
     xlUniqueValues: [],
-    // M7 X-O01 (default-only creation, no appearance fields -- same empty-identity shape as xlUniqueValues)
+    // M7 X-O01: no type-level identity field; X-O01 appearance keys join per rule (rule.idKeys)
     xlColorScale: [],
     xlDatabar: [],
     xlIconSets: [],
+  };
+  // X-O01: the appearance fields the real reader returns for these types (CF_SCALAR_FIELDS + stopColors), with the
+  // engine defaults the LIVE phase-1 probe read; a rule's identity is the appearance keys it asked for (rule.idKeys)
+  const CF_APPEARANCE_DEFAULTS = {
+    xlDatabar: { barColor: 6524614, barFillType: 'xlDataBarFillGradient', direction: 'xlContext', showValue: true, axisPosition: 'xlDataBarAxisAutomatic' },
+    xlIconSets: { iconSet: 'xl3TrafficLights1', showIconOnly: false, reverseOrder: false },
+    xlColorScale: { stopColors: JSON.stringify([16279915, 16771972, 6536827]) },
   };
   function applyCf(m) {
     const f = script.fault;
@@ -840,7 +1143,7 @@ function createFakeXlsxDriver(store, script = {}) {
     const ws = live.find(x => x.name === m.sheet);
     if (!ws) return;
     const r = m.rule;
-    const own = CF_OWN_FIELDS[r.type];
+    const own = CF_OWN_FIELDS[r.type] && [...CF_OWN_FIELDS[r.type], ...(r.idKeys || [])];
     const mine = x => x.kind === 'conditional' && x.range === m.range && x.type === r.type
       && (own ? own.every(k => x[k] === r[k]) : x.operator === r.operator && String(x.formula) === r.formula1 && (x.fill === undefined ? null : x.fill) === r.fill);
     ws.rules = ws.rules || [];
@@ -858,7 +1161,7 @@ function createFakeXlsxDriver(store, script = {}) {
     const flip = v => (typeof v === 'boolean' ? !v : (typeof v === 'number' ? v + 1 : `${v}-wrong`));
     if (m.action === 'add_conditional_format') {
       const add = own
-        ? { kind: 'conditional', type: r.type, range: m.range, ...Object.fromEntries(own.map(k => [k, wrongFields.includes(k) ? flip(r[k]) : r[k]])) }
+        ? { kind: 'conditional', type: r.type, range: m.range, ...(CF_APPEARANCE_DEFAULTS[r.type] || {}), ...Object.fromEntries(own.map(k => [k, wrongFields.includes(k) ? flip(r[k]) : r[k]])) }
         : { kind: 'conditional', type: r.type, operator: r.operator, formula: r.formula1, ...(r.formula2 ? { formula2: f === 'cf-wrong-formula2' ? `${r.formula2}0` : r.formula2 } : {}), fill: f === 'cf-wrong-fill' ? (r.fill === null ? 1 : r.fill + 1) : (r.fill === null ? undefined : r.fill), range: m.range };
       ws.rules.push(add);
       if (f === 'cf-duplicate') ws.rules.push({ ...add });
@@ -879,7 +1182,8 @@ function createFakeXlsxDriver(store, script = {}) {
       if (matching.some(x => x.type === '')) { out[`${w.sheet}!${w.range}`] = 'UNOBSERVABLE:cf-type-empty'; continue; }
       out[`${w.sheet}!${w.range}`] = matching.map(x => {
         const own = CF_OWN_FIELDS[x.type];
-        if (own) return { type: x.type, appliesTo: x.range, ...Object.fromEntries(own.map(k => [k, x[k]])) };
+        const look = CF_APPEARANCE_DEFAULTS[x.type];
+        if (own) return { type: x.type, appliesTo: x.range, ...Object.fromEntries(own.map(k => [k, x[k]])), ...(look ? Object.fromEntries(Object.keys(look).map(k => [k, x[k] === undefined ? look[k] : x[k]])) : {}) };
         return { type: x.type || 'xlExpression', operator: x.operator || null, formula1: x.formula, formula2: x.formula2 || '', fill: x.fill === undefined ? null : x.fill, appliesTo: x.range };
       });
     }
@@ -894,8 +1198,14 @@ function createFakeXlsxDriver(store, script = {}) {
     if (m.action === 'filter_range') {
       const af = ws.autoFilter && ws.autoFilter.range === m.range ? ws.autoFilter : { range: m.range, filters: [] };
       // M7 R19: values -> xlOr =a / =b; and -> xlAnd c1 / c2 (the probe's read-back)
-      const crit = m.values ? { operator: 'xlOr', criteria1: `=${m.values[0]}`, criteria2: `=${m.values[1]}` } : (m.and ? { operator: 'xlAnd', criteria1: m.and[0], criteria2: m.and[1] } : { operator: 'xlOr', criteria1: `=${f === 'filter-wrong-value' ? `${m.value}!` : m.value}`, criteria2: null });
-      if (f === 'filter-wrong-value' && m.values) crit.criteria2 = `=${m.values[1]}!`;
+      const wrong = f === 'filter-wrong-value';
+      // GH #301 D2 (AF-02): 3+ values -> xlFilterValues + the array; top -> xlTop10Items n; dynamic -> xlFilterDynamic constant
+      const DYN = { aboveAverage: 'xlFilterAboveAverage', belowAverage: 'xlFilterBelowAverage' };
+      const crit = m.values && m.values.length > 2 ? { operator: 'xlFilterValues', criteria1: wrong ? m.values.slice(0, -1) : [...m.values], criteria2: null }
+        : m.top ? { operator: 'xlTop10Items', criteria1: wrong ? m.top + 1 : m.top, criteria2: null }
+          : m.dynamic ? { operator: 'xlFilterDynamic', criteria1: wrong ? 'xlFilterToday' : DYN[m.dynamic], criteria2: null }
+            : m.values ? { operator: 'xlOr', criteria1: `=${m.values[0]}`, criteria2: `=${m.values[1]}` } : (m.and ? { operator: 'xlAnd', criteria1: m.and[0], criteria2: m.and[1] } : { operator: 'xlOr', criteria1: `=${wrong ? `${m.value}!` : m.value}`, criteria2: null });
+      if (wrong && m.values && m.values.length === 2) crit.criteria2 = `=${m.values[1]}!`;
       if (f === 'filter-wrong-operator') crit.operator = crit.operator === 'xlAnd' ? 'xlOr' : 'xlAnd';
       af.filters = af.filters.filter(x => x.field !== m.field && f !== 'filter-drops-other').concat([{ field: f === 'filter-wrong-field' ? m.field + 1 : m.field, on: true, ...crit }]);
       if (f === 'filter-extra-field') af.filters.push({ field: m.field + 1, on: true, operator: 'xlOr', criteria1: '=extra', criteria2: null });
@@ -942,6 +1252,84 @@ function createFakeXlsxDriver(store, script = {}) {
       // changing it -- fault 'legend-rejected' simulates that (the position stays as it was).
       const hit = list.find(c => c.name === m.name);
       if (hit && f !== 'legend-rejected') { hit.legend = m.legend; if (f === 'legend-drops-series') hit.series = hit.series.slice(0, -1); }
+    } else if (m.action === 'move_chart') {
+      // X-O06-6: moves the chart's pos (read back through drawingReadsOf's chart mapper, which
+      // defaults to CHART_GEOM.pos when unset -- setting it explicitly here is what makes the
+      // move observable). Fault 'move-chart-wrong-position' lands one column over.
+      // Fault 'move-chart-size-drifts' ALSO perturbs the SAME chart's own width by 1 EMU,
+      // simulating the real ±1 EMU drift X-O08 measured -- proves `sizeBlind` absorbs it (L3
+      // must stay GREEN; a self-check in the test file flips `sizeBlind` off to prove it would
+      // otherwise FAIL).
+      const hit = list.find(c => c.name === m.name);
+      if (hit) {
+        hit.pos = { fromCol: f === 'move-chart-wrong-position' ? m.at.col + 1 : m.at.col, colOffset: 0, fromRow: m.at.row, rowOffset: 0 };
+        if (f === 'move-chart-size-drifts') hit.w = (hit.w === undefined ? CHART_GEOM.w : hit.w) - 1;
+      }
+    } else if (m.action === 'set_chart_style') {
+      // X-O04/1+2: the six ORIGINAL targets are WRITE-ONLY, no readable field for the style itself --
+      // nothing to mutate on the fake chart record normally. The one observable fault
+      // ('style-setter-rejected') is handled at the dispatch layer above, BEFORE applyCharts is even
+      // called. 'style-alters-legend' is a SABOTAGE fault (an unrelated field changes as a side
+      // effect of the style write) -- this IS observable (the family's own PRIMITIVE.set_chart_style
+      // "kept" check reads it back), proving that check actually fires, not just that it exists.
+      const hit = list.find(c => c.name === m.name);
+      if (hit && f === 'style-alters-legend') hit.legend = hit.legend === 'bottom' ? 'top' : 'bottom';
+      // X-O04/11: marker/gridlines ARE readable (through the chartReadsOf markerStyle/gridlinesColor
+      // fields above) -- a successful dispatch records the written colour, the SAME round-trip the
+      // real X-O04/10 bridge read proves end-to-end. 'style-bridge-stale' is a SABOTAGE fault: the
+      // dispatch succeeds but the bridge-read value does NOT change, proving classifyStyle/PRIMITIVE
+      // actually read-and-compare rather than trusting the dispatch outcome.
+      if (hit && m.target === 'marker' && f !== 'style-bridge-stale') {
+        const s = hit.series[m.seriesIndex];
+        if (s) {
+          if (m.styleFill !== null) s.markerFill = m.styleFill;
+          if (m.styleOutline !== null) s.markerOutline = m.styleOutline.color;
+        }
+      }
+      if (hit && m.target === 'gridlines' && f !== 'style-bridge-stale') {
+        hit.gridlinesColor = { ...(hit.gridlinesColor || {}), [`${m.axis}Gridlines`]: m.styleOutline.color };
+      }
+      // X-O05/3: gapOverlap is chart-level (no seriesIndex) -- only the requested field(s) move,
+      // same "only what was asked" convention markerFill/markerOutline above already follow.
+      if (hit && m.target === 'gapOverlap' && f !== 'style-bridge-stale') {
+        hit.gapOverlap = { ...(hit.gapOverlap || {}), ...(m.styleGapWidth !== null ? { gapWidth: m.styleGapWidth } : {}), ...(m.styleOverlap !== null ? { overlap: m.styleOverlap } : {}) };
+      }
+      // X-O05/3: seriesOrder writes the WHOLE permutation in one call -- every series' own order
+      // moves together, mirroring the real handler's one-setOrder()-call-per-series loop.
+      if (hit && m.target === 'seriesOrder' && f !== 'style-bridge-stale') {
+        m.styleOrder.forEach((v, i) => { if (hit.series[i]) hit.series[i].order = v; });
+      }
+    } else if (m.action === 'delete_chart') {
+      // X-O07/3: removes the WHOLE chart record -- the generic `f === 'ignore'` fault above
+      // (dispatch succeeds, nothing actually happens) already covers the RED case, same
+      // convention every other intent in this family shares; no delete-specific fault needed.
+      const idx = list.findIndex(c => c.name === m.name);
+      if (idx >= 0) list.splice(idx, 1);
+    } else if (m.action === 'copy_chart') {
+      // X-O07/4b: v1 copies type/series/title/legend/axis-titles only (never the style targets --
+      // charts.cjs's own COPY_CHART_ALWAYS_OMITTED names them, unconditionally, in the receipt).
+      // Series are the SOURCE's own records, verbatim (same underlying data, not re-derived from
+      // meta.series which stays null for this action -- see charts.cjs's lower() comment on why).
+      const srcWs = live.find(x => x.name === m.sourceSheet);
+      const srcList = (srcWs && srcWs.objects && srcWs.objects.charts) || [];
+      const src = srcList.find(c => c.name === m.sourceName);
+      if (!src) return;
+      // Fault 'copy-wrong-series' (M7-style negative): the recreated chart's series drop its last entry.
+      const series = f === 'copy-wrong-series' ? src.series.slice(0, -1) : src.series.map(clone);
+      const chart = { name: m.name, type: m.type, title: m.title, legend: m.legend, series, pos: { fromCol: m.at.col, colOffset: 0, fromRow: m.at.row, rowOffset: 0 } };
+      if (m.copyHorAxisTitle) chart.horAxisTitle = `${m.copyHorAxisTitle}\r\n`;
+      if (m.copyVerAxisTitle) chart.verAxisTitle = `${m.copyVerAxisTitle}\r\n`;
+      // GH #302 G6: the copy carries the chart-level flags and every POINT label (a fresh chart: every point SERIES, all off);
+      // fault 'copy-drops-point-labels' -- the point calls do nothing (the G6 RED for the point half)
+      if (m.copyLabels) chart.dataLabels = { ...m.copyLabels };
+      if (src.effectiveLabels && typeof src.effectiveLabels === 'object') {
+        chart.effectiveLabels = Object.fromEntries(Object.keys(src.effectiveLabels).map(k => [k, { level: 'SERIES', showSerName: false, showCatName: false, showVal: false, showPercent: false }]));
+        if (f !== 'copy-drops-point-labels') for (const x of m.copyPoints || []) chart.effectiveLabels[x.key] = { level: 'POINT', ...x.flags };
+      }
+      // Fault 'copy-alters-source': a SABOTAGE fault -- the source chart changes as a side effect
+      // of copying it, proving verifyPreservation's "every OTHER chart kept" check actually fires.
+      if (f === 'copy-alters-source') src.title = `${src.title}!`;
+      list.push(chart);
     } else {
       const hit = list.find(c => c.name === m.name);
       if (hit && f === 'rename-copies') list.push({ ...clone(hit), name: m.newName });
@@ -1050,6 +1438,36 @@ function createFakeXlsxDriver(store, script = {}) {
   const gridAt = (sheet, range) => { const g = parseRange(range); const out = []; for (let r = g.r1; r <= g.r2; r += 1) { const row = []; for (let c = g.c1; c <= g.c2; c += 1) row.push((sheet.cells[addr(c, r)] || {}).v); out.push(row); } return out; };
   const refOf = (sheet, range) => `${sheet}!$${range.replace(':', ':$').replace(/([A-Z]+)(\d+)/g, '$1$$$2')}`;
 
+  // X-O08 drawings-insert (insert_shape / insert_image): pushes a new raw drawing onto ws.drawings,
+  // in the SAME shape drawingReadsOf's `own` mapper already expects (kind/name/pos/width/height,
+  // +text for a shape) -- reusing the EXISTING generic drawing machinery, not a parallel system.
+  // Faults: 'ignore' (no-op write); 'drawing-insert-wrong-position' (lands one column over);
+  // 'drawing-insert-wrong-kind' (an image is recorded as a shape, or vice versa);
+  // 'drawing-insert-wrong-stroke-width' (X-O08-7 v2: the SetLine write lands a width +1 EMU off
+  // the requested one -- an L1 FAIL on the stroke axis, the SAME shape the position fault uses).
+  // A shape's default (no `stroke` requested) strokeWidth is 0 -- the product's own hardcoded
+  // `Api.CreateStroke(0, Api.CreateNoFill())`, never undefined/unobserved, mirroring the real driver.
+  // GH #139 D4/D6: fillLineColor, the SAME /14+ driver read (drawings.cjs's normalize() now passes
+  // it through) -- the written value by default (an accepted runtime, matching today's real /15);
+  // script.colourUnobservable simulates a pre-/14 accepted runtime (CAPABILITY_MISSING, the colour
+  // axis stays unprovable, same as before this capability existed); 'drawing-insert-wrong-colour' /
+  // 'drawing-insert-wrong-stroke-colour' flip the leading hex digit of the written fill/stroke
+  // colour -- an L1 FAIL on that ONE axis, the SAME shape the position/stroke-width faults use.
+  const flipHex = hex => (hex[0] === 'F' ? `0${hex.slice(1)}` : `F${hex.slice(1)}`);
+  function applyDrawingsInsert(m) {
+    const f = script.fault;
+    if (f === 'ignore') return;
+    const ws = live.find(x => x.name === m.sheet);
+    if (!ws) return;
+    ws.drawings = ws.drawings || [];
+    const col = f === 'drawing-insert-wrong-position' ? m.at.col + 1 : m.at.col;
+    const kind = f === 'drawing-insert-wrong-kind' ? (m.kind === 'shape' ? 'image' : 'shape') : m.kind;
+    const strokeWidth = m.stroke ? Math.round(m.stroke.width * 12700) + (f === 'drawing-insert-wrong-stroke-width' ? 1 : 0) : 0;
+    const fillLineColor = kind !== 'shape' ? undefined : script.colourUnobservable ? 'UNOBSERVABLE:CAPABILITY_MISSING'
+      : { fill: f === 'drawing-insert-wrong-colour' ? flipHex(m.fill) : m.fill, line: m.stroke ? (f === 'drawing-insert-wrong-stroke-colour' ? flipHex(m.stroke.color) : m.stroke.color) : 'noLine' };
+    ws.drawings.push({ kind, name: m.name, pos: { fromCol: col, colOffset: 0, fromRow: m.at.row, rowOffset: 0 }, width: m.sizeEmu.width, height: m.sizeEmu.height, ...(kind === 'shape' ? { text: '', strokeWidth, fillLineColor } : {}) });
+  }
+
   // M7 P1: create_pivot as the probe measured it (P-A3): the table at `at`, (2 + row keys + 1) x (1 + column keys + 1),
   // keys ascending, a title row, a label row, the sums, the grand totals; the pivot record on the host with its public
   // (in-session) source, the raw identity (dataRef, fields), the table address and the layout. Faults: 'pivot-wrong-sum',
@@ -1059,7 +1477,7 @@ function createFakeXlsxDriver(store, script = {}) {
     if (f === 'ignore') return;
     if (m.action === 'refresh_pivot') { applyPivotRefresh(m, f); return; }
     const src = live.find(x => x.name === m.sheet);
-    const host = live.find(x => x.name === m.host);
+    const host = live.find(x => x.name === m.pivotSheet);
     if (!src || !host) return;
     const grid = gridAt(src, m.range);
     const at = parseRange(m.at);
@@ -1123,13 +1541,34 @@ function createFakeXlsxDriver(store, script = {}) {
     if (script.pageFieldMissing) delete st.printHeadings;
     if (script.pageMarginMissing) delete st.leftMargin;
     return [n, script.pageBuild === false ? 'UNOBSERVABLE:per-sheet-read-not-verified' : st]; }));
+  // X-O04/10/11: MARKER_WRITE_TYPES mirrors the real driver's own scope (xlsx-driver.cjs chartReads:
+  // type==='scatter'||'lineNormal') -- a series only carries `markerStyle` on those two types,
+  // matching the X-O04/6 LIVE fixture (an untouched series' field is null, never absent/guessed).
+  // script.chartStyleUnobservable simulates a pre-/11 bridge (both fields read 'UNOBSERVABLE:...').
+  const MARKER_WRITE_TYPES = ['scatter', 'lineNormal'];
   const chartReadsOf = asked => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => { const ws = live.find(x => x.name === n); const o = ws && ws.objects ? ws.objects : { charts: [], pivots: [] };
-    return [n, script.chartsUnobservable ? 'UNOBSERVABLE:threw' : { charts: (o.charts || []).map(c => ({ name: c.name === undefined ? null : c.name, type: c.type, title: c.title === undefined ? null : c.title, legend: c.legend === undefined ? 'bottom' : c.legend, series: c.series.map(x => ({ name: x.name, values: x.values, cat: x.cat })),
+    return [n, script.chartsUnobservable ? 'UNOBSERVABLE:threw' : { charts: (o.charts || []).map(c => ({ name: c.name === undefined ? null : c.name,
+      // X-O03/3 (LIVE MEASURED): GetChartType() reads a radar chart back as "unknown", never
+      // "radar" -- every other type (stock included) reads back as its own name.
+      type: c.type === 'radar' ? 'unknown' : c.type, title: c.title === undefined ? null : c.title, legend: c.legend === undefined ? 'bottom' : c.legend,
+      series: c.series.map((x, si) => ({ name: x.name, values: x.values, cat: x.cat,
+        // X-O05/2 (LIVE VERIFIED): order is read on EVERY chart type, not scoped like markerStyle
+        // above -- an untouched series' baseline is its own index (the measured default, sequential).
+        order: script.chartStyleUnobservable ? 'UNOBSERVABLE:CAPABILITY_MISSING' : (script.orderReadAsObject ? { order: x.order === undefined ? si : x.order } : (x.order === undefined ? si : x.order)),
+        ...(MARKER_WRITE_TYPES.includes(c.type) ? { markerStyle: script.chartStyleUnobservable ? 'UNOBSERVABLE:CAPABILITY_MISSING' : { fill: x.markerFill === undefined ? null : x.markerFill, outline: x.markerOutline === undefined ? null : x.markerOutline } } : {}) })),
       // X-O05: an untouched chart's axis titles / data labels are absent in the fake's own object -- normalized to the
       // baseline the real engine MEASURED (null / null / every flag false); script.chartLabelsUnobservable
       // makes the labels read return a non-object (the unobservable branch)
       horAxisTitle: c.horAxisTitle === undefined ? null : c.horAxisTitle, verAxisTitle: c.verAxisTitle === undefined ? null : c.verAxisTitle,
-      dataLabels: script.chartLabelsUnobservable ? undefined : (c.dataLabels || { showSerName: false, showCatName: false, showVal: false, showPercent: false }) })), pivots: (o.pivots || []).map(p => p.name) }]; }));
+      dataLabels: script.chartLabelsUnobservable ? undefined : (c.dataLabels || { showSerName: false, showCatName: false, showVal: false, showPercent: false }),
+      // GH #302 G6: the per-point effective labels only when the chart record carries them (absent = not read, the
+      // unobservable branch -- the fake's charts predate this field)
+      ...(c.effectiveLabels !== undefined ? { effectiveLabels: clone(c.effectiveLabels) } : {}),
+      gridlinesColor: script.chartStyleUnobservable ? 'UNOBSERVABLE:CAPABILITY_MISSING' : { verticalGridlines: (c.gridlinesColor && c.gridlinesColor.verticalGridlines !== undefined) ? c.gridlinesColor.verticalGridlines : null, horizontalGridlines: (c.gridlinesColor && c.gridlinesColor.horizontalGridlines !== undefined) ? c.gridlinesColor.horizontalGridlines : null },
+      // X-O05/2 (LIVE VERIFIED): chart-level, read on EVERY chart type the fake carries (the real
+      // bridge handler itself gates to bar-only; classifyStyle's own bar-only check runs BEFORE
+      // this field is ever read, so the fake does not need to repeat that gate here).
+      gapOverlap: script.chartStyleUnobservable ? 'UNOBSERVABLE:CAPABILITY_MISSING' : { gapWidth: (c.gapOverlap && c.gapOverlap.gapWidth !== undefined) ? c.gapOverlap.gapWidth : null, overlap: (c.gapOverlap && c.gapOverlap.overlap !== undefined) ? c.gapOverlap.overlap : null } })), pivots: (o.pivots || []).map(p => p.name) }]; }));
   // Drawings (M7 S2b): a sheet's charts (objects.charts; pos / w / h default to the probe's chart geometry, w: 0 = the
   // measured 0 x 0) plus its explicit `drawings` (raw images / shapes in the driver's read shape); read for
   // `drawingSheets` ('*' = every sheet). script.drawingsUnobservable -> every sheet 'UNOBSERVABLE:threw';
@@ -1183,6 +1622,32 @@ function createFakeXlsxDriver(store, script = {}) {
     if (script.fault.startsWith('chart-') ? c : d) fn(d, c, ws);
   }
   const filterReadsOf = asked => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => { const ws = live.find(x => x.name === n); return [n, script.filterBuild === false ? 'UNOBSERVABLE:field-build-not-verified' : (ws && ws.autoFilter ? clone(ws.autoFilter) : { range: null, filters: [] })]; }));
+  // GH #326/#327: a sheet is unprotected unless the fixture opts in with `ws.protection = { forbids: {<flag
+  // overrides, default false>}, unlocked: [<A1 addresses, EXPLICITLY unlocked>] }` -- the SAME shape
+  // sheet.protection.read/v1 reads on the real DS 9.3.5 bridge (docs/DS-9.3.5-BRIDGE17-PROTECTION-READ.md): a
+  // NON-EMPTY cell NOT named in `unlocked` is the Excel default, LOCKED (an empty cell is never listed either
+  // way -- the SAME fail-closed direction the real handler's own range walk uses). An unprotected sheet needs
+  // no cell-level walk (`cells: null`). `script.protectionUnread` names a sheet whose read degrades, for the
+  // fail-closed branch's own test.
+  const FLAGS = ['objects', 'scenarios', 'formatCells', 'formatColumns', 'formatRows', 'insertColumns', 'insertRows', 'insertHyperlinks', 'deleteColumns', 'deleteRows', 'selectLockedCells', 'sort', 'autoFilter', 'pivotTables', 'selectUnlockedCells'];
+  const protectionValue = (n, range) => {
+    const ws = live.find(x => x.name === n);
+    if (!ws) return 'UNOBSERVABLE:sheet-missing';
+    if ((script.protectionUnread || []).includes(n)) return 'UNOBSERVABLE:scripted';
+    const p = ws.protection;
+    if (!p) return { protected: false, forbids: null, cells: range !== undefined ? rangeCells(ws, range, null) : null };
+    const forbids = Object.fromEntries(FLAGS.map(f => [f, !!(p.forbids && p.forbids[f])]));
+    return { protected: true, forbids, cells: range !== undefined ? rangeCells(ws, range, p.unlocked || []) : null };
+  };
+  // `unlocked === null` (the sheet is NOT protected): every non-empty cell reads as unlocked (no restriction
+  // applies either way); otherwise ONLY the named addresses do -- the Excel locked-by-default direction.
+  const rangeCells = (ws, range, unlocked) => {
+    const g = parseRange(range);
+    const nonEmpty = cellsOf(g).filter(a => ws.cells && ws.cells[a] !== undefined);
+    return { range, nonEmpty: nonEmpty.length, unlocked: unlocked === null ? nonEmpty : nonEmpty.filter(a => unlocked.includes(a)), hidden: [] };
+  };
+  const protectionReadsOf = asked => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => [n, protectionValue(n)]));
+  const protectionRangeReadsOf = asked => Object.fromEntries(asked.map(w => [`${w.sheet}!${w.range}`, protectionValue(w.sheet, w.range)]));
 
   const sideNames = [];
   /** faults 'side-rule' / 'side-name': the dispatch also adds a rule on another sheet / a workbook name (L3's job) */
@@ -1207,7 +1672,9 @@ function createFakeXlsxDriver(store, script = {}) {
     const rect = a => { const g = parseRange(a); return { r1: g.r1 - 1, c1: g.c1 - 1, r2: g.r2 - 1, c2: g.c2 - 1 }; };
     const names = [...liveNames.concat(sideNames).map(n => ({ name: n.name, ref: n.ref, scopeSheet: null })),
       ...live.flatMap(x => ((x.objects && x.objects.names) || []).map(n => ({ name: n.name, ref: bare(n.refersTo), scopeSheet: x.name })))];
-    const validations = Object.fromEntries(live.map(x => [x.name, (x.rules || []).filter(r => r.kind === 'validation').map(r => ({ type: 4, ranges: [rect(r.range)], formula1: bare(r.formula), formula2: r.formula2 ? bare(r.formula2) : null }))]));
+    // L-22d v2: the bridge projects the rule's OWN raw serial (r.bridgeFormula/2) when the rule carries one
+    // (date) -- never the public locale text (r.formula/2), which is what every OTHER type still projects.
+    const validations = Object.fromEntries(live.map(x => [x.name, (x.rules || []).filter(r => r.kind === 'validation').map(r => ({ type: 4, ranges: [rect(r.range)], formula1: bare('bridgeFormula' in r ? r.bridgeFormula : r.formula), formula2: ('bridgeFormula2' in r ? r.bridgeFormula2 : r.formula2) ? bare('bridgeFormula2' in r ? r.bridgeFormula2 : r.formula2) : null }))]));
     const conditional = Object.fromEntries(live.map(x => [x.name, (x.rules || []).filter(r => r.kind === 'conditional').map(r => ({ type: r.type || 'xlExpression', ...(r.type === 'xlCellValue' ? { operator: r.operator } : {}), appliesTo: `${x.name}!$${r.range.replace(/(\d)/, '$$$1')}`, formula1: bare(r.formula), formula2: r.formula2 ? bare(r.formula2) : '' }))]));
     if (script.conditionalFault) conditional[live[0].name] = script.conditionalFault;
     if (script.dependencyBuild === false) return { dependents: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', conditional };
@@ -1231,7 +1698,7 @@ function createFakeXlsxDriver(store, script = {}) {
       return { ok: true, confirmation: script.closeConfirmation || confirmation };
     },
     async forceSave() {
-      calls.forceSave += 1; store.durable = clone(live); store.names = clone(liveNames); store.active = active; store.saves += 1; dirty = false;
+      calls.forceSave += 1; store.durable = clone(live); for (const [k, lit] of Object.entries(literalOnSave)) { const [sh, a] = k.split('\u0000'); const ws = store.durable.find(x => x.name === sh); if (ws && ws.cells[a] && ws.cells[a].f === lit.shown) ws.cells[a] = { ...ws.cells[a], f: lit.f, v: lit.v }; } store.names = clone(liveNames); store.active = active; store.saves += 1; dirty = false;
       if (script.forceSaveUnconfirmed) return { ok: true, confirmed: false, forceSave: { state: 'unconfirmed', reason: script.forceSaveUnconfirmed } };
       confirmedAt = calls.dispatch;
       return { ok: true, confirmed: true, forceSave: { state: 'confirmed', reason: 'forcesave-confirmed' } };
@@ -1255,7 +1722,11 @@ function createFakeXlsxDriver(store, script = {}) {
       for (const w of (request && request.windows) || []) {
         const sheet = live.find(s => s.name === w.sheet);
         const g = parseRange(w.range);
-        if (sheet && g) for (const a of cellsOf(g)) push(sheet, a, w.format === true, w.style === true);
+        if (sheet && g) for (const a of cellsOf(g)) {
+          push(sheet, a, w.format === true, w.style === true);
+          // X-T01: the `nf` window flag reads the number format ALONE (the driver's PUBLIC GetNumberFormat)
+          if (w.nf === true && w.format !== true) { const o = out[idx.get(`${sheet.name}!${a}`)]; if (!('nf' in o)) o.nf = readCell(sheet, a, true, false).nf; }
+        }
       }
       return {
         ok: true,
@@ -1265,13 +1736,20 @@ function createFakeXlsxDriver(store, script = {}) {
           ...(request && request.dependents ? dependents() : {}),
           ...(request && request.layout ? { layout: layoutOf(request.layout) } : {}),
           ...(request && request.panes ? { panes: panesOf(), active } : {}),
+          ...(request && request.sheetVisibility ? { visibility: Object.fromEntries(live.map(x => [x.name, script.visibilityUnreadable ? 'UNOBSERVABLE:scripted' : x.hidden !== true])) } : {}),
           ...(request && request.validationRanges ? { validationReads: validationReadsOf(request.validationRanges) } : {}),
           ...(request && request.cfRanges ? { cfReads: cfReadsOf(request.cfRanges) } : {}),
+          ...(request && request.runCells ? { runReads: runReadsOf(request.runCells) } : {}),
+          ...(request && request.arrayCells ? { arrayReads: arrayReadsOf(request.arrayCells) } : {}),
+          ...(request && request.commentSheets ? { commentReads: commentReadsOf(request.commentSheets) } : {}),
+          ...(request && request.sessionUser ? { sessionUser: sessionUserOf() || 'UNOBSERVABLE:no-session-user' } : {}),
           ...(request && request.filterSheets ? { filterReads: filterReadsOf(request.filterSheets) } : {}),
           ...(request && request.chartSheets ? { chartReads: chartReadsOf(request.chartSheets) } : {}),
           ...(request && request.drawingSheets ? { drawingReads: (anchorAsked = !!request.drawingAnchor && script.anchorBuild !== false, drawingReadsOf(request.drawingSheets)) } : {}),
           ...(request && request.pageSheets ? { pageReads: pageReadsOf(request.pageSheets) } : {}),
           ...(request && request.printSheets ? { printReads: printReadsOf(request.printSheets, request.colBreaks === true) } : {}),
+          ...(request && request.protectionSheets ? { protectionReads: protectionReadsOf(request.protectionSheets) } : {}),
+          ...(request && request.protectionRanges ? { protectionRangeReads: protectionRangeReadsOf(request.protectionRanges) } : {}),
           runtime: { identity: script.runtime === undefined ? XLSX_RUNTIME_ID : script.runtime, cacheKey: '9.3.4-fakecachekey00', ...(script.fileIdUnobservable ? {} : { fileId: openedFileId }) } },
       };
     },
@@ -1280,6 +1758,8 @@ function createFakeXlsxDriver(store, script = {}) {
       calls.dispatch += 1;
       if (script.fault === 'throw') throw new Error('transport lost');
       if (!command || command.kind !== 'callCommand' || !command.meta) return { ok: false, dispatched: true };
+      // GH #300 K2: the real driver's author prelude -- no session author, no dispatch
+      if (command.meta.sessionAuthor === true && !sessionUserOf()) return { ok: false, dispatched: false, outcome: 'comment-author-identity-unavailable' };
       // M11.5c.4: copy_sheet is ONE worksheet.copy/v1 Bridge WRITE (meta.bridgeCopyWrite); the receipt rule of the driver's B03 client
       if (command.meta.family === 'sheets' && command.meta.bridgeCopyWrite === true) {
         const failed = evidence => ({ ok: false, dispatched: true, outcome: 'b03-bridge-write-failed', evidence, error: null });
@@ -1294,6 +1774,7 @@ function createFakeXlsxDriver(store, script = {}) {
       }
       if (command.meta.action === 'write') applyWrite(command.meta);
       if (command.meta.action === 'clear-content') applyClear(command.meta);
+      if (command.meta.action === 'clear-formats' || command.meta.action === 'clear-all') applyClearScope(command.meta);
       if (command.meta.family === 'sheets') { applySheet(command.meta); sideWorkbook(command.meta.sheet); }
       if (command.meta.family === 'merge') applyMerge(command.meta);
       if (command.meta.family === 'layout') applyLayout(command.meta);
@@ -1306,8 +1787,20 @@ function createFakeXlsxDriver(store, script = {}) {
       if (command.meta.family === 'sort') applySort(command.meta);
       if (command.meta.family === 'validation') applyValidation(command.meta);
       if (command.meta.family === 'cf') applyCf(command.meta);
+      if (command.meta.family === 'format_run') applyFormatRun(command.meta);
       if (command.meta.family === 'filter') applyFilter(command.meta);
+      if (command.meta.family === 'array-formula') applyArrayFormula(command.meta);
+      if (command.meta.family === 'comments') applyComment(command.meta);
+      // X-O04/1+2 (1bafc2ca): set_chart_style has NO getter -- the real engine's own setter
+      // return value (checked inside lower()'s callCommand body, fail-closed) is the ONLY
+      // failure signal; the fake has no JS body to execute, so a rejection is simulated at THIS
+      // dispatch layer instead (the generic `f === 'ignore'` no-op-but-ok=true path cannot stand
+      // in for it, since nothing downstream would ever notice a style write that silently no-oped).
+      if (command.meta.family === 'charts' && command.meta.action === 'set_chart_style' && script.fault === 'style-setter-rejected') {
+        return { ok: false, dispatched: true, outcome: 'style-setter-rejected', evidence: { stage: 'style-fill-rejected' } };
+      }
       if (command.meta.family === 'charts') applyCharts(command.meta);
+      if (command.meta.family === 'drawings-insert') applyDrawingsInsert(command.meta);
       if (command.meta.family === 'page') applyPage(command.meta);
       if (command.meta.family === 'print' && command.meta.bridgePrintWrite === true) return b10Write(command.meta);
       if (command.meta.family === 'print') applyPrint(command.meta);

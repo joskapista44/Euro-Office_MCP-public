@@ -134,8 +134,28 @@ function withProvenPivots(objects, runtime, sheetNames) {
     const extra = p && typeof p.table === 'string' && p.layout && typeof p.layout === 'object' ? { table: p.table, layout: p.layout } : {};
     return { name: p && p.name, source: pub || provenSource(p && p.proof, runtime, sheetNames), ...extra };
   };
-  const axis = list => { const all = list.map(pivot); const gap = all.find(p => p.source.startsWith('UNOBSERVABLE')); return gap ? `${gap.source} (pivot ${gap.name})` : all; };
-  return Object.fromEntries(Object.entries(objects || {}).map(([n, o]) => [n, o && Array.isArray(o.pivots) ? { ...o, pivots: axis(o.pivots) } : o]));
+  const axis = all => { const gap = all.find(p => p.source.startsWith('UNOBSERVABLE')); return gap ? `${gap.source} (pivot ${gap.name})` : all; };
+  // GH #302 G2: the READ projection's per-pivot rows (read_pivots), built only when the driver read the axes. They never feed
+  // the pivots AXIS above (the write guards keep refusing on any unproven pivot of a sheet); an unproven source is that ONE
+  // row's named `source`, the list stays whole.
+  const detail = (p, proven) => {
+    const ax = p.axes;
+    const fns = Array.isArray(p.functions) ? p.functions : null;
+    // GH #302 G3: the row axis layout form (SetRowAxisLayout sets every field's form; the row fields' common form is the
+    // answer, a disagreement or a gap is named) and the Bridge dataRef a create_pivot v2 retry compares the source by
+    // (read_pivots does not project it: `source` is the public / content-proven reference)
+    const forms = Array.isArray(p.fieldLayout) && Array.isArray(ax.rows) ? ax.rows.map(r => (p.fieldLayout.find(f => f.name === r) || {}).form) : null;
+    const rowLayout = !forms ? 'UNOBSERVABLE:field-layout-unread' : (forms.length && forms.every(f => typeof f === 'string' && !f.startsWith('UNOBSERVABLE') && f === forms[0]) ? forms[0] : (forms.length ? 'UNOBSERVABLE:row-layout-mixed-or-unread' : null));
+    return { name: proven.name, source: proven.source, ...(typeof p.table === 'string' ? { table: p.table } : {}),
+      layout: { rows: ax.rows, cols: ax.cols, data: fns ? fns.map(f => f.name) : p.functions },
+      pages: ax.pages, values: ax.values, dataFields: fns || p.functions, rowLayout, style: p.style, dataRef: p.dataRef };
+  };
+  const sheet = o => {
+    const all = o.pivots.map(pivot);
+    const withAxes = o.pivots.every(p => p && p.axes && typeof p.axes === 'object');
+    return { ...o, pivots: axis(all), ...(withAxes && o.pivots.length ? { pivotDetails: o.pivots.map((p, i) => detail(p, all[i])) } : {}) };
+  };
+  return Object.fromEntries(Object.entries(objects || {}).map(([n, o]) => [n, o && Array.isArray(o.pivots) ? sheet(o) : o]));
 }
 
 module.exports = { PIVOT_STATE_BRIDGE_RUNTIMES, MAX_SOURCE_CELLS, provenSource, withProvenPivots, layoutOf, parseRef };

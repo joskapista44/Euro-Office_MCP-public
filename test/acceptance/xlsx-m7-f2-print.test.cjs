@@ -37,8 +37,9 @@ const STEPS = {
 
 async function run(store, t, script = {}) {
   let n = 0;
-  // M11.5b.4: the print WRITE goes through the /7-only Bridge WRITE -- the fake session runs on /7 unless a test says otherwise
-  const driver = createFakeXlsxDriver(store, { runtime: '9.3.4|euro-office-bridge-v1/9.3.4.60/7', ...script });
+  // M11.5b.4 (DS9346: now 9.3.5.0/16, the sole accepted runtime): the print WRITE goes through the
+  // Bridge WRITE -- the fake session runs on the accepted runtime unless a test says otherwise
+  const driver = createFakeXlsxDriver(store, { runtime: '9.3.5|euro-office-bridge-v1/9.3.5.0/16', ...script });
   const options = { driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } };
   const result = await withSession(options, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));
   return { result, driver, m: result.metrics };

@@ -1,6 +1,6 @@
 'use strict';
 
-const { norm, blockText } = require('../inventory.cjs');
+const { norm, blockText, textUnits } = require('../inventory.cjs');
 const { resolveStableTarget } = require('../resolver.cjs');
 
 /**
@@ -167,6 +167,11 @@ function classifyDelete(primary, op) {
   // Absent. SATISFIED only if the task's own context proves the deletion: the neighbours it named are
   // adjacent now. Without both anchors an absent text proves nothing (a typo is absent too).
   const sel = op.selector || {};
+  // GH #293 N5 (LIVE finding, docs/evidence/gh293-n5-word-shared-abstractnum-run3-false-delete-satisfied-20261022.json): "not found" here
+  // means "not a released target kind" -- a LIST ITEM (or a table cell) with this exact text is still in the document, and the containment
+  // context check below matched the whole list block, reporting a deletion that never happened. Present in any text unit -> never SATISFIED.
+  const present = typeof sel.text === 'string' ? textUnits(primary).find(u => norm(u.text) === norm(sel.text)) : null;
+  if (present) return { state: 'FAIL_CLOSED', evidence: { reason: `delete-target-present-as-an-unsupported-unit:${present.kind}` } };
   if (typeof sel.before !== 'string' || typeof sel.after !== 'string') {
     return { state: 'FAIL_CLOSED', evidence: { reason: 'delete-terminal-identity-insufficient-selector' } };
   }

@@ -1,0 +1,38 @@
+{
+  "_comment": "DS v9.3.5 (build:0) fresh install plan, v1.1.0 (B3): cell = euro-office-bridge-v1/9.3.5.0/17 (rev17-candidate, plan-rev17.py) + chart-read /1; word = euro-office-bridge-word-v1/9.3.5.0/5 (rev5-candidate). Derived 2026-10-27 from the REAL unpatched 9.3.5 bundles (input_sha256 unchanged vs fresh-install.json); output_sha256 MEASURED.",
+  "cell": {
+    "file": "sdkjs/cell/sdk-all.js",
+    "input_sha256": "5e1e7d6df5a0868ef08d9adea1e18d8b18a11cb2ce21c1ace94f5bc36bcd7b49",
+    "anchor": "Api.GetSheets=function(){",
+    "blocks": [
+      {
+        "file": "euro-office-chart-read-v1/chart-read-block.js",
+        "sha256": "20d06243532ccd40ee139e738da48b9afbc7baa160d57ced4f2545b647a678b1",
+        "layer": "euro-office-chart-read-v1/9.3.5.0/1",
+        "anchor": "AscBuilder.Cell.init=function("
+      },
+      {
+        "file": "euro-office-bridge-v1/rev17-candidate/bridge-block.js",
+        "sha256": "072bf10a3b9c2231959a4bcf26c10c116c584ca93134f00fbb4f2eb8e47933d6",
+        "layer": "euro-office-bridge-v1/9.3.5.0/17"
+      }
+    ],
+    "output_sha256": "1a8c9ab11047843eff5337766fe8cc6ac38aaf7c709f5167ea33cd9deeda382d",
+    "patchVersion": "euro-office-bridge-v1/9.3.5.0/17",
+    "_comment": "GH #326/#327 /17 candidate plan, derived by plan-rev17.py from the real unpatched input; only the bridge block differs from the /16 plan."
+  },
+  "word": {
+    "file": "sdkjs/word/sdk-all.js",
+    "input_sha256": "4392397b3b3544d013108515374c60b35f42f97326694033dc9a60a2a9bd854e",
+    "anchor": "Api.attachEvent=function(eventName,callback){",
+    "blocks": [
+      {
+        "file": "euro-office-bridge-word-v1/rev5-candidate/bridge-block.js",
+        "sha256": "daf94343282b602c212d2e5f194a146b9ed64cc7c9c362ae7b5ecc73b51c4583",
+        "layer": "euro-office-bridge-word-v1/9.3.5.0/5"
+      }
+    ],
+    "output_sha256": "dd9c4a9aacd74602d83956fe8e35beebf9c51433fda005798ac5991bb9448945",
+    "patchVersion": "euro-office-bridge-word-v1/9.3.5.0/5"
+  }
+}

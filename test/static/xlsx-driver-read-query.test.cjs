@@ -9,21 +9,24 @@ const { readQuery } = require('../../src/drivers/eurooffice/xlsx-driver.cjs');
  * getters, ForEach and WorksheetFunction.COUNT -- for any window list, including hostile names.
  */
 const MUTATING = /\.(Add\w*|Delete|Remove\w*|Insert\w*|Set\w*|Merge|UnMerge|Split\w*|Paste\w*|Replace\w*|Move\w*|Apply\w*|Clear\w*|Copy\w*|AutoFit|Sort|SetValue|ShowAllData)\s*\(/;
-const ALLOWED = /^(Get\w*|ForEach|COUNT)$/;
+// GH #300 K1: IsSolved -- the ApiComment resolved-state GETTER (read_comments), the only non-Get* reader name in a read
+const ALLOWED = /^(Get\w*|IsSolved|ForEach|COUNT)$/;
 const QUERIES = [readQuery(), readQuery([{ sheet: 'Data', range: 'A1:B2' }]), readQuery([{ sheet: "x'); ws.GetRange('A1').SetValue(1); ('", range: 'A1' }]),
   readQuery([], { formatSheets: ['Data'], objectSheets: ['Data', "x'); Api.GetSheet('Data').Delete(); ('"] }),
   readQuery([], { layout: [{ sheet: "x'); Api.GetSheet('Data').Delete(); ('", maxCol: 3, maxRow: 2 }] }),
   readQuery([], { panes: true, internalPanes: true }),
   readQuery([], { validationRanges: [{ sheet: "x'); Api.GetSheet('Data').GetRange('A1').GetValidation().Delete(); ('", range: 'A1' }] }),
   readQuery([], { cfRanges: [{ sheet: "x'); Api.GetSheet('Data').GetRange('A1').GetFormatConditions().Delete(); ('", range: 'A1' }] }),
+  readQuery([], { runCells: [{ sheet: "x'); Api.GetSheet('Data').GetRange('A1').SetValue('z'); ('", cell: 'A1' }] }),
   readQuery([], { filterSheets: ["x'); Api.GetSheet('Data').GetAutoFilter().ShowAllData(); ('"], internalFilter: true }),
   readQuery([], { chartSheets: ['*', "x'); Api.GetSheet('Data').GetAllCharts()[0].SetName('z'); ('"] }),
   readQuery([], { pageSheets: ['*', "x'); Api.GetSheet('Data').SetPageOrientation('xlLandscape'); ('"], pagePerSheet: true }),
-  readQuery([], { printSheets: ['*', "x'); Api.GetSheet('Data').worksheet.PagePrintOptions.asc_setHorizontalCentered(true); ('"] })];
+  readQuery([], { printSheets: ['*', "x'); Api.GetSheet('Data').worksheet.PagePrintOptions.asc_setHorizontalCentered(true); ('"] }),
+  readQuery([], { commentSheets: ["x'); Api.GetSheet('Data').GetRange('A1').AddComment('z'); ('"] })];
 
 test('the read query calls no mutating editor method, for every window shape', () => {
   for (const q of QUERIES) {
-    const code = q.replace(/const (windows|formatSheets|objectSheetsAsked|layoutAsked|validationAsked|cfAsked|filterAsked|chartAsked|pageAsked|printAsked) = \[[\s\S]*?\];/g, 'const $1 = [];'); // the lists are DATA (JSON), not calls
+    const code = q.replace(/const (windows|formatSheets|objectSheetsAsked|layoutAsked|validationAsked|cfAsked|runAsked|filterAsked|chartAsked|pageAsked|printAsked|commentAsked) = \[[\s\S]*?\];/g, 'const $1 = [];'); // the lists are DATA (JSON), not calls
     assert.doesNotMatch(code, MUTATING);
     const calls = [...code.matchAll(/\.([A-Z]\w*)\s*\(/g)].map(m => m[1]);
     assert.ok(calls.length >= 6, 'positive control: the extractor sees the query calls');
@@ -35,6 +38,22 @@ test('a hostile sheet name stays inside the JSON window list (it is data, never 
   const q = QUERIES[2];
   const list = q.match(/const windows = (\[[\s\S]*?\]);/)[1];
   assert.equal(JSON.parse(list)[0].sheet, "x'); ws.GetRange('A1').SetValue(1); ('");
+});
+
+// GH #141 (docs/GH141-CF-DEPENDENCY-OBSERVABILITY-20261018.md): the whole-sheet conditional reader must call
+// GetAppliesTo for the three newly-measured types (they have no formula getter to call -- it throws), and
+// must NOT add a branch for the three still-excluded types (their CFVO stops can be formula-typed and are
+// never read here) -- those stay on the generic bare-{ type } else.
+test('readQuery conditional reader: aboveAverage/top10/unique call GetAppliesTo; colorScale/databar/iconSet stay bare', () => {
+  const q = readQuery([], { conditional: true });
+  const block = q.match(/const conditional[\s\S]*?\n  const layoutAsked/)[0];
+  for (const type of ['xlAboveAverageCondition', 'xlTop10', 'xlUniqueValues']) {
+    const branch = block.match(new RegExp(`type === '${type}'[\\s\\S]*?;`));
+    assert.ok(branch, `no branch found for ${type}`);
+    assert.match(branch[0], /GetAppliesTo/, `${type} branch must call GetAppliesTo: ${branch[0]}`);
+    assert.doesNotMatch(branch[0], /GetFormula1|GetFormula2/, `${type} has no formula getter: ${branch[0]}`);
+  }
+  for (const type of ['xlColorScale', 'xlDatabar', 'xlIconSets']) assert.doesNotMatch(block, new RegExp(`'${type}'`), `${type} must not get its own branch`);
 });
 
 test('NEGATIVE CONTROL: the pattern catches a mutation smuggled into a read', () => {
@@ -105,6 +124,42 @@ test('format is read only for window cells that ask for it -- also when the cell
   assert.equal('nf' in inv.cells['Data\u0000A1'], false);
 });
 
+// X-F04 (format_run): the run-map read is PUBLIC and character-by-
+// character (GetCharacters(i,1).GetFont()) -- a separate, minimal stand-in Api (the shared
+// fakeApi()'s cell has no GetCharacters).
+function runFontApi(text, fontAt) {
+  const range = { GetValue: () => text, GetCharacters: (start, len) => ({ GetFont: () => fontAt(start, len) }) };
+  const ws = { GetName: () => 'Data', GetIndex: () => 0, GetUsedRange: () => null, GetRange: a1 => (a1 === 'A1' ? range : null) };
+  return { GetSheets: () => [ws], GetSheet: n => (n === 'Data' ? ws : null) };
+}
+const font = (bold, italic, name, size, rgb) => ({ GetBold: () => bold, GetItalic: () => italic, GetName: () => name, GetSize: () => size, GetColor: () => (rgb === null ? null : { GetRGB: () => rgb }) });
+
+test('run-map: two runs merged from per-character reads, the font-tuple compared by value not by call count', () => {
+  const api = runFontApi('abcdef', (start) => (start <= 3 ? font(true, false, 'Arial', 18, 16711680) : font(null, null, 'Calibri', 11, null)));
+  const out = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(api);
+  assert.deepEqual(out.runReads['Data!A1'], {
+    text: 'abcdef',
+    runs: [
+      { start: 1, length: 3, font: { bold: true, italic: false, name: 'Arial', size: 18, color: 16711680 } },
+      { start: 4, length: 3, font: { bold: null, italic: null, name: 'Calibri', size: 11, color: null } },
+    ],
+  });
+});
+
+test('run-map fail-closed: empty cell, text over the 256-char ceiling, a throwing getter', () => {
+  const empty = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(runFontApi('', () => font(null, null, 'Calibri', 11, null)));
+  assert.equal(empty.runReads['Data!A1'], 'UNOBSERVABLE:empty-cell');
+  const long = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(runFontApi('x'.repeat(257), () => font(null, null, 'Calibri', 11, null)));
+  assert.equal(long.runReads['Data!A1'], 'UNOBSERVABLE:text-too-long');
+  const throwing = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(runFontApi('x', () => { throw new Error('boom'); }));
+  assert.match(throwing.runReads['Data!A1'], /^UNOBSERVABLE:/);
+});
+
+test('run-map: a sheet the request names but the workbook does not have -> UNOBSERVABLE:sheet-missing', () => {
+  const out = new Function('Api', readQuery([], { runCells: [{ sheet: 'Nope', cell: 'A1' }] }))(runFontApi('x', () => font(null, null, 'Calibri', 11, null)));
+  assert.equal(out.runReads['Nope!A1'], 'UNOBSERVABLE:sheet-missing');
+});
+
 // B01 / B02 DS Bridge cutover (owner GO, internal tracker point 8; LIVE parity #ref / #ref): cell-level bold and italic
 // are read ONLY through the DS Bridge (`textStyle.bold.read/v1` / `textStyle.italic.read/v1`). These EXECUTE the generated
 // code against the REAL served bridge block (test/fakes/ds-bridge-runtime.cjs), so every gap is the bridge's own reason.
@@ -152,11 +207,18 @@ test('the style read calls no direct internal getter or setter: W4c alignment / 
   assert.doesNotMatch(code, /'set[A-Z]\w*'/, 'no dynamically-dispatched internal setter name either');
 });
 
-test('copy_sheet (M11.5c.4 Bridge WRITE): the adapter and the driver gate on the SAME /8-only id; the internal-copy kind is gone; the driver refuses any other runtime without touching the editor', async () => {
+// X-O07/3 (merge WIP, 2026-10-15): /13 (chart.drawing.delete.write/v1, X-O07/2) joined the SAME
+// B03 Bridge-write list -- the pin extends by one entry, same byte-identical-handler convention.
+// X-O08 (maintainer, /14 landed): /14 (drawing.fillLineColor.read/v1) joined the SAME list -- a READ
+// capability only, the B03-WRITE handler untouched.
+test('copy_sheet (M11.5c.4 Bridge WRITE): the adapter and the driver gate on the SAME /8 .. /15 ids (L-05 / X-O05/5-B); the internal-copy kind is gone; the driver refuses any other runtime without touching the editor', async () => {
   const { B03_BRIDGE_WRITE_RUNTIMES, createEuroOfficeXlsxDriver } = require('../../src/drivers/eurooffice/xlsx-driver.cjs');
   const sheets = require('../../src/adapters/xlsx/families/sheets.cjs');
   assert.deepEqual([...sheets.B03_BRIDGE_WRITE_RUNTIMES], [...B03_BRIDGE_WRITE_RUNTIMES]);
-  assert.deepEqual([...B03_BRIDGE_WRITE_RUNTIMES], ['9.3.4|euro-office-bridge-v1/9.3.4.60/8'], 'the explicit manifest runtime id (/8 only), never a cache key');
+  // DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the historical 9.3.4.60/8..16 chain this list
+  // used to carry was retired -- the single accepted entry became 9.3.5.0/16, byte-identical handler proven
+  // by b03-write-handler-identity.test.cjs. GH #326/#327 widens again to /16 + /17 (same byte-identity proof).
+  assert.deepEqual([...B03_BRIDGE_WRITE_RUNTIMES], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17'], 'the explicit manifest runtime id, never a cache key');
   const d = createEuroOfficeXlsxDriver({ url: 'u', user: 'u', pass: 'p', loadPlaywright: () => ({ ok: false }) });
   const lowered = sheets.lower({ intent: 'copy_sheet', selector: { sheet: 'A', name: 'B' } });
   assert.equal(lowered.kind, 'callCommand'); assert.equal(lowered.meta.bridgeCopyWrite, true);

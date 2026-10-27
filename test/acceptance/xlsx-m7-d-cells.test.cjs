@@ -64,7 +64,8 @@ test('S28 APPLIED: dates and a time as serial + measured mask; retry 0/0', async
 
 test('S26/S28 refused at planning: empty text, an unmeasured mask, an impossible date, a date with a time mask, unknown keys', () => {
   for (const [v, re] of [[{ text: '' }, /non-empty/], [{ date: '2026-10-03', format: 'mmm d' }, /measured masks/], [{ date: '2026-02-30', format: 'yyyy-mm-dd' }, /not a valid date/],
-    [{ date: '2026-10-03', format: 'yyyy-mm-dd hh:mm' }, /measured masks/], [{ text: 'a', nf: '@' }, /typed value is/], [{ time: '25:00', format: 'hh:mm' }, /HH:MM/], [{ text: '=x' }, /starting with = \+ - @/], [{ text: '+1' }, /starting with/]]) {
+    [{ date: '2026-10-03', format: 'yyyy-mm-dd hh:mm' }, /measured masks/], [{ text: 'a', nf: '@' }, /typed value is/], [{ time: '25:00', format: 'hh:mm' }, /HH:MM/]]) {
+    // X-T01 (LIVE xt01-r1): { text: '=x' } / { text: '+1' } are measured and SUPPORTED now (xt01-cell-value-typing.test.cjs)
     const p = planOperations(write([v]));
     assert.equal(p.ok, false, JSON.stringify(v));
     assert.match(p.detail, re);

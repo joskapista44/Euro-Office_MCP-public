@@ -61,7 +61,8 @@ test('B11 bridge body: every gap is UNOBSERVABLE on its own axis, never an empty
   const base = { sheets: ['A'], wbNames: { x: def('X', 'A!$A$1') } };
   // an unaccepted runtime (another patch revision) -> the bridge client's own identity gate
   assert.deepEqual(runBody(withPatch(model(base), 'euro-office-bridge-v1/9.3.4.60/2')), { names: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', validations: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH' });
-  assert.equal(BRIDGE_RUNTIME_ID, '9.3.4|euro-office-bridge-v1/9.3.4.60/5', 'POSITIVE CONTROL: the served block is the accepted runtime');
+  // DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the served block is now the 9.3.5.0/16 identity.
+  assert.equal(BRIDGE_RUNTIME_ID, '9.3.5|euro-office-bridge-v1/9.3.5.0/16', 'POSITIVE CONTROL: the served block is the accepted runtime');
   // no bridge at all
   const nb = model(base); delete nb.api.GetEuroOfficeBridge;
   assert.deepEqual(runBody(nb), { names: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE', validations: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE' });
@@ -132,7 +133,9 @@ test('reference resolution: name uses, a formula through a name, and each unreso
   assert.deepEqual(resolveRef('=L*2', 'H', ctx), { sheets: ['D'] }, 'through a sheet-level name through a workbook name');
   assert.deepEqual(resolveRef('=L*2', 'D', ctx), { problem: 'unknown-name:L' }, 'a sheet-level name is not visible from another sheet');
   assert.deepEqual(resolveRef('=Gone!A1', 'H', ctx), { problem: 'missing-sheet:Gone' });
-  assert.deepEqual(resolveRef('= #REF!*2', 'H', ctx), { problem: 'broken-reference' });
+  // a #REF! points at nothing: no dependency, and the rest of the formula is still read (the live D!A1 is seen)
+  assert.deepEqual(resolveRef('= #REF!*2', 'H', ctx), { sheets: [] });
+  assert.deepEqual(resolveRef('=D!A1+#REF!', 'H', ctx), { sheets: ['D'] });
   assert.deepEqual(resolveRef('=INDIRECT("D!A1")', 'H', ctx), { problem: 'indirect' });
   const cyc = { sheets: ['D'], names: [{ name: 'A_', ref: 'B_', scopeSheet: null }, { name: 'B_', ref: 'A_', scopeSheet: null }] };
   assert.match(resolveRef('=A_', 'D', cyc).problem, /name-cycle/);

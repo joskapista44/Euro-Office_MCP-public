@@ -17,11 +17,13 @@ function clientWith(Api) {
   return new Function('Api', `${BRIDGE_CLIENT_SRC} return __eoBridgeRead;`)(Api);
 }
 
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): the default manifest now carries the
+// ACCEPTED 9.3.5.0/16 identity (RUNTIMES.xlsx) -- the historical 9.3.4.60/5 baseline is retired.
 const manifest = (over = {}) => ({
   bridgeVersion: '1.0.0',
-  documentServerVersion: '9.3.4',
-  documentServerBuild: '9.3.4-9475e9f12a1905e2ada1fbc4bb87d01b',
-  patchVersion: 'euro-office-bridge-v1/9.3.4.60/5',
+  documentServerVersion: '9.3.5',
+  documentServerBuild: '9.3.5-9475e9f12a1905e2ada1fbc4bb87d01b',
+  patchVersion: 'euro-office-bridge-v1/9.3.5.0/16',
   capabilities: [{ id: CAP.id, version: 1, kind: 'READ', format: 'XLSX', mutation: 'NO', semanticContract: 'x' }],
   ...over,
 });
@@ -64,19 +66,19 @@ test('BRIDGE_VERSION_MISMATCH: another bridge major', () => {
 });
 
 test('RUNTIME_VERSION_MISMATCH: another DS runtime version, or the caller expects nothing', () => {
-  assert.deepEqual(call(apiWith({ m: manifest({ documentServerVersion: '9.3.5' }) })), { ok: false, reason: 'RUNTIME_VERSION_MISMATCH' });
+  assert.deepEqual(call(apiWith({ m: manifest({ documentServerVersion: '9.3.4' }) })), { ok: false, reason: 'RUNTIME_VERSION_MISMATCH' });
   assert.deepEqual(call(apiWith(), null), { ok: false, reason: 'RUNTIME_VERSION_MISMATCH' });
-  assert.deepEqual(call(apiWith(), '9.3.4-9475e9f12a1905e2ada1fbc4bb87d01b'), { ok: false, reason: 'RUNTIME_VERSION_MISMATCH' }, 'a cache-key string is not an expected runtime');
+  assert.deepEqual(call(apiWith(), '9.3.5-9475e9f12a1905e2ada1fbc4bb87d01b'), { ok: false, reason: 'RUNTIME_VERSION_MISMATCH' }, 'a cache-key string is not an expected runtime');
 });
 
 test('PATCH_VERSION_MISMATCH: another patch family, DS patch runtime or revision', () => {
-  for (const v of ['euro-office-bridge-v1/9.3.4.60/2', 'euro-office-bridge-v1/9.3.4.61/3', 'euro-office-bridge-word-v1/9.3.4.60/3']) {
+  for (const v of ['euro-office-bridge-v1/9.3.5.0/2', 'euro-office-bridge-v1/9.3.5.1/16', 'euro-office-bridge-word-v1/9.3.5.0/16']) {
     assert.deepEqual(call(apiWith({ m: manifest({ patchVersion: v }) })), { ok: false, reason: 'PATCH_VERSION_MISMATCH' }, v);
   }
 });
 
 test('CACHE-KEY CHANGE: the manifest\'s own documentServerBuild (the patch-time cache key) is NOT compared -- any value PASSES', () => {
-  for (const b of ['9.3.4-9475e9f12a1905e2ada1fbc4bb87d01b', '9.3.4-94bc577ecccd9583be1b130bd5a6b407', undefined]) {
+  for (const b of ['9.3.5-9475e9f12a1905e2ada1fbc4bb87d01b', '9.3.5-94bc577ecccd9583be1b130bd5a6b407', undefined]) {
     assert.deepEqual(call(apiWith({ m: manifest({ documentServerBuild: b }) })), { ok: true, value: true }, String(b));
   }
 });

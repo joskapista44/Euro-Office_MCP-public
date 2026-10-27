@@ -27,8 +27,9 @@ const STEPS = {
 
 async function run(store, t, script = {}) {
   let n = 0;
-  // M11.5b.4: the print WRITE goes through the /7-only Bridge WRITE -- the fake session runs on /7 unless a test says otherwise
-  const driver = createFakeXlsxDriver(store, { runtime: '9.3.4|euro-office-bridge-v1/9.3.4.60/7', ...script });
+  // M11.5b.4 (DS9346: now 9.3.5.0/16, the sole accepted runtime): the print WRITE goes through the
+  // Bridge WRITE -- the fake session runs on the accepted runtime unless a test says otherwise
+  const driver = createFakeXlsxDriver(store, { runtime: '9.3.5|euro-office-bridge-v1/9.3.5.0/16', ...script });
   const options = { driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } };
   const result = await withSession(options, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));
   return { result, driver, m: result.metrics };
@@ -123,11 +124,11 @@ test('RED (owner decision 2026-09-30): a missing required API refuses BEFORE any
   }
 });
 
-test('the print WRITE runtime list (M11.5b.4 Bridge WRITE): the adapter and the driver gate on the SAME /7-only id; the direct-internal list is gone; the driver refuses any other runtime untouched', async () => {
+test('the print WRITE runtime list (M11.5b.4 Bridge WRITE; DS9346: now the single accepted 9.3.5.0/16 entry): the adapter and the driver gate on the SAME id list; the direct-internal list is gone; the driver refuses any other runtime untouched', async () => {
   const drv = require('../../src/drivers/eurooffice/xlsx-driver.cjs');
   assert.deepEqual([...print.B10_BRIDGE_WRITE_RUNTIMES], [...drv.B10_BRIDGE_WRITE_RUNTIMES]);
   for (const k of ['EO_INTERNAL_PRINT_RUNTIMES', 'EO_INTERNAL_PRINT_WRITE_RUNTIMES']) { assert.equal(k in drv, false, k); assert.equal(k in print, false, k); }
-  assert.deepEqual([...drv.B10_BRIDGE_WRITE_RUNTIMES], ['9.3.4|euro-office-bridge-v1/9.3.4.60/7', '9.3.4|euro-office-bridge-v1/9.3.4.60/8'], 'the explicit manifest runtime ids (/7 + /8), never a URL cache key');
+  assert.deepEqual([...drv.B10_BRIDGE_WRITE_RUNTIMES], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17'], 'the explicit manifest runtime id, never a URL cache key');
   const d = drv.createEuroOfficeXlsxDriver({ url: 'u', user: 'u', pass: 'p', loadPlaywright: () => ({ ok: false }) });
   const r = await d.dispatch(null, print.lower(planOperations(one(STEPS.center)).operations[0]));
   assert.equal(r.ok, false);
@@ -222,8 +223,11 @@ test('the driver reader (B09 through sheet.printSettings.read/v1): measured defa
   assert.equal(new Function('Api', readQuery([], { printSheets: ['Nope'] }))(Api).printReads.Nope, 'UNOBSERVABLE:sheet-missing', 'the driver pre-check, before any bridge call');
 });
 
-// M11.5b.4 cutover: B10 print WRITE through the Bridge WRITE ONLY (/7; M11.5c.1: /8 carries it byte-identical) -- /4 /5 /6 /9 refused before the write (no fallback)
-for (const rt of ['9.3.4|euro-office-bridge-v1/9.3.4.60/7', '9.3.4|euro-office-bridge-v1/9.3.4.60/8']) test(`M11.5b.4 print WRITE on ${rt}: every intent APPLIED via ONE Bridge WRITE, retry SATISFIED 0/0`, async () => {
+// M11.5b.4 cutover: B10 print WRITE through the Bridge WRITE ONLY. DS9346 (owner D5=B, VALTAS,
+// docs/DS9346-RUNTIME-RETIREMENT.md): the 9.3.4.60 family (/7 through /16, the entire list GH #138
+// U4 widened) is retired -- ONE accepted entry now (9.3.5.0/16). /4 /5 /6 era examples (never
+// carried this capability) stay refused before the write (no fallback) in the loop below.
+for (const rt of ['9.3.5|euro-office-bridge-v1/9.3.5.0/16']) test(`M11.5b.4 print WRITE on ${rt}: every intent APPLIED via ONE Bridge WRITE, retry SATISFIED 0/0`, async () => {
   for (const [k, step] of Object.entries(STEPS)) {
     const store = createStore(book());
     const a = await run(store, one(step), { runtime: rt });
@@ -232,7 +236,7 @@ for (const rt of ['9.3.4|euro-office-bridge-v1/9.3.4.60/7', '9.3.4|euro-office-b
     assert.equal(r.m.commands, 0, k);
   }
 });
-for (const rt of ['4', '5', '6', '9'].map(n => `9.3.4|euro-office-bridge-v1/9.3.4.60/${n}`)) test(`M11.5b.4 print WRITE on ${rt}: refused before the write`, async () => {
+for (const rt of ['4', '5', '6'].map(n => `9.3.4|euro-office-bridge-v1/9.3.4.60/${n}`)) test(`M11.5b.4 print WRITE on ${rt}: refused before the write`, async () => {
   for (const step of Object.values(STEPS)) {
     const { result, driver } = await run(createStore(book()), one(step), { runtime: rt });
     assert.equal(reason(result), 'xlsx-print-bridge-write-runtime-not-proven'); assert.deepEqual([driver.calls.dispatch, driver.calls.bridgeWrites], [0, 0]);

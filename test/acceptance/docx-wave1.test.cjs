@@ -114,7 +114,7 @@ test('format_text: dispatch ok but no mutation / only part applied -> never APPL
     const { x, result, driver } = await run(createStore(doc()), formatTask({ bold: true, italic: true }), { fault });
     assert.equal(status(x), OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN, fault);
     assert.equal(x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.VERIFY_CANNOT_PROVE_TERMINAL_STATE);
-    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
     assert.equal(driver.calls.forceSave, 0);
   }
 });
@@ -187,12 +187,13 @@ test('format_text: pagination flags (keepNext/keepLines/pageBreakBefore/widowCon
   assert.equal(p.format.widowControl, true);
 });
 
-test('format_text plan: pagination false/0, and malformed tabs/border shapes -> plan fails before any dispatch (NOT MEASURED, refused)', async () => {
+test('format_text plan: a non-boolean flag and malformed tabs/border shapes -> plan fails before any dispatch (NOT MEASURED, refused)', async () => {
   for (const step of [
-    { intent: 'format_text', selector: { text: P2 }, format: { keepNext: false } },
-    { intent: 'format_text', selector: { text: P2 }, format: { widowControl: false } },
-    { intent: 'format_text', selector: { text: P2 }, format: { tabs: [] } },
-    { intent: 'format_text', selector: { text: P2 }, format: { tabs: [{ pos: 36, align: 'center' }] } },
+    // GH #290: keepNext:false, a center tab, widowControl:false and tabs:[] are released (gh290-format-text-*.test.cjs);
+    // decimal stays refused
+    { intent: 'format_text', selector: { text: P2 }, format: { keepNext: 0 } },
+    { intent: 'format_text', selector: { text: P2 }, format: { tabs: {} } },
+    { intent: 'format_text', selector: { text: P2 }, format: { tabs: [{ pos: 36, align: 'decimal' }] } },
     { intent: 'format_text', selector: { text: P2 }, format: { tabs: [{ pos: -1, align: 'left' }] } },
     { intent: 'format_text', selector: { text: P2 }, format: { borderTop: { style: 'double', size: 1, color: '#FF0000' } } },
     { intent: 'format_text', selector: { text: P2 }, format: { borderTop: { style: 'single', size: 0, color: '#FF0000' } } },

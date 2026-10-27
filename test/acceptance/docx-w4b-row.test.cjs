@@ -138,7 +138,10 @@ test('negatives before dispatch -> FAIL_CLOSED or plan-failed, 0 dispatch', asyn
     [task(ins('after', 'A r1c1', 9)), store(), {}, 'table-row-terminal-unprovable'],
     [task(del('A r1c1', 1, 'A r0c0')), store(), {}, 'delete-target-present-but-row-count-not-terminal-plus-one'],
     [task(del('A r1c1', 2, 'A r1c0')), store(), {}, 'table-anchor-in-target-row'],
-    [task(del('A r0c0', 2, 'A r1c1')), store([vm]), {}, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:vertical-merge'],
+    // W06-3: the per-table blanket narrowed to per-row -- 'A r0c0' is row 0, INSIDE the
+    // vm fixture's own merge span [0,1] (col 2), so this STILL refuses, with the new, row-delete-
+    // specific reason (distinct from the insert-side reasons, never conflated).
+    [task(del('A r0c0', 2, 'A r1c1')), store([vm]), {}, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-delete-inside-a-vertical-merge'],
     // M5: on a vertically merged table the INSERT is decided by the reconciled grid
     [task(ins('after', 'A r1c1', 4)), store([vm]), {}, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-insert-target-row-inside-a-vertical-merge'],
     [task(ins('before', 'A r1c1', 4)), store([vm]), {}, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-insert-cuts-a-vertical-merge'],
@@ -298,13 +301,78 @@ test('M5 NEGATIVE CONTROL: the DELETE of the anchor\'s own row (same anchor, sam
   }
 });
 
+test('GH #291 T-06: deleting a CONTINUATION row of a vertical merge -> APPLIED, the owner keeps its content, its rowspan shrinks (the two-row merge ends); retry SATISFIED 0/0; an editor that leaves the rowspan -> never APPLIED', async () => {
+  const s = store([vm4()]);
+  const first = await run(s, task(del('V r2c0', 3, 'V r3c3')));
+  assert.equal(status(first.x), OPERATION_STATUS.APPLIED, JSON.stringify(first.x.appliedOperations.map(e => e.evidence)));
+  assert.ok(first.x.preservationVerification.every(v => v.verdict === 'PASS'), JSON.stringify(first.x.preservationVerification));
+  const rows = s.durableDoc.tables[0].rows;
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1][1].paras[0].text, 'V r1c1', 'the merged content is kept');
+  assert.equal(rows[1][1].rowspan, undefined, 'the two-row merge ended');
+  assert.equal(rows.flat().some(c => c.vContinue), false);
+  const second = await run(s, task(del('V r2c0', 3, 'V r3c3')));
+  assert.equal(status(second.x), OPERATION_STATUS.SATISFIED);
+  assert.deepEqual([second.m.writes, second.m.commands], [0, 0]);
+  const bad = await run(store([vm4()]), task(del('V r2c0', 3, 'V r3c3')), { fault: 'row-delete-merge-not-shortened' });
+  assert.notEqual(status(bad.x), OPERATION_STATUS.APPLIED);
+});
+
+test('GH #291 T-06: the MIDDLE continuation row of a three-row merge -> APPLIED, the owner rowspan 3 -> 2, the content kept', async () => {
+  const t = grid('V', 4); t.rows[0][1] = { ...cell('V r0c1'), rowspan: 3 };
+  for (const r of [1, 2]) t.rows[r][1] = { span: 1, vContinue: true, paras: [{ text: '', props: { ...PLAIN } }] };
+  const s = store([t]);
+  const r = await run(s, task(del('V r1c0', 3, 'V r3c3')));
+  assert.equal(status(r.x), OPERATION_STATUS.APPLIED, JSON.stringify(r.x.appliedOperations.map(e => e.evidence)));
+  assert.ok(r.x.preservationVerification.every(v => v.verdict === 'PASS'));
+  const rows = s.durableDoc.tables[0].rows;
+  assert.deepEqual([rows.length, rows[0][1].rowspan, rows[1][1].vContinue, rows[0][1].paras[0].text], [3, 2, true, 'V r0c1']);
+});
+
+test('GH #291 T-05: extendMerge -- an insert INSIDE a merge (before / after the boundary that cuts it) -> APPLIED, the merge grows by one row, its content kept; retry SATISFIED 0/0; an editor that leaves the merge -> never APPLIED', async () => {
+  for (const [side, text] of [['after', 'V r1c0'], ['before', 'V r2c0']]) {
+    const s = store([vm4()]);
+    const step = { ...ins(side, text, 5, 'V r3c3'), extendMerge: true };
+    const first = await run(s, task(step));
+    assert.equal(status(first.x), OPERATION_STATUS.APPLIED, `${side}: ${JSON.stringify(first.x.appliedOperations.map(e => e.evidence))}`);
+    assert.ok(first.x.preservationVerification.every(v => v.verdict === 'PASS'), JSON.stringify(first.x.preservationVerification));
+    const rows = s.durableDoc.tables[0].rows;
+    assert.deepEqual([rows.length, rows[1][1].rowspan, rows[1][1].paras[0].text, rows[2][1].vContinue, rows[3][1].vContinue], [5, 3, 'V r1c1', true, true]);
+    const second = await run(s, task(step));
+    assert.equal(status(second.x), OPERATION_STATUS.SATISFIED);
+    assert.deepEqual([second.m.writes, second.m.commands], [0, 0]);
+    const bad = await run(store([vm4()]), task(step), { fault: 'row-insert-merge-not-extended' });
+    assert.notEqual(status(bad.x), OPERATION_STATUS.APPLIED);
+  }
+});
+
+test('GH #291 T-05: extendMerge on an insert that cuts NO merge (the merge edge, or a plain row) -> refused before dispatch, 0/0; extendMerge on a delete or as false -> refused at plan', async () => {
+  for (const step of [{ ...ins('before', 'V r1c0', 5, 'V r3c3'), extendMerge: true }, { ...ins('after', 'V r2c0', 5, 'V r3c3'), extendMerge: true }, { ...ins('before', 'V r0c0', 5, 'V r3c3'), extendMerge: true }]) {
+    const s = store([vm4()]);
+    const before = JSON.stringify(s.durableDoc);
+    const r = await run(s, task(step));
+    assert.equal(status(r.x), OPERATION_STATUS.FAILED, JSON.stringify(step));
+    assert.equal(reason(r.x), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:extend-merge-requested-but-the-insert-cuts-no-vertical-merge', JSON.stringify(step));
+    assert.deepEqual([r.driver.calls.dispatch, r.m.writes], [0, 0]);
+    assert.equal(JSON.stringify(s.durableDoc), before);
+  }
+  for (const step of [{ ...del('V r2c0', 3, 'V r3c3'), extendMerge: true }, { ...ins('after', 'V r1c0', 5, 'V r3c3'), extendMerge: false }]) {
+    const planned = require('../../src/adapters/docx/adapter.cjs').planOperations(task(step));
+    assert.equal(planned.ok, false, JSON.stringify(step));
+    assert.match(planned.detail, /field-unsupported: step 0 \(delete_table_row\)\.extendMerge|extendMerge is only true, and only on insert_table_row_before \/ insert_table_row_after/);
+  }
+});
+
 test('M5 NEGATIVE: on the merged table a boundary INSIDE the merge / a target row inside it / a delete -> refused before dispatch, 0/0; an unreconciled grid -> refused', async () => {
   const cases = [
     [ins('after', 'V r1c0', 5, 'V r3c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-insert-cuts-a-vertical-merge'],
     [ins('before', 'V r2c0', 5, 'V r3c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-insert-cuts-a-vertical-merge'],
     [ins('before', 'V r1c0', 5, 'V r3c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-insert-target-row-inside-a-vertical-merge'],
     [ins('after', 'V r2c0', 5, 'V r3c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-insert-target-row-inside-a-vertical-merge'],
-    [del('V r0c0', 3, 'V r3c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:vertical-merge'],
+    // W06-3: 'V r0c0' (row 0) is OUTSIDE the merge's span [1,2] -- LIVE-measured clean
+    // (#ref case A) -- moved to its own POSITIVE test below, no longer a negative case here.
+    // the OWNER row of the span [1,2] stays refused (W06-2a, destructive); its continuation row (GH #291 T-06) is a positive test below
+    [del('V r1c0', 3, 'V r3c3'), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-delete-inside-a-vertical-merge'],
   ];
   for (const [step, want] of cases) {
     const s = store([vm4()]);
@@ -320,4 +388,20 @@ test('M5 NEGATIVE: on the merged table a boundary INSIDE the merge / a target ro
   const u = await run(store([bad]), task(ins('after', 'V r3c0', 5)));
   assert.equal(reason(u.x), 'vertical-merge-grid-unreconciled');
   assert.equal(u.driver.calls.dispatch, 0);
+});
+
+// W06-3 (#ref, LIVE-measured #ref case A): a row OUTSIDE a vertical merge's span deletes
+// cleanly -- the per-table blanket is narrowed to per-row (table-row.cjs:149).
+test('M5 POSITIVE (W06-3): a row delete OUTSIDE a vertical merge\'s span -> APPLIED, the merge and its content kept; retry SATISFIED 0/0', async () => {
+  const cases = [
+    [del('V r0c0', 3, 'V r3c3'), 0],   // row 0, above the merge [1,2] -- owner shifts up to row 0
+    [del('V r3c0', 3, 'V r1c0'), 1],   // row 3, below the merge [1,2] -- owner stays at row 1
+  ];
+  for (const [step, ownerRow] of cases) {
+    const s = store([vm4()]);
+    await firstAndSecond(s, task(step));
+    const t = texts(s);
+    assert.equal(t.length, 3, JSON.stringify(step));
+    mergeKept(s, ownerRow);
+  }
 });

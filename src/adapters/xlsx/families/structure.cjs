@@ -2,6 +2,7 @@
 
 const { colNum, colName, parseRange, rangeText, MAX_COL, MAX_ROW } = require('../a1.cjs');
 const { key } = require('../inventory.cjs');
+const { refOnTarget } = require('../dependencies.cjs');
 const formula = require('../formula.cjs');
 const { shiftFormula, referencesBlock, moveIndex, moveSpan } = require('../shift.cjs');
 const { layoutGuard, layoutDiffs } = require('../sheet-layout.cjs');
@@ -27,7 +28,12 @@ const drawings = require('../drawings.cjs');
  * L1: every cell of the target sheet is where the shift puts it, with its value (literal) and its formula
  * (reference-aware shift, shift.cjs); an insert leaves the new rows / columns blank; merges moved with it.
  * L3: every other sheet's cells keep their values and their formulas re-pointed exactly as the shift implies.
- * A structural step is the only step of its task. Retry SATISFIED, 0 write / 0 command.
+ * A structural step is the only step of its task -- EXCEPT delete_rows, which may repeat with itself (L-19 C,
+ * adapter.cjs planOperations): each repeat's `at` / `anchor` names the position as it will be once the task's
+ * OWN earlier steps have already run, not the task-start position. Retry SATISFIED, 0 write / 0 command; in a
+ * delete_rows batch, a SATISFIED verdict for a step that follows one this SAME run had to APPLY is refused
+ * instead (adapter.cjs classifyOperation, `xlsx-structure-satisfied-after-applied-in-batch`) -- SATISFIED steps
+ * of one run must be an unbroken prefix, since a retry can only ever find an earlier RUN's prefix already done.
  *
  * M7 S2a (owner GO 2026-09-30, owner channel; sheet-layout.cjs): the AutoFilter, the row / column page breaks and the
  * frozen pane of EVERY sheet are read before and after. Refused before the write: an object of the shifted sheet that is
@@ -204,6 +210,8 @@ function ruleRefusal(op, rule) {
 function guards(p, op) {
   const sheet = op.shift.sheet;
   if (!p.dependencies || !p.dependencies.complete) return { reason: 'xlsx-structure-dependency-observation-incomplete', unobservable: p.dependencies ? p.dependencies.unobservable.slice(0, 20) : 'not-read' };
+  const ref = refOnTarget(p.dependencies, [sheet]);
+  if (ref) return ref;
   const named = nameGuard(p, op);
   if (named) return named;
   const hostedRules = p.rules && p.rules.bySheet && p.rules.bySheet[sheet] ? p.rules.bySheet[sheet] : [];

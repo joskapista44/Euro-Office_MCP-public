@@ -135,7 +135,7 @@ test('lost run properties -> NOT APPLIED: preservation is PRIMITIVE_INTEGRAL, th
   assert.equal(result.execution.primitiveVerification[0].verdict, 'PASS');
   assert.equal(result.execution.preservationVerification[0].verdict, 'FAIL', 'INTEGRAL_PRESERVATION_BEFORE_APPLIED');
   assert.equal(result.metrics.writes, 0, 'no verified write is counted');
-  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED, 'uncertain-only: hybrid policy, no barrier');
+  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST, 'uncertain-only: hybrid policy, no barrier');
   assert.equal(driver.calls.forceSave, 0);
   assert.equal(store.durable.some(p => p.text === OLD), true, 'durable untouched');
 });
@@ -315,7 +315,7 @@ test('dispatch "succeeds" but the editor did not change -> never APPLIED; uncert
   const e = result.execution.appliedOperations[0];
   assert.equal(e.status, OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN);
   assert.equal(e.uncertainty.reason, UNCERTAINTY_REASON.VERIFY_CANNOT_PROVE_TERMINAL_STATE);
-  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
   assert.equal(driver.calls.forceSave, 0);
 });
 

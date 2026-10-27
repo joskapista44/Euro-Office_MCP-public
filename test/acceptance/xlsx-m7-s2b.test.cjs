@@ -57,6 +57,18 @@ test('the name: missing, empty, "null" or shared by two drawings of a sheet is a
   assert.deepEqual(why([shp({ parent: 'O' })]), ['parent:parent-mismatch']);
 });
 
+test('GH #188: a position OFFSET is an integer EMU too -- the measured float noise (rowOffset 57239.00000000001, a real customer shape) passes, 1 EMU still differs; the cell index stays a strict integer', () => {
+  const noisy = obs([shp({ pos: { fromCol: 6, colOffset: 514439, fromRow: 57, rowOffset: 57239.00000000001 } })]);
+  assert.equal(noisy.complete, true, JSON.stringify(noisy.gaps));
+  assert.equal(noisy.bySheet.D[0].rowOffset, 57239);
+  const clean = obs([shp({ pos: { fromCol: 6, colOffset: 514439, fromRow: 57, rowOffset: 57239 } })]);
+  assert.deepEqual(drawings.drawingDiffs(clean, noisy), []);
+  assert.equal(drawings.drawingDiffs(clean, obs([shp({ pos: { fromCol: 6, colOffset: 514439, fromRow: 57, rowOffset: 57240 } })])).length > 0, true, '1 EMU differs');
+  for (const pos of [{ ...POS, rowOffset: -1 }, { ...POS, colOffset: Number.NaN }, { ...POS, colOffset: '5' }, { ...POS, fromRow: 3.5 }, { ...POS, fromCol: -1 }]) {
+    assert.deepEqual(why([img({ pos })]), ['pos:position-unexpected-shape'], JSON.stringify(pos));
+  }
+});
+
 test('size: integer EMU (the measured float noise passes, 1 EMU fails); an EXACT 0 x 0 of ANY kind = size unobserved (decisions A / (2)); one zero side is a gap', () => {
   const a = obs([cht()]);
   const b = obs([cht({ height: 2160000.0000000005 })]);
@@ -139,7 +151,14 @@ test('driver: the drawing read is generated only when asked, each getter on its 
   };
   const q = () => readQuery([], { drawingSheets: ['*'] });
   const out = new Function('Api', q())(mkApi()).drawingReads;
-  assert.deepEqual(out.D[0], { kind: 'shape', name: 'S', parent: 'D', pos, width: 10, height: 'UNOBSERVABLE:GetHeight-threw', rotation: 0, flipH: false, flipV: 'UNOBSERVABLE:no-GetFlipV', text: 'a|b' });
+  // X-O08-7 (16fd90b9, LIVE r3): `d` has no GetLine -- strokeWidth is 'UNOBSERVABLE:no-GetLine', the
+  // same unconditional-field shape width/height/rotation already use, never a gap by itself.
+  // DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the fake bridge (test/fakes/ds-bridge-runtime.cjs)
+  // now loads the 9.3.5.0 block directly -- that block carries the FULL capability set (including
+  // fillLineColor, byte-identical through the retired /16) and self-reports the accepted 9.3.5 identity, so
+  // the capability IS advertised here. The gap is now at the GETTER level, not the capability level: `d` has
+  // no fill/line getters, so each sub-field degrades individually to 'UNOBSERVABLE:getter-missing'.
+  assert.deepEqual(out.D[0], { kind: 'shape', name: 'S', parent: 'D', pos, width: 10, height: 'UNOBSERVABLE:GetHeight-threw', rotation: 0, flipH: false, flipV: 'UNOBSERVABLE:no-GetFlipV', strokeWidth: 'UNOBSERVABLE:no-GetLine', fillLineColor: { fill: 'UNOBSERVABLE:getter-missing', line: 'UNOBSERVABLE:getter-missing' }, text: 'a|b' });
   const textOf = (a = mkApi()) => new Function('Api', q())(a).drawingReads.D[0].text;
   ws.GetAllDrawings = () => [{ ...d, Drawing: { getDocContent: () => null } }];
   assert.equal(textOf(), '', 'no text body: empty, nothing created');
@@ -167,8 +186,9 @@ const book = ({ s = {}, o = {} } = {}) => [{ name: 'S', cells: cellsAZ(), ...s }
 async function run(store, steps, script = {}) {
   let n = 0;
   const t = { id: 'm7s2b', steps: Array.isArray(steps) ? steps : [steps] };
-  // M11.5c.4: copy_sheet writes only through the /8 Bridge WRITE -- a copy task runs on /8 unless the test names a runtime
-  const driver = createFakeXlsxDriver(store, t.steps.some(x => x.intent === 'copy_sheet') && script.runtime === undefined ? { ...script, runtime: '9.3.4|euro-office-bridge-v1/9.3.4.60/8' } : script);
+  // M11.5c.4 / DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): copy_sheet writes only through an
+  // ACCEPTED Bridge WRITE runtime -- a copy task runs on the accepted 9.3.5.0/16 identity unless the test names a runtime.
+  const driver = createFakeXlsxDriver(store, t.steps.some(x => x.intent === 'copy_sheet') && script.runtime === undefined ? { ...script, runtime: '9.3.5|euro-office-bridge-v1/9.3.5.0/16' } : script);
   const options = { driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } };
   const result = await withSession(options, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));
   return { result, m: result.metrics };

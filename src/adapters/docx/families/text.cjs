@@ -181,6 +181,7 @@ function resolve(primary, selector) {
  * the replacement is inserted BEFORE the intact target, re-formatted with the old run properties,
  * and the OLD text is deleted through a FRESH exact range (the original range is stale after
  * AddText). Any failed step rolls back what it inserted. An empty replacement deletes the target.
+ * The old text is verified at its KNOWN post-insert offset (targetOffset + replacement.length), never searched for: a replacement that CONTAINS the old text (GH #228) is a normal case.
  *
  * `meta` is a structured description of the same intent, for test transports that cannot run the
  * editor API. The real driver executes `body`; nothing else.
@@ -232,8 +233,9 @@ try {
   }
   if (String(inserted.GetText(textOpts) || '') !== replacement) return rollback();
   const afterInsert = String(paragraph.GetText(textOpts) || '');
-  const oldOffset = afterInsert.indexOf(targetText);
-  if (oldOffset < 0 || afterInsert.indexOf(targetText, oldOffset + targetText.length) !== -1) return rollback();
+  // GH #228: the old text stands at a KNOWN offset after the insert -- check it THERE (a search would also find the old text inside a replacement that contains it)
+  const oldOffset = targetOffset + replacement.length;
+  if (afterInsert.slice(targetOffset, oldOffset) !== replacement || afterInsert.slice(oldOffset, oldOffset + targetText.length) !== targetText) return rollback();
   const freshOld = exactRange(paragraph, oldOffset, targetText);
   if (!freshOld || String(freshOld.GetText(textOpts) || '') !== targetText) return rollback();
   if (freshOld.Delete() !== true) return rollback();

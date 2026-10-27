@@ -213,7 +213,7 @@ test('faults at L1: no write / wrong target / duplicate / wrong url / note elsew
     assert.equal(status(x), OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN, tag);
     assert.equal(x.primitiveVerification[0].verdict, 'FAIL', tag);
     assert.equal(x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.VERIFY_CANNOT_PROVE_TERMINAL_STATE, tag);
-    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED, tag);
+    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST, tag);
     assert.equal(driver.calls.forceSave, 0, tag);
   }
 });

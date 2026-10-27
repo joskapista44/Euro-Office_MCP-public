@@ -14,10 +14,15 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
 
 /**
  * M6 wave 5: copy_range / move_range on the fake transport. Copy: the natural terminal-state retry, an occupied
- * target refused (the source overwrote silently, B-S10). Move (owner decision 2026-09-30, owner channel): the task
- * CARRIES the whole block's expectation, built from a fresh live read BEFORE the first write and bound to the document,
- * both sheets and both ranges; the retry is SATISFIED 0/0 only on a blank source AND a target equal to it cell by cell
- * (type, blank, formula text); anything else is refused -- never a second Cut (the source's X1).
+ * target refused (the source overwrote silently, B-S10).
+ *
+ * Move -- L-06/b (owner decision, zero 2026-10-15), REPLACING the owner decision 2026-09-30 caller-
+ * supplied-`expect` contract: the caller NEVER supplies `expect` -- classify() builds it itself,
+ * from its OWN fresh read, directly before dispatch (moveExpectation, the SAME mechanism, now called
+ * SERVER-side instead of by the caller). A blank source (any state that LOOKS already-moved,
+ * including a genuine retry) therefore has nothing to build a fresh expectation FROM, and is refused
+ * named (xlsx-move-already-applied-not-provable), 0/0, BEFORE even checking the target -- v1 never
+ * attempts to verify a retry's target content. Never a second Cut.
  */
 
 const book = () => [
@@ -29,7 +34,7 @@ const copy = (target, extra = {}) => ({ id: 'm6-w5r', steps: [{ intent: 'copy_ra
 const MOVE = { intent: 'move_range', sheet: 'P', range: 'H1:H2' };
 const H12 = Object.freeze([[{ t: 'text', v: 'm' }], [{ t: 'number', v: '3' }]]);
 const exp = (target, cells = H12, over = {}) => ({ version: 1, fileId: 'disposable', source: { sheet: 'P', range: 'H1:H2' }, target: { sheet: 'P', range: `${target}:${target.replace(/\d+/, n => String(Number(n) + 1))}` }, cells, ...over });
-const move = (target, extra = {}) => ({ id: 'm6-w5r', steps: [{ ...MOVE, target, expect: exp(target), ...extra }] });
+const move = (target, extra = {}) => ({ id: 'm6-w5r', steps: [{ ...MOVE, target, ...extra }] });
 
 /** The preparatory read: a fresh live read of both blocks, then the expectation from it (what a caller does). */
 async function prepared(store, step, script = {}) {
@@ -72,75 +77,45 @@ test('copy to ANOTHER sheet: APPLIED, the other sheet keeps the rest', async () 
   assert.equal(S(store, 'Q').A1.v, 'keep');
 });
 
-test('move: the expectation from a fresh read, APPLIED; the reopened retry SATISFIED 0/0 (owner decision 2026-09-30)', async () => {
+test('move: classify() builds the expectation itself (no `expect` on the step), APPLIED; the reopened retry is REFUSED named, 0/0, NEVER SATISFIED (L-06/b, owner decision 2026-10-15)', async () => {
   const store = createStore(book());
-  const e = await prepared(store, { ...MOVE, target: 'J5' });
-  assert.equal(e.ok, true, JSON.stringify(e));
-  assert.deepEqual(e.expect, exp('J5'));
-  const t = { id: 'm6-w5r', steps: [{ ...MOVE, target: 'J5', expect: e.expect }] };
+  const t = move('J5');
+  assert.equal(Object.keys(t.steps[0]).includes('expect'), false, 'the caller never supplies expect');
   const { result } = await run(store, t);
   assert.equal(result.ok, true, JSON.stringify([result.execution.primitiveVerification, result.execution.appliedOperations[0].evidence]));
   assert.equal(S(store, 'P').J5.v, 'm');
   assert.equal(S(store, 'P').H1, undefined);
   const again = await run(store, t);
-  assert.equal(again.result.ok, true, JSON.stringify(again.result.execution.appliedOperations[0].evidence));
-  assert.equal(again.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
+  assert.equal(again.result.ok, false, JSON.stringify(again.result.execution.appliedOperations[0].evidence));
+  assert.equal(reason(again.result), 'xlsx-move-already-applied-not-provable');
   assert.equal(again.m.writes, 0);
   assert.equal(again.m.commands, 0);
   assert.equal(again.driver.calls.dispatch, 0);
-  assert.equal(again.result.execution.appliedOperations[0].evidence.proof, 'fresh-live-source-blank-and-target-block-equals-the-carried-expectation');
+  // the saved state is untouched by the refused retry
+  assert.equal(S(store, 'P').J5.v, 'm');
+  assert.equal(S(store, 'P').H1, undefined);
 });
 
-test('RED (owner review 8527132): blank source + the top-left right but the REST of the block wrong -> never SATISFIED, never a second Cut', async () => {
-  const b = book();
-  delete b[0].cells.H1; delete b[0].cells.H2;
-  b[0].cells.J5 = { v: 'm' }; b[0].cells.J6 = { v: 'WRONG' };
-  const store = createStore(b);
-  const { result, driver, m } = await run(store, move('J5'));
-  assert.equal(result.ok, false);
-  assert.notEqual(result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
-  assert.equal(m.commands, 0);
-  assert.equal(driver.calls.dispatch, 0);
-  assert.equal(reason(result), 'xlsx-move-retry-target-differs');
-  assert.deepEqual(result.execution.appliedOperations[0].evidence.evidence.cells, ['J6']);
-});
-
-for (const [name, cells, target] of [
-  ['a NUMBER expected, TEXT with the same digits at the target', H12, { J5: { v: 'm' }, J6: { v: '3' } }],
-  ['a BLANK expected, a value at the target', [[{ t: 'text', v: 'm' }], [{ t: 'blank' }]], { J5: { v: 'm' }, J6: { v: 'x' } }],
-  ['a FORMULA expected, its value without the formula at the target', [[{ t: 'text', v: 'm' }], [{ t: 'formula', f: '=B1+2' }]], { J5: { v: 'm' }, J6: { v: 3 } }],
-  ['a VALUE expected, a formula giving that value at the target', H12, { J5: { v: 'm' }, J6: { v: 3, f: '=B1+2' } }],
-  ['another formula text at the target', [[{ t: 'text', v: 'm' }], [{ t: 'formula', f: '=B1+2' }]], { J5: { v: 'm' }, J6: { v: 3, f: '=B1+1+1' } }],
-]) {
-  test(`RED negative control, retry: ${name} -> refused 0/0, never SATISFIED`, async () => {
+test('a blank source is ALWAYS refused xlsx-move-already-applied-not-provable, regardless of what the target holds (v1: never attempts to verify a retry)', async () => {
+  for (const target of [{ J5: { v: 'm' }, J6: { v: 3 } }, { J5: { v: 'm' }, J6: { v: 'WRONG' } }, {}]) {
     const b = book();
     delete b[0].cells.H1; delete b[0].cells.H2;
     Object.assign(b[0].cells, target);
-    const { result, driver } = await run(createStore(b), { id: 'x', steps: [{ ...MOVE, target: 'J5', expect: exp('J5', cells) }] });
-    assert.equal(result.ok, false);
+    const { result, driver, m } = await run(createStore(b), move('J5'));
+    assert.equal(result.ok, false, JSON.stringify(target));
+    assert.equal(m.commands, 0);
     assert.equal(driver.calls.dispatch, 0);
-    assert.equal(reason(result), 'xlsx-move-retry-target-differs');
-  });
-}
-
-test('the retry: a formula is compared by its TEXT; a different computed result is not a content difference', async () => {
-  const b = book();
-  delete b[0].cells.H1; delete b[0].cells.H2;
-  b[0].cells.J5 = { v: 'm' }; b[0].cells.J6 = { v: 999, f: '=B1+2' };
-  const { result, driver } = await run(createStore(b), { id: 'x', steps: [{ ...MOVE, target: 'J5', expect: exp('J5', [[{ t: 'text', v: 'm' }], [{ t: 'formula', f: '=B1+2' }]]) }] });
-  assert.equal(result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED, JSON.stringify(result.execution.appliedOperations[0].evidence));
-  assert.equal(driver.calls.dispatch, 0);
+    assert.equal(reason(result), 'xlsx-move-already-applied-not-provable');
+  }
 });
 
-for (const [name, t, why, script] of [
-  ['the expectation names ANOTHER document', move('J5', { expect: exp('J5', H12, { fileId: 'another-file' }) }), 'xlsx-move-expect-document-mismatch'],
-  ['the document identity is not observable', move('J5'), 'xlsx-move-expect-document-mismatch', { fileIdUnobservable: true }],
-  ['the source no longer equals the expectation (first execution, just before the write)', move('J5', { expect: exp('J5', [[{ t: 'text', v: 'm' }], [{ t: 'number', v: '4' }]]) }), 'xlsx-move-source-differs-from-expectation'],
-  ['a cell type is unobservable (COUNT unread)', move('J5'), 'xlsx-move-source-differs-from-expectation', { countUnreadable: true }],
+for (const [name, why, script] of [
+  ['the document identity is not observable', 'xlsx-move-document-identity-unobservable', { fileIdUnobservable: true }],
+  ['a cell type is unobservable (COUNT unread)', 'xlsx-move-expect-type-unobservable', { countUnreadable: true }],
 ]) {
   test(`RED: refused BEFORE dispatch -- ${name}`, async () => {
     const store = createStore(book());
-    const { result, driver } = await run(store, t, script);
+    const { result, driver } = await run(store, move('J5'), script);
     assert.equal(result.ok, false);
     assert.equal(driver.calls.dispatch, 0);
     assert.equal(reason(result), why);
@@ -148,12 +123,19 @@ for (const [name, t, why, script] of [
   });
 }
 
-test('RED (owner review 8527132): the whole-task check proves the WHOLE target block against the expectation, not the anchor', () => {
+test('L-06/b: the whole-task check (L2) only confirms the source is left blank -- it can no longer re-prove the target content (that is L1\'s job, on the SAME op classify() mutated); the narrowed scope is NAMED via notProven', () => {
   const op = planOperations(move('J5')).operations[0];
+  // op.expect stays null: wholeTaskChecks receives a FRESH re-plan (adapter.verifyWholeTask), and
+  // finalObservation is POST-write (source already blank) -- there is no pre-write snapshot left
+  // to build one from at this layer. See the function's own header comment.
   const obs = cells => ({ primary: normalizeInventory({ sheets: [{ name: 'P', index: 0, used: 'A1:J6' }], cells: Object.entries(cells).map(([a, c]) => ({ sheet: 'P', a, v: c.v, f: c.f || '', count: typeof c.v === 'number' ? 1 : 0, merge: a })), unsupported: [], runtime: { identity: 'b', fileId: 'disposable' } }) });
   const blank = { v: '' };
-  assert.equal(range.wholeTaskChecks(op, obs({ H1: blank, H2: blank, J5: { v: 'm' }, J6: { v: 3 } }))[0].ok, true);
-  assert.equal(range.wholeTaskChecks(op, obs({ H1: blank, H2: blank, J5: { v: 'm' }, J6: { v: 'WRONG' } }))[0].ok, false, 'the rest of the block is checked');
+  const r1 = range.wholeTaskChecks(op, obs({ H1: blank, H2: blank, J5: { v: 'm' }, J6: { v: 3 } }))[0];
+  assert.equal(r1.ok, true);
+  assert.deepEqual(r1.notProven, ['move-target-content-equality-not-reprovable-at-l2']);
+  // the target content being WRONG is no longer this layer's concern (named above) -- it still
+  // passes, since the source IS blank; L1 is what caught a wrong target, in the SAME dispatch.
+  assert.equal(range.wholeTaskChecks(op, obs({ H1: blank, H2: blank, J5: { v: 'm' }, J6: { v: 'WRONG' } }))[0].ok, true, 'target content is no longer checked here (L1\'s job)');
   assert.equal(range.wholeTaskChecks(op, obs({ H1: { v: 'm' }, H2: blank, J5: { v: 'm' }, J6: { v: 3 } }))[0].ok, false, 'the source must be blank');
   assert.equal(range.wholeTaskChecks(op, { primary: null })[0].ok, false, 'no final observation -> no whole-task pass');
 });
@@ -199,7 +181,7 @@ for (const [name, t, why, mutate] of [
 }
 
 test('RED: ignored / partial / not translated / source kept -> L1 FAIL; a side effect -> L3 FAIL; nothing persisted', async () => {
-  for (const [t, fault] of [[copy('D5'), 'ignore'], [copy('D5'), 'partial'], [copy('D5'), 'copy-no-translate'], [move('J5'), 'move-keeps-source'], [move('J5'), 'ignore']]) {
+  for (const [t, fault] of [[copy('D5'), 'ignore'], [copy('D5'), 'partial'], [move('J5'), 'move-keeps-source'], [move('J5'), 'ignore']]) {
     const store = createStore(book());
     const { result, driver } = await run(store, t, { fault });
     assert.equal(result.ok, false, fault);
@@ -212,32 +194,54 @@ test('RED: ignored / partial / not translated / source kept -> L1 FAIL; a side e
   assert.equal(side.result.execution.preservationVerification[0].verdict, 'FAIL');
 });
 
-test('planner: target shape, overlap, the carried expectation, the only step of its task', () => {
+test('L-06 r6: a Copy that did NOT translate the formula (fault copy-no-translate) is REPAIRED by the planner-translated explicit write -- APPLIED, the saved target is the translated text, a retry SATISFIED', async () => {
+  const store = createStore(book());
+  const first = await run(store, copy('D5'), { fault: 'copy-no-translate' });
+  assert.equal(first.result.ok, true, JSON.stringify(first.result.execution.appliedOperations[0] && first.result.execution.appliedOperations[0].evidence).slice(0, 400));
+  const again = await run(store, copy('D5'), { fault: 'copy-no-translate' });
+  assert.equal(again.result.execution.appliedOperations[0].status, 'SATISFIED');
+});
+
+test('planner: target shape, overlap, the only step of its task -- move_range no longer accepts `expect` at all (L-06/b)', () => {
   const refuse = (t, re) => { const p = planOperations(t); assert.equal(p.ok, false, JSON.stringify(t)); assert.match(p.detail, re); };
   refuse(copy('D5:E6'), /target must be ONE cell/);
   refuse(copy('B2'), /overlap on the same sheet/);
   refuse(copy('XFD1'), /leaves the sheet/);
-  refuse({ id: 'x', steps: [{ ...MOVE, target: 'J5' }] }, /expect must be/);
   refuse({ id: 'x', steps: [{ ...MOVE, target: 'J5', anchor: { value: 'm' } }] }, /does not support field\(s\): anchor/);
-  refuse(move('J5', { expect: exp('J5', H12, { version: 2 }) }), /expect.version must be 1/);
-  refuse(move('J5', { expect: exp('J5', H12, { fileId: '' }) }), /expect.fileId/);
-  refuse(move('J5', { expect: exp('J6') }), /expect.target must be P!J5:J6/);
-  refuse(move('J5', { expect: exp('J5', H12, { source: { sheet: 'Q', range: 'H1:H2' } }) }), /expect.source must be P!H1:H2/);
-  refuse(move('J5', { expect: exp('J5', [[{ t: 'text', v: 'm' }]]) }), /expect.cells must be 2 x 1/);
-  refuse(move('J5', { expect: exp('J5', [[{ t: 'blank' }], [{ t: 'blank' }]]) }), /nothing to prove/);
-  refuse(move('J5', { expect: exp('J5', [[{ t: 'text', v: 'm' }], [{ t: 'bool', v: 'x' }]]) }), /expect.cells\[1\]\[0\]/);
-  refuse(move('J5', { expect: exp('J5', [[{ t: 'text', v: 'm' }], [{ t: 'text', v: 'FALSE' }]]) }), /type is not observable/);
-  refuse(move('J5', { expect: exp('J5', [[{ t: 'text', v: 'm' }], [{ t: 'number', v: '3', extra: 1 }]]) }), /expect.cells\[1\]\[0\]/);
+  // L-06/b: `expect` itself is now an UNKNOWN field for move_range (the caller never supplies it --
+  // classify() builds it, see the move_range tests above) -- same rejection path copy_range's own
+  // `expect: {}` already used, below.
+  refuse({ id: 'x', steps: [{ ...MOVE, target: 'J5', expect: exp('J5') }] }, /does not support field\(s\): expect/);
   refuse({ id: 'x', steps: [{ intent: 'copy_range', sheet: 'P', range: 'A1', target: 'D5', expect: {} }] }, /does not support field/);
   refuse({ id: 'x', steps: [copy('D5').steps[0], { intent: 'write_range', sheet: 'Q', range: 'Z9', values: [['v']] }] }, /only step of its task/);
   assert.equal(planOperations(copy('B2', { targetSheet: 'Q' })).ok, true, 'the same coordinates on ANOTHER sheet do not overlap');
+});
+
+test('L-06 r6: the Copy body writes the PLANNER\'s translated formulas (target.formulas) and reads each back; a target that took no formula fails the command, named', () => {
+  const op = planOperations(copy('D5', { targetSheet: 'Q' })).operations[0];
+  const cmd = range.lower(op, { from: {}, to: op.dest, formulas: { E6: '=E5+X9' } });
+  assert.deepEqual(cmd.meta.formulaWrites, { E6: '=E5+X9' });
+  assert.equal(cmd.meta.explicitFormulaWrite, true);
+  const run = (formulaOf) => {
+    const sets = [];
+    const ws = n => ({ GetName: () => n, GetRange: a => ({ a, Copy: () => {}, GetFormula: () => formulaOf(n, a), SetValue: v => sets.push([n, a, v]) }) });
+    return { sets, out: new Function('Api', cmd.body)({ GetSheet: n => ws(n) }) };
+  };
+  const good = run((n, a) => (n === 'Q' && a === 'E6' ? '=E5+X9' : ''));
+  assert.deepEqual(good.out, { ok: true });
+  assert.deepEqual(good.sets, [['Q', 'E6', '=E5+X9']], 'ONLY the planner-translated cell, on the TARGET sheet, with the planner text');
+  assert.deepEqual(run(() => '').out, { ok: false, stage: 'xlsx-copy-formula-not-written', cell: 'E6' });
+  // no formulas in the source block -> nothing is rewritten
+  const none = range.lower(op, { from: {}, to: op.dest, formulas: {} });
+  assert.doesNotMatch(none.body, /SetValue\("/);
+  assert.deepEqual(none.meta.formulaWrites, {});
 });
 
 test('the command bodies: exact-name sheets, the public Copy / Cut onto the target top-left', () => {
   for (const [t, call] of [[copy('D5', { targetSheet: 'Q' }), 'Copy'], [move('J5'), 'Cut']]) {
     const cmd = range.lower(planOperations(t).operations[0]);
     const log = [];
-    const ws = n => ({ GetName: () => n, GetRange: a => ({ a, [call]: dest => log.push([n, a, call, dest.a]) }) });
+    const ws = n => ({ GetName: () => n, GetRange: a => ({ a, GetFormula: () => '', [call]: dest => log.push([n, a, call, dest.a]) }) }); // L-06 r5: no formula cell -> nothing rewritten
     assert.deepEqual(new Function('Api', cmd.body)({ GetSheet: n => ws(n) }), { ok: true });
     assert.deepEqual(log, call === 'Copy' ? [['P', 'A1:B2', 'Copy', 'D5']] : [['P', 'H1:H2', 'Cut', 'J5']]);
   }

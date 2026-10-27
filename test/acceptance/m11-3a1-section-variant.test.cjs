@@ -32,9 +32,14 @@ const { docxAdapter } = require('../../src/adapters/docx/adapter.cjs');
 const { createStore, createFakeDocxDriver } = require('../fakes/fake-docx-driver.cjs');
 
 const FILE = '1302148';
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): the historical word /1, /2, /3 (9.3.4.60)
+// identities are all retired. VERIFIED_PATCH / VERIFIED_PATCH_V2 keep naming an actual, now-off-list revision
+// (NEGATIVE examples below). VERIFIED_PATCH_ACCEPTED is the single ACCEPTED patch -- 9.3.5.0/5 since the GH #292 S4
+// D-state (9.3.5.0/3 and /4 are now NEGATIVE examples too); the byte-identical B21 handler is proven by
+// docx-b21-read-handler-identity.test.cjs.
 const VERIFIED_PATCH = 'euro-office-bridge-word-v1/9.3.4.60/1';
 const VERIFIED_PATCH_V2 = 'euro-office-bridge-word-v1/9.3.4.60/2';
-const VERIFIED_PATCH_V3 = 'euro-office-bridge-word-v1/9.3.4.60/3';
+const VERIFIED_PATCH_ACCEPTED = 'euro-office-bridge-word-v1/9.3.5.0/5';
 const CAP = BRIDGE_CAPABILITIES.DOCX_SECTION_VARIANT_STATE_READ;
 const HTML = '<h1>Budget</h1><p>Hello world</p><table><tr><td>a</td></tr></table>';
 
@@ -54,8 +59,10 @@ function wordApi(spy, { patchVersion = VERIFIED_PATCH, mode = 'ok', sections = [
   const paragraph = { GetClassType: () => 'paragraph', GetText: () => 'Hello world', GetElementsCount: () => 0, GetElement: () => null };
   const doc = { GetElementsCount: () => 1, GetElement: i => (i === 0 ? paragraph : null), GetAllTables: () => [], Search: () => [], GetSections: () => [section],
     GetAllBookmarksNames: () => [], GetFootnotesFirstParagraphs: () => [], GetEndNotesFirstParagraphs: () => [], GetCurrentFootEndnote: () => null };
-  const hasCap = patchVersion === VERIFIED_PATCH_V3 && mode !== 'capability-missing';
-  const manifest = { bridgeVersion: '1.0.0', documentServerVersion: '9.3.4', patchVersion, capabilities: hasCap ? [{ id: CAP.id, version: 1, kind: 'READ', format: 'DOCX', mutation: 'NO' }] : [] };
+  const hasCap = patchVersion === VERIFIED_PATCH_ACCEPTED && mode !== 'capability-missing';
+  // DS9346: documentServerVersion tracks the patch -- 9.3.5 for the accepted VERIFIED_PATCH_ACCEPTED, 9.3.4 for the
+  // retired historical identities (which must now also fail at the RUNTIME level, not just the patch level).
+  const manifest = { bridgeVersion: '1.0.0', documentServerVersion: patchVersion === VERIFIED_PATCH_ACCEPTED ? '9.3.5' : '9.3.4', patchVersion, capabilities: hasCap ? [{ id: CAP.id, version: 1, kind: 'READ', format: 'DOCX', mutation: 'NO' }] : [] };
   const read = (capabilityId, args) => {
     spy.reads += 1;
     if (mode === 'throw') throw new Error('bridge-boom');
@@ -73,14 +80,14 @@ const run = (Api, body) => new Function('Api', body)(Api); // eslint-disable-lin
 
 test('the generated body: on word /3 it calls the Bridge READ ONCE per section; opt-out / gated bodies call it 0 times and do not even name the capability id', () => {
   const spy = { reads: 0 };
-  const r = run(wordApi(spy, { patchVersion: VERIFIED_PATCH_V3 }), docx.propertyQuery());
+  const r = run(wordApi(spy, { patchVersion: VERIFIED_PATCH_ACCEPTED }), docx.propertyQuery());
   assert.equal(spy.reads, 1, 'one Bridge read per section carries BOTH flags');
   assert.deepEqual([r.document.sections[0].titlePage, r.document.sections[0].evenAndOdd], [true, false]);
   for (const reason of ['not-requested', 'runtime-not-verified']) {
     const s0 = { reads: 0 };
     const body = docx.propertyQuery({ sectionVariantState: false, sectionVariantUnavailable: reason });
     assert.equal(body.includes(CAP.id), false, `${reason}: the body does not even name the capability`);
-    const x = run(wordApi(s0, { patchVersion: VERIFIED_PATCH_V3 }), body);
+    const x = run(wordApi(s0, { patchVersion: VERIFIED_PATCH_ACCEPTED }), body);
     assert.equal(s0.reads, 0, reason);
     assert.deepEqual([x.document.sections[0].titlePage, x.document.sections[0].evenAndOdd], [`UNAVAILABLE:${reason}`, `UNAVAILABLE:${reason}`]);
     assert.equal(x.document.sections[0].header.default.paras[0].text, 'Head', 'the PUBLIC header read is untouched');
@@ -91,7 +98,7 @@ test('the generated body: on word /3 it calls the Bridge READ ONCE per section; 
 test('any Bridge failure (capability missing, explicit refusal, a thrown read, or a malformed shape) is UNAVAILABLE:bridge-unavailable on BOTH flags, never null or a guessed boolean', () => {
   for (const mode of ['capability-missing', 'refuse', 'throw', 'malformed']) {
     const spy = { reads: 0 };
-    const sec = run(wordApi(spy, { patchVersion: VERIFIED_PATCH_V3, mode }), docx.propertyQuery()).document.sections[0];
+    const sec = run(wordApi(spy, { patchVersion: VERIFIED_PATCH_ACCEPTED, mode }), docx.propertyQuery()).document.sections[0];
     assert.deepEqual([sec.titlePage, sec.evenAndOdd], ['UNAVAILABLE:bridge-unavailable', 'UNAVAILABLE:bridge-unavailable'], mode);
   }
   const inv = normalizeInventory({ html: HTML, paragraphs: [], document: { sections: [{ header: {}, footer: {} }] } });
@@ -144,12 +151,16 @@ async function liveRead(apiOpts, request) {
 
 test('the handshake precondition: the fake serves manifests the handshake can parse; B21 is proven on word /3 ONLY', () => {
   assert.equal(run(wordApi({ reads: 0 }), HANDSHAKE_BODY) !== undefined, true);
-  assert.deepEqual([...docx.B21_BRIDGE_READ_RUNTIMES], [`9.3.4|${VERIFIED_PATCH_V3}`]);
+  // DS9346: the historical word /3 (9.3.4.60) chain this list used to carry is retired -- the single accepted
+  // entry is now 9.3.5.0/5 (GH #292 S4 D-state), byte-identical handler proven by docx-b21-read-handler-identity.test.cjs
+  // GH #292 S4 COMPAT: word /4 = /3 + the next / link WRITE, every /3 handler byte-identical (docx-b21-read-handler-identity.test.cjs)
+  // GH #292 S4 D-state: /5 is the single accepted entry (/3 and /4 retired with their DS rollback points)
+  assert.deepEqual([...docx.B21_BRIDGE_READ_RUNTIMES], [`9.3.5|${VERIFIED_PATCH_ACCEPTED}`]);
   assert.ok(Object.isFrozen(docx.B21_BRIDGE_READ_RUNTIMES));
 });
 
 test('SHARED DEFAULT UNCHANGED: readLive() on word /3 reads the Bridge once and the WRITE family gets a known state', async () => {
-  const { r, spy, inv } = await liveRead({ patchVersion: VERIFIED_PATCH_V3 });
+  const { r, spy, inv } = await liveRead({ patchVersion: VERIFIED_PATCH_ACCEPTED });
   assert.equal(r.ok, true, r.detail);
   assert.equal(r.payload.runtime.internalGate.sectionVariant, true);
   assert.equal(spy.reads, 1);
@@ -167,17 +178,17 @@ test('RUNTIME GATE: without the B21 Bridge READ capability (word /1, word /2, or
 });
 
 test('OPT-OUT: readLive({ includeSectionVariantState: false }) on word /3 calls the Bridge 0 times', async () => {
-  const { r, spy, inv } = await liveRead({ patchVersion: VERIFIED_PATCH_V3 }, { includeSectionVariantState: false });
+  const { r, spy, inv } = await liveRead({ patchVersion: VERIFIED_PATCH_ACCEPTED }, { includeSectionVariantState: false });
   assert.equal(r.ok, true, r.detail);
   assert.equal(spy.reads, 0);
   assert.equal(inv.document.sections[0].titlePage, 'UNAVAILABLE:not-requested');
   assert.equal(inv.document.sections[0].header.default.paras[0].text, 'Head');
 });
 
-test('PRODUCT READ: the five accepted DOCX operations call the Bridge READ 0 times, with output IDENTICAL to a default-read projection (on word /3, where the control DOES read it)', async () => {
-  const OPS = ['read_text', 'read_formatting', 'read_tables', 'read_headers_footers', 'read_bookmarks'];
+test('PRODUCT READ: the six accepted DOCX operations call the Bridge READ 0 times, with output IDENTICAL to a default-read projection (on word /3, where the control DOES read it)', async () => {
+  const OPS = ['read_text', 'read_formatting', 'read_tables', 'read_headers_footers', 'read_page_setup', 'read_bookmarks'];
   const tool = (forceDefault, spies) => createReadTool('docx', { configSource, loadPlaywright: () => ({ ok: true }), createDriver: () => {
-    const ed = editor({ patchVersion: VERIFIED_PATCH_V3 });
+    const ed = editor({ patchVersion: VERIFIED_PATCH_ACCEPTED });
     spies.push(ed.spy);
     const d = docx.createEuroOfficeDocxDriver({ configSource, loadPlaywright: ed.loadPlaywright, pollMs: 5, closeAckTimeoutMs: 200, timeoutMs: 2000 });
     if (forceDefault) { const real = d.readLive.bind(d); d.readLive = () => real(); } // the control: the shared default read
@@ -192,8 +203,8 @@ test('PRODUCT READ: the five accepted DOCX operations call the Bridge READ 0 tim
     assert.equal(p.ok, true, JSON.stringify(p));
     assert.deepEqual(p.result, c.result, `${op}: READ_OUTPUT_PARITY`);
   }
-  assert.deepEqual(productSpies.map(s => s.reads), [0, 0, 0, 0, 0], 'ACCEPTED_DOCX_BRIDGE_READS=0');
-  assert.deepEqual(controlSpies.map(s => s.reads), [1, 1, 1, 1, 1], 'positive control: the default read does call the Bridge, once');
+  assert.deepEqual(productSpies.map(s => s.reads), [0, 0, 0, 0, 0, 0], 'ACCEPTED_DOCX_BRIDGE_READS=0');
+  assert.deepEqual(controlSpies.map(s => s.reads), [1, 1, 1, 1, 1, 1], 'positive control: the default read does call the Bridge, once');
 });
 
 // ---- the WRITE family: unknown -> fail closed ------------------------------------------------------------------------
@@ -234,11 +245,11 @@ test('WRITE RUNTIME GATE: a title/even command carries bridgeSectionVariantRead 
   for (const v of ['title', 'even']) {
     const cmd = hf.lower({ intent: 'edit_header', text: 'x' }, target(v));
     assert.equal(cmd.meta.bridgeSectionVariantRead, true);
-    for (const runtime of [`9.3.4|${VERIFIED_PATCH}`, `9.3.4|${VERIFIED_PATCH_V2}`, '9.3.4|euro-office-bridge-word-v1/9.3.4.60/4', null]) {
+    for (const runtime of [`9.3.4|${VERIFIED_PATCH}`, `9.3.4|${VERIFIED_PATCH_V2}`, '9.3.4|euro-office-bridge-word-v1/9.3.4.60/4', '9.3.5|euro-office-bridge-word-v1/9.3.5.0/3', '9.3.5|euro-office-bridge-word-v1/9.3.5.0/4', null]) {
       const refused = docx.internalWriteRefusal(cmd, runtime);
       assert.deepEqual([refused.ok, refused.dispatched, refused.outcome, refused.proven], [false, false, 'b21-bridge-read-runtime-not-proven', [...docx.B21_BRIDGE_READ_RUNTIMES]], String(runtime));
     }
-    assert.equal(docx.internalWriteRefusal(cmd, `9.3.4|${VERIFIED_PATCH_V3}`), null, 'word /3: let through');
+    assert.equal(docx.internalWriteRefusal(cmd, `9.3.5|${VERIFIED_PATCH_ACCEPTED}`), null, 'the accepted 9.3.5.0/5 runtime: let through');
   }
   const d = hf.lower({ intent: 'edit_header', text: 'x' }, target('default'));
   assert.equal(d.meta.bridgeSectionVariantRead, undefined);

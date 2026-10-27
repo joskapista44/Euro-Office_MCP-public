@@ -111,8 +111,15 @@ function tableRead(primary) {
   const html = ((primary && primary.blocks) || []).filter(b => b.kind === 'table');
   // a VERTICAL merge (row probe 4, measured): the projection renders rowspan on the top cell and
   // OMITS the continuation cell, while the driver read keeps it as an empty cell -- the two reads
-  // no longer describe the same grid, and a row delete on the top row lost the merged content
-  // (row probe 3). Unsupported for every table family: refused explicitly, before any dispatch.
+  // no longer describe the same grid for THAT table, and a row delete on the top row lost the
+  // merged content (row probe 3). This function refuses the moment ANY table in the document has
+  // one -- DOCUMENT-WIDE, not scoped to the table actually being acted on. W06-3 (point 2,
+  // LIVE-measured READ_DIVERGENCE: a merge-free table's two reads agree regardless of what
+  // another table carries) found this too wide for `replace_table_cell` and the column family,
+  // which now use `tableReadWithVerticalMerges` (below) instead -- PER-TABLE reconciled, with
+  // their own callers (`cellState`/`classify`, table-column.cjs's `locate`) refusing a merge only
+  // in the TARGET table. `tableRead` itself is unchanged and still exported; nothing in this file
+  // calls it anymore as of W06-3, but a future caller wanting the document-wide behaviour can.
   if (html.some(t => (t.rows || []).some(r => r.some(c => c.rowspan > 1)))) return { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:vertical-merge' };
   const shape = ts => JSON.stringify(ts.map(t => (t.rows || []).map(r => r.length)));
   if (shape(tables) !== shape(html)) return { ok: false, reason: 'table-read-shape-mismatch' };
@@ -160,14 +167,43 @@ function tableReadWithVerticalMerges(primary) {
  */
 function scopeOf(read, tableAnchor) {
   if (tableAnchor === null || tableAnchor === undefined) return { ok: true, prefix: null, cells: read.cells };
-  const tis = [...new Set(read.cells.filter(c => c.cell.text === tableAnchor).map(c => c.at.split(':')[0]))];
+  const tis = [...new Set(read.cells.filter(c => c.cell.text === tableAnchor).map(c => tableOf(c.at)))];
   if (tis.length !== 1) return { ok: false, reason: tis.length ? 'table-anchor-ambiguous' : 'table-anchor-not-found', tables: tis.length };
-  return { ok: true, prefix: tis[0], cells: read.cells.filter(c => c.at.split(':')[0] === tis[0]) };
+  return { ok: true, prefix: tis[0], cells: read.cells.filter(c => tableOf(c.at) === tis[0]) };
 }
 
+/**
+ * GH #291 N3 (LIVE, docs/evidence/gh291-n3-nested-cell-probe-20261022.json): the cells of a nested table -- one level down, bound
+ * to its holding cell (cell.nestedTables) -- are cells too: `at` = `<holder at>><nested table>:<row>:<cell>`, their table is the
+ * nested table itself (an anchor of the HOLDING table does not reach them: measured, the command finds no such cell there).
+ * The write's own command reaches them through GetAllTables(); the holding cell's read text runs on into the nested text.
+ * GH #291 N3x (LIVE, docs/evidence/gh291-nested-remaining-probe-20261023.json): TWO levels down the same -- only that cell changes,
+ * and every holding cell above it (`holders`, nearest first) reads the new text in place of the old. Deeper is not measured: such a
+ * cell is not in this list (its write ends `table-cell-terminal-unprovable`).
+ */
+const NESTED_DEPTH_MEASURED = 2;
+const tableOf = at => { const i = at.lastIndexOf('>'); const head = at.slice(i + 1).split(':')[0]; return i < 0 ? head : `${at.slice(0, i)}>${head}`; };
+function withNestedCells(read) {
+  const nested = [];
+  const walk = (at, cell, holders) => {
+    if (holders.length >= NESTED_DEPTH_MEASURED || !Array.isArray(cell.nestedTables)) return;
+    cell.nestedTables.forEach((nt, n) => nt.rows.forEach((row, r) => row.forEach((c, k) => {
+      const here = { at: `${at}>${n}:${r}:${k}`, cell: c, holder: at, holders: [at, ...holders] };
+      nested.push(here);
+      walk(here.at, c, here.holders);
+    })));
+  };
+  for (const { at, cell } of read.cells) walk(at, cell, []);
+  return { ...read, cells: [...read.cells, ...nested] };
+}
+const occurrences = (hay, needle) => { let n = 0; for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + 1)) n += 1; return n; };
+
 function cellState(primary, op) {
-  const read = tableRead(primary);
-  if (!read.ok) return read;
+  // W06-3 (point 2): per-table reconciled, not the document-wide blanket -- `classify`
+  // below refuses a vertical merge only in the SPECIFIC table the resolved target lives in.
+  const read0 = tableReadWithVerticalMerges(primary);
+  if (!read0.ok) return read0;
+  const read = withNestedCells(read0);
   const scope = scopeOf(read, op.tableAnchor);
   if (!scope.ok) return scope;
   const old = scope.cells.filter(c => c.cell.text === op.oldText);
@@ -185,7 +221,20 @@ function classify(primary, op) {
   if (s.oldTotal === 1) {
     if (s.newTotal === 1) return { state: 'FAIL_CLOSED', evidence: { reason: 'table-cell-conflicting-old-and-new-state', ...counts } };
     const target = s.old.cells[0];
+    // GH #291 N3 / N3x: a nested cell -- every holding cell's read text carries the old text; L3 expects exactly that one occurrence replaced
+    if (target.holder !== undefined) {
+      const proven = target.holders.every(h => { const holder = s.read.cells.find(c => c.at === h); return !!holder && occurrences(holder.cell.text, op.oldText) === 1; });
+      if (!proven) return { state: 'FAIL_CLOSED', evidence: { reason: 'nested-table-holder-text-unprovable', at: target.at } };
+    }
+    // GH #291 T-02 / T-03: a vertical merge in the target table no longer refuses. LIVE-measured
+    // (docs/evidence/gh291-vmerge-table-probe-20261021.json): this command on a cell in the owner's row, the
+    // continuation's row, below the merge, and on the vMerge OWNER itself changes only that cell; the saved
+    // vMerge restart/continue and gridSpan stay. A continuation cell (empty text) is never a target (plan
+    // requires a non-empty old text); L3 still compares every cell and the HTML spans (rowspan included).
     if (!target.cell.simple) return { state: 'FAIL_CLOSED', evidence: { reason: 'table-cell-not-plain-paragraphs-of-runs', at: target.at } };
+    // GH #289: a field (PAGE ...) or an image reads as runs with no text -- the whole-cell replacement would drop it silently
+    if (!Array.isArray(target.cell.inline)) return { state: 'FAIL_CLOSED', evidence: { reason: 'table-cell-inline-content-unreadable', at: target.at } };
+    if (target.cell.inline.length) return { state: 'FAIL_CLOSED', evidence: { reason: `FAIL_CLOSED_UNSUPPORTED_SHAPE:table-cell-replacement-would-drop-inline:${target.cell.inline.join(',')}`, at: target.at } };
     return { state: 'APPLY', evidence: { from: op.oldText, at: target.at, baseline: target.cell.format } };
   }
   if (s.newTotal === 0) return { state: 'FAIL_CLOSED', evidence: { reason: 'table-cell-terminal-unprovable', ...counts } };
@@ -194,9 +243,12 @@ function classify(primary, op) {
 }
 
 function resolve(primary, selector) {
-  const read = tableRead(primary);
+  // W06-3 (point 2): the per-table reconciled read, so a target in a merge-free table can
+  // still be located even when another table in the document carries a vertical merge.
+  const read0 = tableReadWithVerticalMerges(primary);
   const up = r => r.toUpperCase().replace(/-/g, '_');
-  if (!read.ok) return { ok: false, target: null, selector, ambiguity: up(read.reason) };
+  if (!read0.ok) return { ok: false, target: null, selector, ambiguity: up(read0.reason) };
+  const read = withNestedCells(read0);
   const sel = cellSelector(selector);
   if (!sel) return { ok: false, target: null, selector, ambiguity: 'INVALID_SELECTOR' };
   const tableAnchor = sel.tableAnchor === null ? null : norm(sel.tableAnchor);
@@ -276,7 +328,8 @@ try {
 
 // ---- verify -------------------------------------------------------------------------------------
 
-const shapeOf = read => JSON.stringify(read.tables.map(t => t.rows.map(r => r.length)));
+// the shape of every table, the nested ones too (GH #291 N3): the cell positions
+const shapeOf = read => JSON.stringify(read.cells.map(c => c.at));
 const pick = f => CELL_KEYS.filter(k => f[k] !== undefined).map(k => [k, f[k]]);
 
 /** L1: the target cell (same place, same table shape) holds exactly the new text in one paragraph; old 0, new 1. */
@@ -303,15 +356,24 @@ function verifyPrimitive(op, before, after) {
 function verifyPreservation(op, before, after) {
   const b = cellState(before && before.primary, op);
   if (!b.ok || b.old.cells.length !== 1) return { ok: false, evidence: { reason: b.ok ? 'before-target-cell-not-unique' : `before-${b.reason}` } };
-  const a = tableRead(after.primary);
-  if (!a.ok) return { ok: false, evidence: { reason: `after-${a.reason}` } };
+  // W06-3 (point 2): the SAME per-table reconciled read as cellState/classify -- an
+  // unrelated table's vertical merge must not make verification itself unreadable for an
+  // operation classify() just allowed to dispatch (the `html`/`cells` shape this function reads
+  // afterward is byte-identical between `tableRead` and `tableReadWithVerticalMerges`, see
+  // tableReadWithVerticalMerges's own doc comment -- only the OK/refusal check differs).
+  const a0 = tableReadWithVerticalMerges(after.primary);
+  if (!a0.ok) return { ok: false, evidence: { reason: `after-${a0.reason}` } };
+  const a = withNestedCells(a0);
   const at = b.old.cells[0].at;
+  // GH #291 N3 / N3x: every holding cell of a nested target reads the new text in place of the old (classify proved it occurs once)
+  const holders = b.old.cells[0].holders || [];
+  const expectedOf = c => (holders.includes(c.at) ? { ...c.cell, text: c.cell.text.replace(op.oldText, norm(op.text)) } : c.cell);
   const sameShape = shapeOf(a) === shapeOf(b.read);
   const spans = r => JSON.stringify(r.html.map(t => t.rows.map(row => row.map(c => [c.span, c.rowspan]))));
   const sameSpans = spans(a) === spans(b.read);
   const afterAt = new Map(a.cells.map(c => [c.at, c.cell]));
   const key = c => JSON.stringify([c.text, c.paragraphs, c.simple, pick(c.format)]);
-  const changed = sameShape ? b.read.cells.filter(c => c.at !== at && (!afterAt.get(c.at) || key(afterAt.get(c.at)) !== key(c.cell))).map(c => c.at) : null;
+  const changed = sameShape ? b.read.cells.filter(c => c.at !== at && (!afterAt.get(c.at) || key(afterAt.get(c.at)) !== key(expectedOf(c)))).map(c => c.at) : null;
   const target = afterAt.get(at);
   // a MIXED font family (runs that disagree, W4c column probe 1) is not one family: never claimed
   const wanted = pick(b.old.cells[0].cell.format).filter(([k, v]) => !(k === 'fontFamily' && v === 'MIXED'));

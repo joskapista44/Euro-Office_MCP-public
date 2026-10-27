@@ -20,7 +20,10 @@
  */
 
 // M5: `constraints` migrated (constraints.cjs validates its shape and enforces it).
-const TASK_KEYS = Object.freeze(['id', 'steps', 'recovery', 'constraints']);
+// GH #76 MODEL 1 DOCX port (owner decision "A", the owner channel, 2026-10-19): `verifyStoredContent` is
+// read and enforced by docx-write-tools.cjs's own `runDocxStoredContentVerify` gate -- not a "source" field
+// this contract is transitionally refusing, so it carries no NOT_ENFORCED_YET.task entry below.
+const TASK_KEYS = Object.freeze(['id', 'steps', 'recovery', 'constraints', 'verifyStoredContent']);
 
 // Source (f8c6d6cf) fields the target does not enforce yet -- named, so the refusal says what is
 // missing instead of a generic "unknown field". Their migration is the M5 parity work.
@@ -71,17 +74,17 @@ const STEP_KEYS = Object.freeze({
   move_paragraph_after: [...C, ...D, 'selector', 'destinationSelector'],
   apply_list: [...C, ...D, 'selector', 'type', 'level'],
   set_list_level: [...C, ...D, 'selector', 'level'],
-  set_list_type: [...C, ...D, 'selector', 'type'],
+  set_list_type: [...C, ...D, 'selector', 'type', 'sharedDefinition'],
   indent_list_item: [...C, ...D, 'selector'],
   outdent_list_item: [...C, ...D, 'selector'],
   remove_list: [...C, ...D, 'selector'],
-  add_bookmark: [...C, ...D, 'selector', 'name'],
-  add_link: [...C, ...D, 'selector', 'url', 'tooltip'],
+  add_bookmark: [...C, ...D, 'selector', 'name', 'matchText'],
+  add_link: [...C, ...D, 'selector', 'url', 'tooltip', 'matchText'],
   add_footnote: [...C, ...D, 'selector', 'text'],
   add_endnote: [...C, ...D, 'selector', 'text'],
   replace_table_cell: [...C, ...D, 'selector', 'text'],
-  insert_table_row_before: [...C, ...D, 'selector', 'terminalRowCount', 'terminalTableAnchor'],
-  insert_table_row_after: [...C, ...D, 'selector', 'terminalRowCount', 'terminalTableAnchor'],
+  insert_table_row_before: [...C, ...D, 'selector', 'terminalRowCount', 'terminalTableAnchor', 'extendMerge'], // GH #291 T-05: the explicit merge-extending mode
+  insert_table_row_after: [...C, ...D, 'selector', 'terminalRowCount', 'terminalTableAnchor', 'extendMerge'], // GH #291 T-05: the explicit merge-extending mode
   delete_table_row: [...C, ...D, 'selector', 'terminalRowCount', 'terminalTableAnchor'],
   insert_table_column_before: [...C, ...D, 'selector', 'terminalColumnCount', 'terminalTableAnchor'],
   insert_table_column_after: [...C, ...D, 'selector', 'terminalColumnCount', 'terminalTableAnchor'],
@@ -89,8 +92,8 @@ const STEP_KEYS = Object.freeze({
   merge_table_cells: [...C, ...D, 'selector', 'endSelector', 'terminalMergedText', 'terminalMergedSpan', 'terminalTableAnchor'],
   split_table_cell: [...C, ...D, 'selector', 'splitRows', 'splitCols', 'terminalTableAnchor'],
   // `selector` stays accepted here so the family keeps refusing it with its own, precise reason.
-  edit_header: [...C, ...D, 'selector', 'section', 'text', 'variant'],
-  edit_footer: [...C, ...D, 'selector', 'section', 'text', 'variant'],
+  edit_header: [...C, ...D, 'inheritedBy', 'pageNumber', 'paragraph', 'selector', 'section', 'text', 'variant'],
+  edit_footer: [...C, ...D, 'inheritedBy', 'pageNumber', 'paragraph', 'selector', 'section', 'text', 'variant'],
 });
 
 // Selector key sets for the families that resolve through the shared resolver and would otherwise

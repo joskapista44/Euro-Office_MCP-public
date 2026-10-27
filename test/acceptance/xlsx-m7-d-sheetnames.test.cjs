@@ -62,11 +62,11 @@ test('R26c RED: the quoted reference does not follow the rename -> L3 FAIL', asy
   assert.equal(result.ok, false);
 });
 
-test('R26c refused: copy of a quoted-class sheet; an accented name without a space; a rename whose sheet a validation references', async () => {
+test('R26c refused: copy of a quoted-class sheet; (L-21/2: an accented name without a space is now RELEASED); a rename whose sheet a validation references', async () => {
   const copy = await run(createStore(book()), task({ intent: 'copy_sheet', sheet: 'Q 1', name: 'Q 2' }));
   assert.equal(copy.driver.calls.dispatch, 0);
   assert.equal(reason(copy.result), 'xlsx-copy-quoted-name-not-measured');
-  assert.equal(planOperations(task({ intent: 'create_sheet', name: 'Ünnep' })).ok, false);
+  assert.equal(planOperations(task({ intent: 'create_sheet', name: 'Ünnep' })).ok, true);
   const b = book();
   b[0].rules = [{ kind: 'validation', type: 1, range: 'C1', formula: "='Q 1'!$A$1", formula2: '', api: { type: 'xlValidateList', alertStyle: 'xlValidAlertStop', operator: 'xlBetween' } }];
   const rn = await run(createStore(b), task({ intent: 'rename_sheet', sheet: 'Q 1', name: 'Kiadás 1' }));

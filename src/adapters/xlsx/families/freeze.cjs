@@ -23,8 +23,12 @@ const cells = require('./cells.cjs');
  */
 
 const INTENTS = Object.freeze(['freeze_panes', 'unfreeze_panes']);
-const MAX_ROWS = 1000;
-const MAX_COLS = 100;
+// X-L09 (owner decision "A", internal tracker): raised from 1000 rows / 100 columns to the MEASURED range. LIVE
+// (test/live/xlsx-xl09-freeze-above-cap-probe.live.cjs, LIVE probe, session + reopen): a freeze at 1001 / 2000 / 100000 rows, 101 / 200 / 1000
+// columns and 1001 x 101 together lands in the file at exactly that pane -- the old 1000 / 100 was OUR implementation ceiling, not an engine limit.
+// ABOVE these the plan still refuses, named (rows / columns must be an integer in [1, N]); nothing above was measured.
+const MAX_ROWS = 100000;
+const MAX_COLS = 1000;
 
 function plan(step, index) {
   const at = `step ${index}: ${step.intent}`;
@@ -65,6 +69,13 @@ function gate(primary, op) {
   if (s.length !== 1) return { ok: false, reason: s.length > 1 ? 'xlsx-sheet-ambiguous' : 'xlsx-sheet-not-found', available: primary.sheets.map(x => x.name) };
   if (typeof primary.active !== 'string' || !primary.sheets.some(x => x.name === primary.active)) return { ok: false, reason: 'xlsx-active-sheet-unread', active: primary.active };
   if (!primary.panes) return { ok: false, reason: 'xlsx-freeze-pane-unobservable', sheet: op.selector.sheet, why: 'not-read' };
+  // X-L10 (LIVE-measured, test/live/xlsx-freeze-active-sheet-persistence.live.cjs): the SAVED file's activeTab follows
+  // the freeze TARGET -- the in-command restore of the originally active sheet holds in the session (L1) but is not what
+  // the editor saves -- so a HIDDEN target would open as the active (shown) sheet. A hidden target is refused before
+  // the write; an unread visibility is never "visible".
+  const vis = primary.visibility ? primary.visibility[op.selector.sheet] : undefined;
+  if (vis === undefined || typeof vis !== 'boolean') return { ok: false, reason: 'xlsx-freeze-sheet-visibility-unobservable', sheet: op.selector.sheet, why: vis === undefined ? 'not-read' : vis };
+  if (vis === false) return { ok: false, reason: 'xlsx-freeze-hidden-sheet-refused', sheet: op.selector.sheet };
   // every sheet's pane: the target's is the proof, the others' the L3 baseline
   for (const x of primary.sheets) {
     const p = primary.panes[x.name];
@@ -138,7 +149,11 @@ function verifyPreservation(op, before, after) {
   const b = before.primary.panes || {};
   const a = after.primary.panes || {};
   const changed = Object.keys(b).filter(n => n !== op.selector.sheet && JSON.stringify(a[n]) !== JSON.stringify(b[n])).map(n => ({ sheet: n, before: b[n], after: a[n] === undefined ? 'not-read' : a[n] }));
-  return { ok: rest.ok && changed.length === 0, evidence: { ...rest.evidence, paneChanged: changed.slice(0, 20), paneChangedCount: changed.length } };
+  // X-L13/6: once tiered, report preservationScope FULL -- `panes`/`sheetVisibility` are read per-SHEET
+  // (xlsx-driver.cjs: `for (const s of sheets) panes[s.row.name] = ...`), unconditional on used-cell count,
+  // so every other sheet's pane stays fully checked above. Below 45000 unchanged.
+  const tiered = before.primary.tier === 'tiered';
+  return { ok: rest.ok && changed.length === 0, evidence: { ...rest.evidence, paneChanged: changed.slice(0, 20), paneChangedCount: changed.length, ...(tiered ? { preservationScope: 'FULL' } : {}) } };
 }
 
 function wholeTaskChecks(op, finalObservation) {
@@ -148,6 +163,6 @@ function wholeTaskChecks(op, finalObservation) {
 }
 
 const windowsOf = () => [];
-const liveExtras = () => ({ panes: true });
+const liveExtras = () => ({ panes: true, sheetVisibility: true });
 
 module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };

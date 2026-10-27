@@ -86,8 +86,12 @@ const SHADING_HEX_RE = /^[0-9a-fA-F]{6}$/;
 // tab align and border style are each restricted to the ONE value this session's own LIVE probes
 // measured -- 'center'/'decimal' tab alignment and any border style other than 'single' are
 // explicitly NOT MEASURED (the design doc's own point 4) and refused, not guessed.
-const TAB_ALIGNS = Object.freeze(['left', 'right']);
-const BORDER_STYLES = Object.freeze(['single']);
+// GH #290 (docs/evidence/gh290-paragraph-format-public-api-20261021.json): 'center' is stored and survives a reopen ->
+// released; 'decimal' (and an unknown value) is silently stored as 'left', and SetTabs ignores a leader -> still refused.
+// Border 'none' writes an explicit w:val="none" (the other sides unchanged) -> released; double/dotted/dashed/thick are
+// silently stored as 'none' (the border disappears) -> still refused.
+const TAB_ALIGNS = Object.freeze(['left', 'right', 'center']);
+const BORDER_STYLES = Object.freeze(['single', 'none']);
 const BORDER_SIDES = Object.freeze(['Top', 'Bottom', 'Left', 'Right']);
 const BORDER_KEYS = Object.freeze(BORDER_SIDES.map(s => `border${s}`));
 // PAGINATION_KEYS do NOT join BOOLEAN_KEYS: that loop blindly coerces any value with Boolean(),
@@ -108,6 +112,9 @@ const TEXT_KEYS = Object.freeze(['bold', 'italic', 'underline', 'strike', 'fontF
 // survival of other paragraphs, never their format -- this is new coverage, scoped to exactly
 // these new keys, not a retroactive fix of the pre-existing fields).
 const NEW_PARA_LEVEL_KEYS = Object.freeze(['tabs', ...BORDER_KEYS, ...PAGINATION_KEYS]);
+// GH #290: L3 on the OTHER paragraphs also compares the explicit (direct) pagination state -- a stray explicit `false`
+// reads exactly like an absent flag through the boolean keys
+const L3_PARA_LEVEL_KEYS = Object.freeze([...NEW_PARA_LEVEL_KEYS, 'paginationDirect']);
 
 /** W-09 shading: absent -> nothing; else exactly six hex digits (an optional leading '#'), upper-cased. */
 function normalizeShading(value) {
@@ -118,17 +125,19 @@ function normalizeShading(value) {
 }
 
 /** W-09 tabs: an array of {pos (points, >= 0), align}. align restricted to TAB_ALIGNS -- a tab
- * leader is NOT accepted at all (the MEASURED write never passes one; NOT MEASURED for v1). */
+ * leader is NOT accepted at all (the MEASURED write never passes one; NOT MEASURED for v1).
+ * GH #290 F-02 (docs/evidence/gh290-paragraph-format-public-api-20261021.json P3): an EMPTY list removes the paragraph's own
+ * tabs (SetTabs([], []) -- no w:tabs stored, the read gives []); a tab the paragraph's style defines is not touched. */
 function normalizeTabs(value) {
   if (value == null) return { ok: true, value: undefined };
-  if (!Array.isArray(value) || value.length === 0) return { ok: false, detail: 'tabs must be a non-empty array of {pos, align}' };
+  if (!Array.isArray(value)) return { ok: false, detail: 'tabs must be an array of {pos, align} ([] removes the paragraph\'s own tabs)' };
   const out = [];
   for (const t of value) {
     if (!t || typeof t !== 'object') return { ok: false, detail: 'each tabs entry must be an object {pos, align}' };
     const pos = Number(t.pos);
     if (!Number.isFinite(pos) || pos < 0) return { ok: false, detail: 'tabs[].pos must be a non-negative number (points)' };
     const align = String(t.align == null ? '' : t.align).trim();
-    if (!TAB_ALIGNS.includes(align)) return { ok: false, detail: `tabs[].align must be one of ${TAB_ALIGNS.join(', ')} (center/decimal not yet measured)` };
+    if (!TAB_ALIGNS.includes(align)) return { ok: false, detail: `tabs[].align must be one of ${TAB_ALIGNS.join(', ')} (decimal is silently stored as left by the editor -- refused)` };
     out.push({ pos, align });
   }
   return { ok: true, value: out };
@@ -139,7 +148,12 @@ function normalizeBorderSide(key, value) {
   if (value == null) return { ok: true, value: undefined };
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, detail: `${key} must be an object {style, size, color}` };
   const style = String(value.style == null ? '' : value.style).trim();
-  if (!BORDER_STYLES.includes(style)) return { ok: false, detail: `${key}.style must be one of ${BORDER_STYLES.join(', ')} (others not yet measured)` };
+  if (!BORDER_STYLES.includes(style)) return { ok: false, detail: `${key}.style must be one of ${BORDER_STYLES.join(', ')} (double/dotted/dashed/thick are silently stored as none by the editor -- refused)` };
+  // GH #290: 'none' removes the side (an explicit w:val="none", which also overrides a border the style defines)
+  if (style === 'none') {
+    if (Object.keys(value).some(k => k !== 'style')) return { ok: false, detail: `${key} {style: 'none'} takes no size or color` };
+    return { ok: true, value: { style: 'none', size: 0, color: '000000' } };
+  }
   const size = Number(value.size);
   if (!Number.isFinite(size) || size <= 0) return { ok: false, detail: `${key}.size must be a positive number (points)` };
   // stored WITHOUT the leading '#' -- matches both the driver read's own shape (borderSideFormat
@@ -159,6 +173,9 @@ function tabsEqual(actual, wanted) {
 /** W-09 border side deep-equality: style exact, size within 0.01pt, color case-insensitive. */
 function borderSideEqual(actual, wanted) {
   if (!actual || typeof actual !== 'object') return false;
+  // GH #290: a removed side is an explicit 'none' (size / colour carry nothing); an ABSENT side is not proof -- the
+  // paragraph's style may define a border there
+  if (wanted.style === 'none') return actual.style === 'none';
   return actual.style === wanted.style && Number.isFinite(Number(actual.size)) && Math.abs(Number(actual.size) - wanted.size) < 0.01 && String(actual.color || '').toUpperCase() === wanted.color.toUpperCase();
 }
 
@@ -215,12 +232,13 @@ function normalizeWanted(format) {
     if (!r.ok) return r;
     if (r.value !== undefined) out[k] = r.value;
   }
-  // W-09 pagination flags: `false` is EXPLICITLY REFUSED, named -- clearing is not yet measured
-  // (design doc point 4). This is why these keys do NOT join BOOLEAN_KEYS's blind loop above.
+  // W-09 pagination flags: a real boolean only (never coerced). GH #290: `false` is released -- SetKeepNext(false) etc.
+  // write an explicit w:val="false", which overrides a style that sets the flag (Heading 1 keepNext, measured). GH #290 F-07
+  // (LIVE, docs/evidence/gh289-290-remaining-probe-20261023.json): SetWidowControl(false) the same (stored, kept after a reopen).
   for (const k of PAGINATION_KEYS) {
     if (format[k] == null) continue;
-    if (format[k] !== true) return { ok: false, detail: `${k} must be true -- clearing (false) is not yet measured, refused explicitly` };
-    out[k] = true;
+    if (typeof format[k] !== 'boolean') return { ok: false, detail: `${k} must be a boolean` };
+    out[k] = format[k];
   }
   if (Object.keys(out).length === 0) return { ok: false, detail: 'empty format' };
   return { ok: true, wanted: Object.freeze(out) };
@@ -243,6 +261,14 @@ function compare(actual, wanted) {
     }
     if (BORDER_KEYS.includes(k)) {
       if (!borderSideEqual(actual[k], v)) missing.push({ property: k, expected: v, actual: actual[k] });
+      continue;
+    }
+    // GH #290: a `false` flag is proven only by an EXPLICIT direct false (the driver's paginationDirect) -- an absent
+    // flag reads false but the paragraph's style may set it (Heading 1 keepNext), so it is not the requested state
+    if (PAGINATION_KEYS.includes(k) && v === false) {
+      const dv = actual.paginationDirect ? actual.paginationDirect[k] : undefined;
+      if (dv === undefined) unobservable.push(k);
+      else if (dv !== false) missing.push({ property: k, expected: false, actual: dv === null ? 'absent (the style may set it)' : dv });
       continue;
     }
     if (actual[k] === null) { unobservable.push(k); continue; }
@@ -399,7 +425,52 @@ function successorHolds(primary, node, op) {
   return m.ok;
 }
 
+/**
+ * W-10-9: `primary.document.styles` lists every style the observation could read --
+ * an unknown `wanted.style` name is refused PRE-DISPATCH, with a NAMED reason, the SAME way every
+ * other unobservable/ambiguous classification in this family already fails closed.
+ *
+ * CORRECTED (LIVE regression): the W10-9 comment here claimed "format_text never
+ * creates a style, so this family needs none of style-definition.cjs's GetAllStyles-blindness
+ * workaround" -- MEASURED FALSE. `doc.GetAllStyles()` does not see ANY custom style, not only a
+ * freshly-created one in the same task (the reviewer's own LIVE diagnostic: a `define_style`'d custom
+ * style, APPLIED, was then invisible to a `format_text` step requesting that SAME, genuinely
+ * existing style -- a case that WORKED before this family's W10-9 fix, because the old bare
+ * `doc.GetStyle(name)` call found it directly). `styleNamesOf` below (the SAME shape as
+ * style-definition.cjs's own export) lets `docxAdapter.observationRequestFor` (adapter.cjs)
+ * include this family's own `format.style` names in the SAME targeted-read request W10-8 already
+ * wires through -- the docx-driver merges a targeted hit into `document.styles`, winning over any
+ * same-named (or absent) `GetAllStyles()` entry.
+ *
+ * CORRECTED AGAIN (a SECOND LIVE regression, from W10-10): `buildTargetedStyleQuery`
+ * writes `out[name] = null` for a name it was asked for but could not find (docx-driver.cjs) --
+ * `readLive`'s union merge then adds that name as a KEY of `document.styles`, with a `null`
+ * VALUE. Checking key-presence alone (the ORIGINAL W10-9 shape) therefore now also matches a
+ * genuinely MISSING name, once W10-10 started requesting it -- the exact inversion of the pre-
+ * dispatch refusal this function exists for. `style-definition.cjs`'s `styleAt` already treats a
+ * `null` value the SAME as "not a key at all" (`s.st !== null` is its own existence test) -- this
+ * function now does the SAME: a key counts only with a non-null value.
+ */
+function styleExists(primary, name) {
+  const styles = primary && primary.document && primary.document.styles;
+  if (!styles || typeof styles !== 'object') return false;
+  const want = String(name).trim().toLowerCase();
+  return Object.entries(styles).some(([k, v]) => k.trim().toLowerCase() === want && v !== null);
+}
+
+/** W-10-10: the style names this task's own `format_text` steps request -- exported
+ * so `docxAdapter.observationRequestFor` can merge them with style-definition.cjs's own
+ * `styleNamesOf(task)` into one targeted-read request. */
+function styleNamesOf(task) {
+  const steps = (task && Array.isArray(task.steps)) ? task.steps : [];
+  const names = steps.filter(s => s && s.intent === 'format_text' && s.format && typeof s.format.style === 'string').map(s => String(s.format.style).trim());
+  return [...new Set(names)];
+}
+
 function classify(primary, op) {
+  if (op.format && op.format.style !== undefined && !styleExists(primary, op.format.style)) {
+    return { state: 'FAIL_CLOSED', evidence: { reason: `format-style-does-not-exist:${op.format.style}` } };
+  }
   const su = successorUnit(primary, op);
   if (su && !su.missing && su.kind === 'list_item') {
     if (successorHolds(primary, su.node, op)) return { state: 'SATISFIED', evidence: { text: su.text, format: op.format, proof: 'fresh-live-format-terminal-on-text-unit', successors: op.successorTransforms } };
@@ -472,7 +543,14 @@ try {
   const paragraph = range.GetParagraph(0);
   if (!paragraph) return;
   let requestedStyle = null;
-  if (Object.prototype.hasOwnProperty.call(wanted, 'style')) { requestedStyle = doc.GetStyle(wanted.style); if (!requestedStyle) return; }
+  // W-10-9 (the SAME bug class as style-definition.cjs's commandBody, W10-7):
+  // doc.GetStyle(<unknown name>) falls back to the 'Normal' style object instead of null -- a
+  // match is only valid when the returned style's own GetName() equals the REQUESTED name.
+  if (Object.prototype.hasOwnProperty.call(wanted, 'style')) {
+    const rawStyle = doc.GetStyle(wanted.style);
+    requestedStyle = rawStyle && typeof rawStyle.GetName === 'function' && rawStyle.GetName() === wanted.style ? rawStyle : null;
+    if (!requestedStyle) return;
+  }
   if ('bold' in wanted) range.SetBold(wanted.bold);
   if ('italic' in wanted) range.SetItalic(wanted.italic);
   if ('underline' in wanted) range.SetUnderline(wanted.underline);
@@ -547,7 +625,12 @@ try {
   if (hits.length !== 1) return;
   const range = hits[0];
   let requestedStyle = null;
-  if (Object.prototype.hasOwnProperty.call(wanted, 'style')) { requestedStyle = doc.GetStyle(wanted.style); if (!requestedStyle) return; }
+  // W-10-9: the SAME GetName()===name guard as commandBody above -- see its comment.
+  if (Object.prototype.hasOwnProperty.call(wanted, 'style')) {
+    const rawStyle = doc.GetStyle(wanted.style);
+    requestedStyle = rawStyle && typeof rawStyle.GetName === 'function' && rawStyle.GetName() === wanted.style ? rawStyle : null;
+    if (!requestedStyle) return;
+  }
   if ('bold' in wanted) range.SetBold(wanted.bold);
   if ('italic' in wanted) range.SetItalic(wanted.italic);
   if ('underline' in wanted) range.SetUnderline(wanted.underline);
@@ -653,7 +736,7 @@ function otherParagraphsNewFieldsUnchanged(target, before, after) {
     if (blk === target || !FORMATTABLE_KINDS.includes(blk.kind)) continue;
     const hits = (after.primary.blocks || []).filter(x => FORMATTABLE_KINDS.includes(x.kind) && norm(x.text) === norm(blk.text));
     if (hits.length !== 1) continue;
-    for (const k of NEW_PARA_LEVEL_KEYS) {
+    for (const k of L3_PARA_LEVEL_KEYS) {
       const bv = blk.format ? blk.format[k] : undefined;
       const av = hits[0].format ? hits[0].format[k] : undefined;
       if (JSON.stringify(bv) !== JSON.stringify(av)) changed.push({ text: norm(blk.text).slice(0, 60), property: k, before: bv, after: av });
@@ -758,4 +841,5 @@ function producedText(op) {
 module.exports = {
   plan, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation,
   wholeTaskChecks, producedText, normalizeWanted, compare, blockText, rangeState, rangeCommandBody,
+  styleNamesOf,
 };

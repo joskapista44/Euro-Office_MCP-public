@@ -1,6 +1,7 @@
 'use strict';
 
-const { parseRange, rangeText } = require('../a1.cjs');
+const { parseRange, rangeText, addr } = require('../a1.cjs');
+const { cellAt, isBlank } = require('../inventory.cjs');
 const cells = require('./cells.cjs');
 
 /**
@@ -25,6 +26,14 @@ const cells = require('./cells.cjs');
  * A one-value filter now also requires an empty criteria2 (W6 read it back null) -- otherwise a two-value list holding
  * the value would read as that one-value filter.
  *
+ * GH #301 D2 (AF-02 LIVE on 9.3.5, session = reopen = stored), three more criteria, each read back as noted:
+ * - `values: [3..10 different plain values]` -- SetAutoFilter(field, [..], 'xlFilterValues'); reads back operator
+ *   xlFilterValues with criteria1 the ARRAY (compared as a set); the two-value shape above is unchanged;
+ * - `top: n` (1..500) -- SetAutoFilter(field, n, 'xlTop10Items'); reads back xlTop10Items, criteria1 n;
+ * - `dynamic: 'aboveAverage' | 'belowAverage'` -- SetAutoFilter(field, 'xlFilter<Above|Below>Average',
+ *   'xlFilterDynamic'); reads back xlFilterDynamic, criteria1 that constant.
+ * The cell-colour filter is NOT a writer shape: GetCriteria1 reads it back null, so no write of it could be verified.
+ *
  * X-L05 (S26 probe m7-s26-probe1, LIVE MEASURED): applying a filter_range with NO active AutoFilter yet
  * UNHIDES every data row of the range the engine judges matching -- INCLUDING a row a human hid by hand before the
  * filter ever ran (the probe's own risk case: a manually-hidden, matching row came back visible the instant
@@ -41,7 +50,7 @@ const INTENTS = Object.freeze(['filter_range', 'clear_filter']);
 function plan(step, index) {
   const at = `step ${index}: ${step.intent}`;
   const set = step.intent === 'filter_range';
-  const fields = set ? ['intent', 'id', 'sheet', 'range', 'field', 'value', 'values', 'and'] : ['intent', 'id', 'sheet', 'range'];
+  const fields = set ? ['intent', 'id', 'sheet', 'range', 'field', 'value', 'values', 'and', 'top', 'dynamic'] : ['intent', 'id', 'sheet', 'range'];
   const unknown = Object.keys(step).filter(k => !fields.includes(k));
   if (unknown.length) return { ok: false, detail: `${at} does not support field(s): ${unknown.join(', ')}` };
   if (typeof step.sheet !== 'string' || step.sheet === '') return { ok: false, detail: `${at} requires a sheet name` };
@@ -63,6 +72,8 @@ function plan(step, index) {
       value: set && 'value' in step ? String(step.value) : null,
       values: set && 'values' in step ? Object.freeze(step.values.map(String)) : null,
       and: set && 'and' in step ? Object.freeze([...step.and]) : null,
+      top: set && 'top' in step ? step.top : null,
+      dynamic: set && 'dynamic' in step ? step.dynamic : null,
       cells: Object.freeze([]),
       preservationMode: 'PRIMITIVE_INTEGRAL',
     },
@@ -72,14 +83,20 @@ function plan(step, index) {
 const plainValue = v => (typeof v === 'string' && v !== '' && !/^[=<>]/.test(v)) || Number.isFinite(v);
 const COMPARE = /^[<>]-?\d+(\.\d+)?$/;
 
+const MAX_VALUES = 10;
+const MAX_TOP = 500;
+const DYNAMIC = Object.freeze({ aboveAverage: 'xlFilterAboveAverage', belowAverage: 'xlFilterBelowAverage' });
+
 function criteriaProblem(step) {
-  const given = ['value', 'values', 'and'].filter(k => k in step);
-  if (given.length !== 1) return 'give exactly one of value / values / and';
+  const given = ['value', 'values', 'and', 'top', 'dynamic'].filter(k => k in step);
+  if (given.length !== 1) return 'give exactly one of value / values / and / top / dynamic';
   if (given[0] === 'value') return plainValue(step.value) ? null : 'value must be one plain value (no operator)';
   if (given[0] === 'values') {
-    const ok = Array.isArray(step.values) && step.values.length === 2 && step.values.every(plainValue) && String(step.values[0]) !== String(step.values[1]);
-    return ok ? null : 'values must be exactly two different plain values (a longer list is not measured)';
+    const ok = Array.isArray(step.values) && step.values.length >= 2 && step.values.length <= MAX_VALUES && step.values.every(plainValue) && new Set(step.values.map(String)).size === step.values.length;
+    return ok ? null : `values must be 2 to ${MAX_VALUES} different plain values`;
   }
+  if (given[0] === 'top') return Number.isInteger(step.top) && step.top >= 1 && step.top <= MAX_TOP ? null : `top must be a whole number of items, 1 to ${MAX_TOP}`;
+  if (given[0] === 'dynamic') return Object.hasOwn(DYNAMIC, step.dynamic) ? null : `dynamic must be one of ${Object.keys(DYNAMIC).join(', ')} (other dynamic filters are not measured)`;
   const ok = Array.isArray(step.and) && step.and.length === 2 && step.and.every(c => typeof c === 'string' && COMPARE.test(c));
   return ok ? null : "and must be two numeric comparisons, each '>n' or '<n' (other operators are not measured)";
 }
@@ -95,8 +112,27 @@ function gate(p, op) {
   const st = p.filterReads ? p.filterReads[op.selector.sheet] : undefined;
   if (!st || typeof st !== 'object') return { ok: false, reason: 'xlsx-filter-unobservable', why: st === undefined ? 'not-read' : st };
   if (st.range !== null && String(st.range).replace(/\$/g, '') !== op.selector.range) return { ok: false, reason: 'xlsx-filter-range-conflict', autoFilter: st.range };
+  const region = op.intent === 'filter_range' && st.range === null ? adjacentData(p, op) : null;
+  if (region) return { ok: false, ...region };
   const manual = op.intent === 'filter_range' && !active(st).length ? manualHiddenRow(p, op) : null;
   return manual ? { ok: false, ...manual } : { ok: true, st };
+}
+
+/**
+ * LIVE (release-l11-3 harness, prod): with no AutoFilter on the sheet, SetAutoFilter on a range that has data right
+ * next to it applies the filter to the whole current region (A1:B5 asked -> A1:B1877 applied) -- rows outside the
+ * request get filtered / hidden, and the X-L05 check above never saw them. A non-blank cell in the ring around the
+ * range (the rows above / below, the columns on either side, the corners) refuses before the write. An absent cell
+ * is outside the used range: empty.
+ */
+function adjacentData(p, op) {
+  const g = parseRange(op.selector.range);
+  const filled = (c, r) => { if (c < 1 || r < 1) return false; const cell = cellAt(p, op.selector.sheet, addr(c, r)); return !!cell && !isBlank(cell); };
+  const ring = [];
+  for (let c = g.c1 - 1; c <= g.c2 + 1; c += 1) ring.push([c, g.r1 - 1], [c, g.r2 + 1]);
+  for (let r = g.r1; r <= g.r2; r += 1) ring.push([g.c1 - 1, r], [g.c2 + 1, r]);
+  const hits = ring.filter(([c, r]) => filled(c, r)).map(([c, r]) => addr(c, r));
+  return hits.length ? { reason: 'xlsx-filter-range-not-the-current-region', cells: hits.slice(0, 20), count: hits.length } : null;
 }
 
 /** X-L05: no ACTIVE filter on the range (none, or a cleared one that kept its range) -> an already-hidden data row is
@@ -114,10 +150,14 @@ function manualHiddenRow(p, op) {
 }
 
 const empty = x => x === null || x === undefined || x === '';
+const sameSet = (a, b) => a.length === b.length && [...a].sort().join('\u0000') === [...b].sort().join('\u0000');
 
 /** The requested filter of op.field, as the reader shows it. */
 function matches(f, op) {
+  if (op.values && op.values.length > 2) return f.operator === 'xlFilterValues' && Array.isArray(f.criteria1) && empty(f.criteria2) && sameSet(f.criteria1.map(String), op.values);
   if (op.values) return f.operator === 'xlOr' && bare(f.criteria1) === op.values[0] && bare(f.criteria2) === op.values[1];
+  if (op.top !== null) return f.operator === 'xlTop10Items' && Number(f.criteria1) === op.top && empty(f.criteria2);
+  if (op.dynamic !== null) return f.operator === 'xlFilterDynamic' && f.criteria1 === DYNAMIC[op.dynamic] && empty(f.criteria2);
   if (op.and) return f.operator === 'xlAnd' && String(f.criteria1) === op.and[0] && String(f.criteria2) === op.and[1];
   return bare(f.criteria1) === op.value && empty(f.criteria2);
 }
@@ -132,7 +172,7 @@ function classify(p, op) {
   const where = { sheet: op.selector.sheet, range: op.selector.range };
   if (op.intent === 'clear_filter') return active(g.st).length === 0 ? { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-no-active-filter' } } : { state: 'APPLY', evidence: where };
   if (holds(g.st, op)) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-the-filter' } };
-  return { state: 'APPLY', evidence: { ...where, field: op.field, value: op.value, values: op.values, and: op.and, otherFields: active(g.st).filter(f => f.field !== op.field).map(f => f.field) } };
+  return { state: 'APPLY', evidence: { ...where, field: op.field, value: op.value, values: op.values, and: op.and, top: op.top, dynamic: op.dynamic, otherFields: active(g.st).filter(f => f.field !== op.field).map(f => f.field) } };
 }
 
 function resolve(p, selector, ctx = {}) {
@@ -144,6 +184,8 @@ function resolve(p, selector, ctx = {}) {
 function setArgs(op) {
   if (op.values) return `${JSON.stringify(op.values)}, 'xlFilterValues'`;
   if (op.and) return `${JSON.stringify(op.and[0])}, 'xlAnd', ${JSON.stringify(op.and[1])}`;
+  if (op.top !== null) return `${op.top}, 'xlTop10Items'`;
+  if (op.dynamic !== null) return `${JSON.stringify(DYNAMIC[op.dynamic]).replace(/"/g, "'")}, 'xlFilterDynamic'`;
   return `${JSON.stringify(op.value)}, 'xlOr'`;
 }
 
@@ -161,7 +203,7 @@ try {
   return { ok: true };
 } catch (err) { return { ok: false, stage: 'threw', error: String(err) }; }
 `,
-    meta: Object.freeze({ family: 'filter', action: op.intent, sheet, range, field: op.field, value: op.value, values: op.values, and: op.and }),
+    meta: Object.freeze({ family: 'filter', action: op.intent, sheet, range, field: op.field, value: op.value, values: op.values, and: op.and, top: op.top, dynamic: op.dynamic }),
   };
 }
 
@@ -175,11 +217,20 @@ function verifyPrimitive(op, before, after) {
   return { ok, evidence: { sheet: op.selector.sheet, range: op.selector.range, state: g.st, proof: 'fresh-live-autofilter-model' } };
 }
 
-const verifyPreservation = (op, before, after) => cells.verifyPreservation(op, before, after);
+/** X-L13/5: clear_filter has NO extra axis of its own -- the shared digest proof is the whole of it, so a tiered
+ * observation reports preservationScope FULL. filter_range stays OUT of TIERED_INTENTS (its own `layout` extra is
+ * not in TIERED_EXTRAS -- a separate eligibility gap), so `tier` can never be 'tiered' for it; this check is safe
+ * for both intents without branching on which one it is. Below 45000 this stays byte-identical to before. */
+function verifyPreservation(op, before, after) {
+  const rest = cells.verifyPreservation(op, before, after);
+  if (!rest.ok && rest.evidence && rest.evidence.reason) return rest;
+  if (before.primary.tier === 'tiered') return { ok: rest.ok, evidence: { ...rest.evidence, preservationScope: 'FULL' } };
+  return rest;
+}
 
 function wholeTaskChecks(op, finalObservation) {
   const v = verifyPrimitive(op, finalObservation, finalObservation);
-  return [{ name: `${op.selector.sheet}!${op.selector.range} ${op.intent === 'filter_range' ? `filtered on field ${op.field} = ${JSON.stringify(op.value !== null ? op.value : op.values || op.and)}` : 'has no active filter'}`, ok: v.ok, detail: v.ok ? null : v.evidence }];
+  return [{ name: `${op.selector.sheet}!${op.selector.range} ${op.intent === 'filter_range' ? `filtered on field ${op.field} = ${JSON.stringify(op.value !== null ? op.value : op.values || op.and || (op.top !== null ? { top: op.top } : { dynamic: op.dynamic }))}` : 'has no active filter'}`, ok: v.ok, detail: v.ok ? null : v.evidence }];
 }
 
 const windowsOf = () => [];

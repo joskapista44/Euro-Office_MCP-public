@@ -19,7 +19,9 @@ const { provenSource } = require('../../src/adapters/xlsx/pivot-source.cjs');
  */
 
 // the DS runtime identity (manifest version|patchVersion), never the URL cache key (owner decision (B), 9580767b)
-const BUILD = '9.3.4|euro-office-bridge-v1/9.3.4.60/5';
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): the historical 9.3.4.60/5 build is
+// retired -- the accepted runtime is now the single 9.3.5.0/16 identity.
+const BUILD = '9.3.5|euro-office-bridge-v1/9.3.5.0/16';
 const DATA = [['reg', 'prod', 'amt'], ['N', 'x', '1'], ['S', 'y', '2'], ['N', 'y', '3'], ['S', 'x', '4'], ['N', 'x', '5'], ['S', 'y', '6']];
 const IMPOSTOR = DATA.map((r, i) => (i ? [r[0], r[1], String(Number(r[2]) * 100)] : r));
 const BODY = [['6', '3', '9'], ['4', '8', '12'], ['10', '11', '21']];
@@ -114,7 +116,7 @@ const store = (hsa = DATA) => createStore([
 async function run(s, step, script = {}) {
   let n = 0;
   // M11.5c.4: copy_sheet writes only through the /8 Bridge WRITE -- a copy task runs on /8 unless the test names a runtime
-  const driver = createFakeXlsxDriver(s, step.intent === 'copy_sheet' && script.runtime === undefined ? { ...script, runtime: '9.3.4|euro-office-bridge-v1/9.3.4.60/8' } : script);
+  const driver = createFakeXlsxDriver(s, step.intent === 'copy_sheet' && script.runtime === undefined ? { ...script, runtime: '9.3.5|euro-office-bridge-v1/9.3.5.0/16' } : script);
   const t = { id: 'm7-p9', steps: [step] };
   const options = { driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } };
   const result = await withSession(options, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));

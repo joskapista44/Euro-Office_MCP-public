@@ -19,11 +19,12 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
  * (m7-s15-probe4 accepted). Mirrors xlsx-m7-b04-remove.test.cjs's own structure and
  * fault-injection convention.
  *
- * The shared-edge refusal (format-fill-clear.cjs's `sharedEdge`) fires whenever the target has a
- * non-zero border side facing a READABLE neighbour at all -- the probe's own accepted run never
- * checked a neighbour's state, so most of this file's fixtures stay border-free on D3 to reach
- * the restore/verification path; the border axis itself is proven separately, on a sheet corner
- * where the relevant sides have no neighbour to disturb.
+ * The shared-edge refusal is GONE (GH #88 follow-up, LIVE-measured: test/live/xlsx-fill-clear-
+ * shared-edge-probe.live.cjs -- a shared edge is one physical storage, so the restore writing the
+ * target's own side back is a no-op on the edge itself, never disturbs the neighbour). Most of
+ * this file's fixtures still stay border-free on D3 (the border axis is proven separately, both on
+ * a sheet corner with no neighbour and on a shared edge WITH one, below), so the default path's
+ * assertions are not entangled with the border axis.
  */
 
 const task = (range, sheet = 'B') => ({ id: 'm7-f08-fill-clear', steps: [{ intent: 'format_range', sheet, range, format: { fill: 'none' } }] });
@@ -105,12 +106,19 @@ for (const fault of ['fillclear-fill-not-cleared', 'fillclear-kept-axis-lost']) 
   });
 }
 
-test('refused before the write, 0/0: a diagonal on the target cell (no public restore path); a merge on the target; an unmeasured kept axis', async () => {
-  const diag = windowSeed();
-  diag.D3 = { v: 'x', fill: 0x00ff00, border: { d: { s: 7, c: 0 }, dd: true } };
-  const r1 = await run(diag);
+test('L-16/1: a drawn diagonal on the target is RESTORED (no old reason); an unrestorable diagonal, a merge on the target, an unmeasured kept axis refuse before the write, 0/0', async () => {
+  for (const flags of [{ dd: true }, { du: true }, { dd: true, du: true }]) {
+    const diag = windowSeed();
+    diag.D3 = { v: 'x', fill: 0x00ff00, border: { d: { s: 7, c: 0 }, ...flags } };
+    const r1 = await run(diag);
+    assert.ok(r1.m.writes > 0, JSON.stringify({ flags, ev: op(r1.result).evidence }));
+  }
+  const nodir = windowSeed();
+  nodir.D3 = { v: 'x', fill: 0x00ff00, border: { d: { s: 7, c: 0 }, dd: false, du: false } };
+  const r1 = await run(nodir);
   assert.deepEqual([r1.m.writes, r1.m.commands], [0, 0]);
-  assert.equal(op(r1.result).evidence.evidence.reason, 'xlsx-format-fill-clear-diagonal-unsupported');
+  assert.equal(op(r1.result).evidence.evidence.reason, 'xlsx-format-fill-clear-unrestorable-value');
+  assert.equal(op(r1.result).evidence.evidence.why, 'no-direction');
 
   const merged = windowSeed();
   merged.D3 = { v: 'x', fill: 0x00ff00 };
@@ -120,7 +128,8 @@ test('refused before the write, 0/0: a diagonal on the target cell (no public re
   const t2 = task('D3:D3');
   const result2 = await withSession({ driver: driver2, fileId: 'disposable', now: () => (n2 += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } }, xlsxAdapter, createExecutor(t2, { observation: { live: liveScope(t2) } }));
   assert.deepEqual([result2.metrics.writes, result2.metrics.commands], [0, 0]);
-  assert.equal(op(result2).evidence.evidence.reason, 'xlsx-format-in-merged-area-refused');
+  // X-B10: fill 'none' over a WHOLE merge is merge-aware now (xb10-format-merged-axes.test.cjs); D3:D3 is only the anchor of D3:D4, so it crosses.
+  assert.equal(op(result2).evidence.evidence.reason, 'xlsx-format-merge-crosses-range-refused');
 
   // X-F02: an empty cell's font is now observable by default -- only a reader that
   // throws for that cell (emptyFontUnobservable) still leaves the kept axis unmeasured.
@@ -147,12 +156,27 @@ test('refused before the write, 0/0: a KEPT axis reads a value outside the measu
   assert.deepEqual({ reason: op(r2.result).evidence.evidence.reason, key: op(r2.result).evidence.evidence.key }, { reason: 'xlsx-format-fill-clear-unrestorable-value', key: 'align.h' });
 });
 
-test('refused before the write, 0/0: the target carries a border side facing a readable neighbour -- the neighbour interaction the probe never measured, regardless of what the neighbour itself carries', async () => {
-  const cells = windowSeed(); // D2 carries NO border of its own
+test('a target sharing a border edge with a readable neighbour is APPLIED (no longer refused); the neighbour\'s facing side is untouched', async () => {
+  const cells = windowSeed();
+  cells.D2 = { v: 0, border: { b: thin } }; // D2's own Bottom is the SAME shared edge as D3's own Top
   cells.D3 = { v: 'x', fill: 0x00ff00, border: { t: thin } };
-  const { result, m } = await run(cells);
-  assert.deepEqual([m.writes, m.commands], [0, 0]);
-  assert.deepEqual({ reason: op(result).evidence.evidence.reason, side: op(result).evidence.evidence.side, neighbour: op(result).evidence.evidence.neighbour }, { reason: 'xlsx-format-fill-clear-shared-edge-unsupported', side: 't', neighbour: 'D2' });
+  const { result, m, store } = await run(cells);
+  assert.equal(result.ok, true, JSON.stringify([op(result).evidence, result.execution.primitiveVerification, result.execution.preservationVerification]));
+  assert.deepEqual([m.writes, m.commands], [1, 1]);
+  const d3 = ws(store).cells.D3;
+  assert.equal(d3.fill, 'S:No Fill', 'fill cleared');
+  assert.deepEqual(d3.border.t, thin, 'border.t: kept, byte-exact -- the shared edge itself');
+  assert.deepEqual(ws(store).cells.D2.border.b, thin, 'the neighbour\'s facing side: untouched');
+});
+
+test('RED (mutant \'fillclear-neighbour-leak\'): if the restore DID disturb the shared neighbour, L3 catches it -- not APPLIED', async () => {
+  const cells = windowSeed();
+  cells.D2 = { v: 0, border: { b: thin } };
+  cells.D3 = { v: 'x', fill: 0x00ff00, border: { t: thin } };
+  const { result } = await run(cells, { fault: 'fillclear-neighbour-leak', leakCell: 'D2' });
+  assert.equal(result.ok, false);
+  const l3 = (result.execution.preservationVerification || []).map(v => v.verdict);
+  assert.ok(l3.includes('FAIL'), JSON.stringify({ status: op(result).status, l3 }));
 });
 
 test('plan: "none" rejects combination with any other format key, rejects a non-hex/non-"none" string; the want shape', () => {

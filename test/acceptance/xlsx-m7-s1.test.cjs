@@ -21,19 +21,19 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
  * other types / operators / a partial read stay UNOBSERVABLE. Print_Area / Print_Titles / _xlnm.* are reserved.
  */
 
-const H12 = Object.freeze([[{ t: 'text', v: 'm' }], [{ t: 'number', v: '3' }]]);
 const book = () => [
   { name: 'P', cells: { A1: { v: 'a' }, B1: { v: 1 }, H1: { v: 'm' }, H2: { v: 3 } } },
   { name: 'Q', cells: { A1: { v: 'keep' } } },
 ];
 const COPY = { id: 'm7s1', steps: [{ intent: 'copy_range', sheet: 'P', range: 'A1:B1', target: 'D5' }] };
-const expectFor = target => ({ version: 1, fileId: 'disposable', source: { sheet: 'P', range: 'H1:H2' }, target: { sheet: 'P', range: `${target}:${target.replace(/\d+/, n => String(Number(n) + 1))}` }, cells: H12 });
-const MOVE = { id: 'm7s1', steps: [{ intent: 'move_range', sheet: 'P', range: 'H1:H2', target: 'J5', expect: expectFor('J5') }] };
+// L-06/b: the caller no longer supplies `expect` -- classify() builds it from book()'s own H1:H2 content.
+const MOVE = { id: 'm7s1', steps: [{ intent: 'move_range', sheet: 'P', range: 'H1:H2', target: 'J5' }] };
 
 async function run(store, t, script = {}) {
   let n = 0;
-  // M11.5c.4: copy_sheet writes only through the /8 Bridge WRITE -- a copy task runs on /8 unless the test names a runtime
-  const driver = createFakeXlsxDriver(store, t.steps.some(x => x.intent === 'copy_sheet') && script.runtime === undefined ? { ...script, runtime: '9.3.4|euro-office-bridge-v1/9.3.4.60/8' } : script);
+  // M11.5c.4 / DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): copy_sheet writes only through an
+  // ACCEPTED Bridge WRITE runtime -- a copy task runs on the accepted 9.3.5.0/16 identity unless the test names a runtime.
+  const driver = createFakeXlsxDriver(store, t.steps.some(x => x.intent === 'copy_sheet') && script.runtime === undefined ? { ...script, runtime: '9.3.5|euro-office-bridge-v1/9.3.5.0/16' } : script);
   const options = { driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } };
   const result = await withSession(options, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));
   return { result, m: result.metrics, driver };
@@ -130,14 +130,15 @@ test('clean copy with unrelated names / rules / charts: APPLIED, reopened retry 
   assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
 });
 
-test('clean move with unrelated dependents: APPLIED, reopened retry SATISFIED 0/0 (never a second Cut)', async () => {
+test('clean move with unrelated dependents: APPLIED, the reopened retry is REFUSED named, 0/0 (L-06/b: never SATISFIED, never a second Cut)', async () => {
   const store = unrelated();
   const { result, m } = await run(store, MOVE);
   assert.equal(result.ok, true, JSON.stringify([op0(result), result.execution.preservationVerification]));
   assert.equal(m.commands, 1);
   const again = await run(store, MOVE);
   assert.equal(again.m.commands, 0);
-  assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
+  assert.equal(again.result.ok, false);
+  assert.equal(reasonOf(again.result), 'xlsx-move-already-applied-not-provable');
 });
 
 // ---- L3 negative controls: a dependent changed as a side effect is never APPLIED ----
@@ -177,14 +178,33 @@ test('xlCellValue read: a full read with a measured operator is complete; the ru
   assert.equal(cfList({ ...CV, operator: 'xlBetween', formula1: '2', formula2: '7' }).rules.complete, true);
 });
 
+// X-L13/7 (zero LIVE r1, cap-live/xl137-r1.out, internal tracker): the remaining six single-/two-formula
+// xlCellValue operators measured round-trip-safe on BOTH readers this module consumes -- each must now
+// be `rules.complete: true`, same as xlGreater/xlBetween already were, with its own formula arity.
+for (const [op, f2] of [['xlLess', ''], ['xlLessEqual', ''], ['xlGreaterEqual', ''], ['xlEqual', ''], ['xlNotEqual', ''], ['xlNotBetween', '7']]) {
+  test(`xlCellValue read: X-L13/7 newly-measured operator ${op} is complete`, () => {
+    const r = cfList({ ...CV, operator: op, formula2: f2 });
+    assert.equal(r.rules.complete, true, JSON.stringify(r.rules.unobservable));
+    assert.equal(r.rules.bySheet.S[0].operator, op);
+  });
+}
+
+// All eight of Excel's xlFormatConditionOperator values are measured as of X-L13/7 -- there is no
+// REAL operator left to use as the "unmeasured" NEG. CONTROL below, so these two cases use a
+// deliberately synthetic operator name that can never collide with a real engine value, to keep
+// proving the "operator not in the whitelist" branch itself (not any specific Excel operator).
+const UNMEASURED_OP = 'xlOperatorNotYetMeasured';
+
 for (const [name, r, why] of [
-  ['an unmeasured operator', { ...CV, operator: 'xlLess' }, 'conditional-operator-not-measured'],
+  ['an unmeasured operator', { ...CV, operator: UNMEASURED_OP }, 'conditional-operator-not-measured'],
   ['the operator missing', { ...CV, operator: undefined }, 'conditional-operator-not-measured'],
   ['formula1 missing', { ...CV, formula1: '' }, 'conditional-partial-read'],
   ['between without formula2', { ...CV, operator: 'xlBetween', formula2: '' }, 'conditional-partial-read'],
   ['greater WITH a formula2', { ...CV, formula2: '9' }, 'conditional-partial-read'],
   ['applies-to missing', { ...CV, appliesTo: '' }, 'conditional-unexpected-shape'],
   ['another type (colour scale)', { type: 'xlColorScale' }, 'conditional-type-not-measured'],
+  ['another type (data bar)', { type: 'xlDatabar' }, 'conditional-type-not-measured'],
+  ['another type (icon set)', { type: 'xlIconSets' }, 'conditional-type-not-measured'],
 ]) {
   test(`xlCellValue read stays UNOBSERVABLE: ${name}`, () => {
     const a = cfList(r);
@@ -192,6 +212,49 @@ for (const [name, r, why] of [
     assert.match(JSON.stringify(a.rules.unobservable), new RegExp(why));
   });
 }
+
+// ---- GH #141 (docs/GH141-CF-DEPENDENCY-OBSERVABILITY-20261018.md): aboveAverage / top10 / unique have no
+// formula concept at all (the engine's own getters throw for them -- cf.cjs's doc comment), so only
+// appliesTo is read; they join MEASURED_CF_TYPES. colorScale / databar / iconSet (regression-checked above)
+// stay OUT: their CFVO stops can be formula-typed and no reader here has ever measured that.
+
+for (const [name, r] of [
+  ['aboveAverage', { type: 'xlAboveAverageCondition', appliesTo: 'S!$A$1:$A$4', formula1: null, formula2: null }],
+  ['top10', { type: 'xlTop10', appliesTo: 'S!$A$1:$A$4', formula1: null, formula2: null }],
+  ['unique', { type: 'xlUniqueValues', appliesTo: 'S!$A$1:$A$4', formula1: null, formula2: null }],
+]) {
+  test(`GH141: ${name} read (appliesTo only, no formula) is complete`, () => {
+    const a = cfList(r);
+    assert.equal(a.rules.complete, true, JSON.stringify(a.rules.unobservable));
+    assert.equal(a.dependencies.complete, true, JSON.stringify(a.dependencies.unobservable));
+    assert.deepEqual(a.rules.bySheet.S, [{ kind: 'conditional', type: r.type, range: 'A1:A4', formula: '', formula2: '' }]);
+  });
+}
+
+const withNewCfType = type => createStore([
+  { name: 'Data', cells: { A1: { v: 'r1' }, A2: { v: 'r2' } } },
+  { name: 'Other', cells: { A1: { v: 7 } }, rules: [{ kind: 'conditional', type, range: 'A1:A4', formula: '' }] },
+]);
+
+for (const type of ['xlAboveAverageCondition', 'xlTop10', 'xlUniqueValues']) {
+  test(`GH141: ${type} on ANOTHER sheet no longer blocks workbook-wide: set_defined_name APPLIED, reopened retry 0/0`, async () => {
+    const store = withNewCfType(type);
+    const t = { id: 'gh141', steps: [{ intent: 'set_defined_name', name: 'GH141N', refersTo: '=Data!$A$1' }] };
+    const { result, m } = await run(store, t);
+    assert.equal(result.ok, true, JSON.stringify(op0(result)));
+    assert.equal(m.commands, 1);
+    const again = await run(store, t);
+    assert.equal(again.m.commands, 0);
+    assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
+  });
+}
+
+test('GH141 regression: xlColorScale on ANOTHER sheet still blocks workbook-wide (stays excluded)', async () => {
+  const store = withNewCfType('xlColorScale');
+  const { result } = await run(store, { id: 'gh141-cs', steps: [{ intent: 'set_defined_name', name: 'GH141N2', refersTo: '=Data!$A$1' }] });
+  assert.equal(result.ok, false);
+  assert.match(JSON.stringify(op0(result)), /conditional-type-not-measured/);
+});
 
 const withCellValueCf = () => {
   const b = [
@@ -229,10 +292,25 @@ test('xlCellValue HOSTED on the shifted sheet: the structural step still refuses
 
 test('xlCellValue with an unmeasured operator anywhere: set_defined_name still refused (incomplete)', async () => {
   const store = withCellValueCf();
-  store.durable[1].rules[0].operator = 'xlLess';
+  store.durable[1].rules[0].operator = UNMEASURED_OP;
   const { result } = await run(store, { id: 'x', steps: [{ intent: 'set_defined_name', name: 'S1N', refersTo: '=Data!$A$1' }] });
   assert.equal(result.ok, false);
   assert.match(JSON.stringify(op0(result)), /conditional-operator-not-measured/);
+});
+
+// X-L13/7: xlLess (and its five siblings) on ANOTHER sheet no longer blocks an unrelated set_defined_name --
+// this is the exact whole-task shape of the e314d2b6 LIVE finding (an unrelated CF rule's operator fail-closing
+// set_validation workbook-wide), replayed here for set_defined_name since that is what this file already covers.
+test('xlCellValue with a newly-measured operator (xlLess) on ANOTHER sheet: set_defined_name APPLIED, reopened retry 0/0', async () => {
+  const store = withCellValueCf();
+  store.durable[1].rules[0].operator = 'xlLess';
+  const t = { id: 'm7s1n-xlless', steps: [{ intent: 'set_defined_name', name: 'S1N2', refersTo: '=Data!$A$1' }] };
+  const { result, m } = await run(store, t);
+  assert.equal(result.ok, true, JSON.stringify(op0(result)));
+  assert.equal(m.commands, 1);
+  const again = await run(store, t);
+  assert.equal(again.m.commands, 0);
+  assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
 });
 
 test('copy_sheet of a sheet HOSTING an xlCellValue rule: refused (the copy of that type is not measured)', async () => {

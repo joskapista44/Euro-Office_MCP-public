@@ -23,7 +23,8 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
  * (drawing.anchor.read/v1, test/fakes/ds-bridge-runtime.cjs); the hydration is a bridge step before it, no direct fallback.
  */
 
-const BUILD = '9.3.4|euro-office-bridge-v1/9.3.4.60/5';
+// DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the served block (installBridge) is now the 9.3.5.0/16 identity.
+const BUILD = '9.3.5|euro-office-bridge-v1/9.3.5.0/16';
 
 /** A one-sheet stand-in: `wb` is the view container the hydration reaches through ws.worksheet.workbook.oApi.wb. */
 function standIn({ wb, worksheetSet = true, log = [] } = {}) {

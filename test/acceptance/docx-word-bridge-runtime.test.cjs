@@ -27,9 +27,12 @@ const { BRIDGE_CAPABILITIES } = require('../../src/drivers/eurooffice/ds-bridge.
 const BUILD = '9.3.4-9475e9f12a1905e2ada1fbc4bb87d01b';
 const LIST_CAP = BRIDGE_CAPABILITIES.DOCX_LIST_LEVEL_FORMAT_READ;
 const GRID_CAP = BRIDGE_CAPABILITIES.DOCX_TABLE_GRID_READ;
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): the default manifest now carries the
+// ACCEPTED 9.3.5.0 identity -- the historical word /1 (9.3.4.60) baseline is retired; since the GH #292 S4 D-state the
+// single accepted Word runtime is 9.3.5.0/5.
 const manifest = (over = {}) => ({
-  bridgeVersion: '1.0.0', documentServerVersion: '9.3.4', documentServerBuild: BUILD,
-  patchVersion: 'euro-office-bridge-word-v1/9.3.4.60/1',
+  bridgeVersion: '1.0.0', documentServerVersion: '9.3.5', documentServerBuild: BUILD,
+  patchVersion: 'euro-office-bridge-word-v1/9.3.5.0/5',
   capabilities: [
     { id: LIST_CAP.id, version: 1, kind: 'READ', format: 'DOCX', mutation: 'NO', semanticContract: 'x' },
     { id: GRID_CAP.id, version: 1, kind: 'READ', format: 'DOCX', mutation: 'NO', semanticContract: 'x' },
@@ -47,8 +50,8 @@ function fakeDoc(internalSpy) {
     GetClassType: () => 'paragraph', GetText: () => 'ZQ bridge runtime probe', GetElementsCount: () => 0, GetElement: () => null,
     GetNumbering: () => { internalSpy.getNumbering += 1; return { present: true, level: 0 }; },
   };
-  const table = { GetRowsCount: () => 0, get Table() { internalSpy.tableGridCalc += 1; return { TableGridCalc: [1, 2, 3] }; } };
-  return { GetElementsCount: () => 1, GetElement: i => (i === 0 ? paragraph : null), GetAllTables: () => [table], Search: () => [] };
+  const table = { GetClassType: () => 'table', GetRowsCount: () => 0, get Table() { internalSpy.tableGridCalc += 1; return { TableGridCalc: [1, 2, 3] }; } };
+  return { GetElementsCount: () => 2, GetElement: i => (i === 0 ? paragraph : (i === 1 ? table : null)), GetAllTables: () => [table], Search: () => [] };
 }
 
 function fakeApi(read, spy = { getNumbering: 0, tableGridCalc: 0 }) {
@@ -56,7 +59,6 @@ function fakeApi(read, spy = { getNumbering: 0, tableGridCalc: 0 }) {
 }
 
 function evaluate(Api) {
-  // eslint-disable-next-line no-new-func
   return new Function('Api', propertyQuery())(Api);
 }
 
@@ -87,14 +89,14 @@ test('the generated query calls docx.table.effectiveGrid.read/v1 with the table 
 const FAIL_CASES = [
   ['capability MISSING (not advertised in the manifest)', m => manifest({ capabilities: m.capabilities.filter(c => c.id !== LIST_CAP.id) }), () => ({ ok: true, value: { present: false } }), 'list'],
   ['capability MISSING (not advertised in the manifest)', m => manifest({ capabilities: m.capabilities.filter(c => c.id !== GRID_CAP.id) }), () => ({ ok: true, value: { gridCalc: [1] } }), 'grid'],
-  ['WRONG VERSION (bridge major version mismatch)', m => manifest({ bridgeVersion: '2.0.0' }), () => ({ ok: true, value: { present: false } }), 'list'],
-  ['WRONG VERSION (bridge major version mismatch)', m => manifest({ bridgeVersion: '2.0.0' }), () => ({ ok: true, value: { gridCalc: [1] } }), 'grid'],
+  ['WRONG VERSION (bridge major version mismatch)', () => manifest({ bridgeVersion: '2.0.0' }), () => ({ ok: true, value: { present: false } }), 'list'],
+  ['WRONG VERSION (bridge major version mismatch)', () => manifest({ bridgeVersion: '2.0.0' }), () => ({ ok: true, value: { gridCalc: [1] } }), 'grid'],
   ['WRONG VERSION (capability version mismatch)', m => manifest({ capabilities: m.capabilities.map(c => (c.id === LIST_CAP.id ? { ...c, version: 2 } : c)) }), () => ({ ok: true, value: { present: false } }), 'list'],
   ['WRONG VERSION (capability version mismatch)', m => manifest({ capabilities: m.capabilities.map(c => (c.id === GRID_CAP.id ? { ...c, version: 2 } : c)) }), () => ({ ok: true, value: { gridCalc: [1] } }), 'grid'],
-  ['MALFORMED result (ok:true but the wrong valueType)', m => manifest(), () => ({ ok: true, value: 'not-an-object' }), 'list'],
-  ['MALFORMED result (ok:true but the wrong valueType)', m => manifest(), () => ({ ok: true, value: 'not-an-object' }), 'grid'],
-  ['MALFORMED result (an unexpected shape, neither ok:true+value nor ok:false+reason)', m => manifest(), () => ({ ok: true, oops: 1 }), 'list'],
-  ['MALFORMED result (an unexpected shape, neither ok:true+value nor ok:false+reason)', m => manifest(), () => ({ ok: true, oops: 1 }), 'grid'],
+  ['MALFORMED result (ok:true but the wrong valueType)', () => manifest(), () => ({ ok: true, value: 'not-an-object' }), 'list'],
+  ['MALFORMED result (ok:true but the wrong valueType)', () => manifest(), () => ({ ok: true, value: 'not-an-object' }), 'grid'],
+  ['MALFORMED result (an unexpected shape, neither ok:true+value nor ok:false+reason)', () => manifest(), () => ({ ok: true, oops: 1 }), 'list'],
+  ['MALFORMED result (an unexpected shape, neither ok:true+value nor ok:false+reason)', () => manifest(), () => ({ ok: true, oops: 1 }), 'grid'],
 ];
 
 for (const [label, buildManifest, read, axis] of FAIL_CASES) {
@@ -120,7 +122,7 @@ test('FAIL CLOSED: BRIDGE_UNAVAILABLE (no Api.GetEuroOfficeBridge at all) leaves
   assert.equal(spy.tableGridCalc, 0);
 });
 
-for (const [label, over] of [['RUNTIME_VERSION_MISMATCH (another DS runtime version)', { documentServerVersion: '9.3.5' }],
+for (const [label, over] of [['RUNTIME_VERSION_MISMATCH (another DS runtime version)', { documentServerVersion: '9.3.4' }],
   ['PATCH_VERSION_MISMATCH (another Word bridge revision)', { patchVersion: 'euro-office-bridge-word-v1/9.3.4.60/4' }],
   ['PATCH_VERSION_MISMATCH (the CELL bridge manifest)', { patchVersion: 'euro-office-bridge-v1/9.3.4.60/3' }]]) {
   test(`FAIL CLOSED: ${label} -> unread, not the bridge value, no internal call`, () => {

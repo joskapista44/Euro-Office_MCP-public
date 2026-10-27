@@ -46,8 +46,11 @@ const formula = require('../formula.cjs');
  * is NOT measured is the CRITERIA objects' own setter shape (GetColorScaleCriteria / GetIconCriteria) and the exact
  * enum strings for every appearance setter the probe only named (BarFillType, Direction, MinPointType, AxisPosition,
  * IconSet, ...) -- guessing those now would repeat the W-08 CreateColorFromRGB mistake at three times the scope.
- * add/delete for these three types THEREFORE create/remove the engine's OWN DEFAULT rule ONLY, with NO appearance
- * fields accepted: { type: 'colorScale' } -> AddColorScale(3) (the one size-arg the probe exercised and confirmed
+ * X-O01 (LIVE phase 1 + 2 probes, 2026-10-12, docs/evidence/xo01-cf-appearance-probe-phase*-20261012.json): the
+ * appearance setters ARE measured now -- databar barColor / barFillType / direction / showValue / axisPosition, icon set
+ * iconSet (19 of 20 names; xl3Arrows refused) / reverseOrder / showIconOnly, colour scale stop colours -- and an
+ * appearance key a rule asks for is part of its identity (databarRule / iconSetRule / colorScaleRule below). Without
+ * appearance keys the rule is still the engine's OWN DEFAULT, exactly as before: { type: 'colorScale' } -> AddColorScale(3) (the one size-arg the probe exercised and confirmed
  * works); { type: 'databar' } -> AddDatabar(); { type: 'iconSet' } -> AddIconSetCondition(). Identity is type +
  * appliesTo only (CF_IDENTITY_FIELDS[...] = [], same shape as 'unique' -- no field to compare, since none of the
  * default appearance was ever set by this family). A later unit MAY widen these with a measured probe for the
@@ -64,10 +67,57 @@ const SCALAR_RULES = Object.freeze({
   aboveAverage: r => aboveAverageRule(r),
   top10: r => top10Rule(r),
   unique: r => uniqueRule(r),
-  colorScale: r => defaultOnlyRule(r, 'colorScale', 'xlColorScale'),
-  databar: r => defaultOnlyRule(r, 'databar', 'xlDatabar'),
-  iconSet: r => defaultOnlyRule(r, 'iconSet', 'xlIconSets'),
+  colorScale: r => colorScaleRule(r),
+  databar: r => databarRule(r),
+  iconSet: r => iconSetRule(r),
 });
+
+// X-O01 appearance (LIVE phase 1 + 2, docs/evidence/xo01-cf-appearance-probe-phase*-20261012.json): ONLY the values a
+// probe SET and read back after a reopen, or the engine default it read (set explicitly in the acceptance).
+const DATABAR_FILL = Object.freeze({ solid: 'xlDataBarFillSolid', gradient: 'xlDataBarFillGradient' });
+const DATABAR_DIRECTION = Object.freeze({ context: 'xlContext', rightToLeft: 'xlRTL' }); // xlLTR: not measured
+const DATABAR_AXIS = Object.freeze({ automatic: 'xlDataBarAxisAutomatic', none: 'xlDataBarAxisNone' }); // midpoint: not measured
+// SetIconSet round-trip, 19 of 20 names; 'xl3Arrows' reads back 'xl3TrafficLights2' (an engine mapping defect) -> refused
+const ICON_SETS = Object.freeze(['xl3ArrowsGray', 'xl3Flags', 'xl3TrafficLights1', 'xl3TrafficLights2', 'xl3Signs', 'xl3Symbols', 'xl3Symbols2', 'xl4Arrows', 'xl4ArrowsGray', 'xl4RedToBlack', 'xl4CRV', 'xl4TrafficLights', 'xl5Arrows', 'xl5ArrowsGray', 'xl5CRV', 'xl5Quarters', 'xl3Stars', 'xl3Triangles', 'xl5Boxes']);
+const intOfHex = h => parseInt(h.slice(1), 16);
+const rgbOfHex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+/** The appearance keys a rule asked for are its identity (the engine default -- nothing asked -- keeps the type-only one). */
+function databarRule(r) {
+  const allowed = ['type', 'barColor', 'barFillType', 'direction', 'showValue', 'axisPosition'];
+  if (Object.keys(r).some(k => !allowed.includes(k))) return { problem: `a databar rule is { type: 'databar', ${allowed.slice(1).join('?, ')}? }` };
+  const out = { type: 'xlDatabar', idKeys: [] };
+  if ('barColor' in r) { if (typeof r.barColor !== 'string' || !HEX.test(r.barColor)) return { problem: "rule.barColor must be '#RRGGBB'" }; out.barColor = intOfHex(r.barColor); out.barRgb = rgbOfHex(r.barColor); out.idKeys.push('barColor'); }
+  if ('barFillType' in r) { if (!Object.hasOwn(DATABAR_FILL, r.barFillType)) return { problem: `rule.barFillType must be one of ${Object.keys(DATABAR_FILL).join(' | ')}` }; out.barFillType = DATABAR_FILL[r.barFillType]; out.idKeys.push('barFillType'); }
+  if ('direction' in r) { if (!Object.hasOwn(DATABAR_DIRECTION, r.direction)) return { problem: `rule.direction must be one of ${Object.keys(DATABAR_DIRECTION).join(' | ')} (leftToRight is not measured)` }; out.direction = DATABAR_DIRECTION[r.direction]; out.idKeys.push('direction'); }
+  if ('showValue' in r) { if (typeof r.showValue !== 'boolean') return { problem: 'rule.showValue must be true or false' }; out.showValue = r.showValue; out.idKeys.push('showValue'); }
+  if ('axisPosition' in r) { if (!Object.hasOwn(DATABAR_AXIS, r.axisPosition)) return { problem: `rule.axisPosition must be one of ${Object.keys(DATABAR_AXIS).join(' | ')} (midpoint is not measured)` }; out.axisPosition = DATABAR_AXIS[r.axisPosition]; out.idKeys.push('axisPosition'); }
+  return out;
+}
+
+function iconSetRule(r) {
+  const allowed = ['type', 'iconSet', 'reverseOrder', 'showIconOnly'];
+  if (Object.keys(r).some(k => !allowed.includes(k))) return { problem: "an iconSet rule is { type: 'iconSet', iconSet?, reverseOrder?, showIconOnly? } (criteria thresholds are not supported)" };
+  const out = { type: 'xlIconSets', idKeys: [] };
+  if ('iconSet' in r) {
+    if (r.iconSet === 'xl3Arrows') return { problem: "rule.iconSet 'xl3Arrows' is refused: the engine stores it as 'xl3TrafficLights2' (measured)" };
+    if (!ICON_SETS.includes(r.iconSet)) return { problem: `rule.iconSet must be one of ${ICON_SETS.join(' | ')}` };
+    out.iconSet = r.iconSet; out.idKeys.push('iconSet');
+  }
+  if ('reverseOrder' in r) { if (typeof r.reverseOrder !== 'boolean') return { problem: 'rule.reverseOrder must be true or false' }; out.reverseOrder = r.reverseOrder; out.idKeys.push('reverseOrder'); }
+  if ('showIconOnly' in r) { if (typeof r.showIconOnly !== 'boolean') return { problem: 'rule.showIconOnly must be true or false' }; out.showIconOnly = r.showIconOnly; out.idKeys.push('showIconOnly'); }
+  return out;
+}
+
+function colorScaleRule(r) {
+  if (Object.keys(r).some(k => !['type', 'colors'].includes(k))) return { problem: "a colorScale rule is { type: 'colorScale', colors? } -- colors: three '#RRGGBB' stop colours (low, mid, high); stop types / values are not supported" };
+  const out = { type: 'xlColorScale', idKeys: [] };
+  if ('colors' in r) {
+    if (!Array.isArray(r.colors) || r.colors.length !== 3 || !r.colors.every(c => typeof c === 'string' && HEX.test(c))) return { problem: "rule.colors must be three '#RRGGBB' colours (the 3-stop scale)" };
+    out.stopColors = JSON.stringify(r.colors.map(intOfHex)); out.stopRgbs = r.colors.map(rgbOfHex); out.idKeys.push('stopColors');
+  }
+  return out;
+}
 
 function plan(step, index) {
   const at = `step ${index}: ${step.intent}`;
@@ -105,7 +155,7 @@ function ruleOf(r) {
   const fill = fillOf(r);
   if (fill.problem) return fill;
   if (r.type === 'expression') return expressionRule(r, fill);
-  return r.type === 'cellValue' ? cellValueRule(r, fill) : { problem: "rule.type must be 'cellValue', 'expression', 'aboveAverage', 'top10', 'unique', 'colorScale', 'databar' or 'iconSet' (the duplicate-values variant of 'unique', and any appearance customization of colorScale/databar/iconSet, are not supported)" };
+  return r.type === 'cellValue' ? cellValueRule(r, fill) : { problem: "rule.type must be 'cellValue', 'expression', 'aboveAverage', 'top10', 'unique', 'colorScale', 'databar' or 'iconSet' (the duplicate-values variant of 'unique' is not supported; colorScale/databar/iconSet take only their measured appearance keys)" };
 }
 
 /** M7 X-O01: no fill, no operator/formula -- each has its OWN scalar identity (CF_IDENTITY_FIELDS). */
@@ -132,12 +182,6 @@ function uniqueRule(r) {
   return { type: 'xlUniqueValues' };
 }
 
-/** M7 X-O01: colorScale/databar/iconSet -- the engine's own default rule, no appearance fields (the criteria/
- * enum setter shapes are NEM-MERT; see the family doc comment at the top of this file). */
-function defaultOnlyRule(r, name, engineType) {
-  if (Object.keys(r).some(k => k !== 'type')) return { problem: `a ${name} rule is { type: '${name}' } -- the engine's own default appearance; customization is not supported yet` };
-  return { type: engineType };
-}
 
 function expressionRule(r, fill) {
   if (Object.keys(r).some(k => !['type', 'formula', 'fill'].includes(k))) return { problem: "an expression rule is { type: 'expression', formula, fill }" };
@@ -185,12 +229,18 @@ const CF_IDENTITY_FIELDS = Object.freeze({
   xlDatabar: [],
   xlIconSets: [],
 });
-const CF_IDENTITY_GETTERS = Object.freeze({ aboveBelow: 'GetAboveBelow', numStdDev: 'GetNumStdDev', rank: 'GetRank', percent: 'GetPercent', topBottom: 'GetTopBottom' });
+const CF_IDENTITY_GETTERS = Object.freeze({ aboveBelow: 'GetAboveBelow', numStdDev: 'GetNumStdDev', rank: 'GetRank', percent: 'GetPercent', topBottom: 'GetTopBottom',
+  barFillType: 'GetBarFillType', direction: 'GetDirection', showValue: 'GetShowValue', axisPosition: 'GetAxisPosition', iconSet: 'GetIconSet', reverseOrder: 'GetReverseOrder', showIconOnly: 'GetShowIconOnly' });
+// X-O01: the identity keys that are not one scalar getter -- a JS expression over the rule object `x` (dispatch-time)
+const CF_IDENTITY_EXPRS = Object.freeze({
+  barColor: 'rgbOf(x.GetBarColor())',
+  stopColors: 'JSON.stringify((x.GetColorScaleCriteria() || []).map(c => rgbOf(c.GetColor())))',
+});
 
 const sameText = (a, b, expr) => (expr ? formula.sameFormula(`=${f1(a)}`, `=${b}`) : f1(a) === b);
 function sameCondition(x, r) {
   if (x.type !== r.type) return false;
-  const own = CF_IDENTITY_FIELDS[r.type];
+  const own = r.idKeys ? [...CF_IDENTITY_FIELDS[r.type], ...r.idKeys] : CF_IDENTITY_FIELDS[r.type];
   if (own) return own.every(k => x[k] === r[k]);
   return (r.type === 'xlExpression' || x.operator === r.operator) && sameText(x.formula1, r.formula1, r.type === 'xlExpression') && f1(x.formula2) === r.formula2;
 }
@@ -267,20 +317,38 @@ function addBody(r, range) {
   if (r.type === 'xlUniqueValues') return `const c = ws.GetRange(${J(range)}).GetFormatConditions().AddUniqueValues();`;
   // M7 X-O01: default-only creation (no appearance setters -- the criteria/enum shapes are NEM-MERT, see the
   // family doc comment). AddColorScale(3) is the one size-arg a maintainer's #ref enum probe exercised and confirmed.
-  if (DEFAULT_ONLY_ADD[r.type]) return `const c = ws.GetRange(${J(range)}).GetFormatConditions().${DEFAULT_ONLY_ADD[r.type]};`;
+  if (DEFAULT_ONLY_ADD[r.type]) return `const c = ws.GetRange(${J(range)}).GetFormatConditions().${DEFAULT_ONLY_ADD[r.type]};${appearanceSetters(r)}`;
   return `const c = ws.GetRange(${J(range)}).GetFormatConditions().Add(${addArgs(r)});${r.rgb ? `
   c.SetFillColor(Api.CreateColorFromRGB(${r.rgb.join(', ')}));` : ''}`;
 }
 
+/** X-O01: the measured appearance setters, only for the keys the rule asked for (none -> the engine default, as before). */
+function appearanceSetters(r) {
+  const J = JSON.stringify;
+  const k = new Set(r.idKeys || []);
+  const out = [];
+  if (k.has('barColor')) out.push(`c.SetBarColor(Api.CreateColorFromRGB(${r.barRgb.join(', ')}));`);
+  if (k.has('barFillType')) out.push(`c.SetBarFillType(${J(r.barFillType)});`);
+  if (k.has('direction')) out.push(`c.SetDirection(${J(r.direction)});`);
+  if (k.has('showValue')) out.push(`c.SetShowValue(${J(r.showValue)});`);
+  if (k.has('axisPosition')) out.push(`c.SetAxisPosition(${J(r.axisPosition)});`);
+  if (k.has('iconSet')) out.push(`c.SetIconSet(${J(r.iconSet)});`);
+  if (k.has('reverseOrder')) out.push(`c.SetReverseOrder(${J(r.reverseOrder)});`);
+  if (k.has('showIconOnly')) out.push(`c.SetShowIconOnly(${J(r.showIconOnly)});`);
+  if (k.has('stopColors')) out.push(`const stops = c.GetColorScaleCriteria();\n  ${r.stopRgbs.map((rgb, i) => `stops[${i}].SetColor(Api.CreateColorFromRGB(${rgb.join(', ')}));`).join('\n  ')}`);
+  return out.length ? `\n  ${out.join('\n  ')}` : '';
+}
+
 function deleteBody(r, range) {
   const J = JSON.stringify;
-  const own = CF_IDENTITY_FIELDS[r.type];
+  const own = CF_IDENTITY_FIELDS[r.type] && [...CF_IDENTITY_FIELDS[r.type], ...(r.idKeys || [])];
   const sameExpr = own
-    ? `x.GetType() === ${J(r.type)}${own.map(k => ` && x.${CF_IDENTITY_GETTERS[k]}() === ${J(r[k])}`).join('')}
+    ? `x.GetType() === ${J(r.type)}${own.map(k => ` && ${CF_IDENTITY_EXPRS[k] || `x.${CF_IDENTITY_GETTERS[k]}()`} === ${J(r[k])}`).join('')}
       && String(x.GetAppliesTo().GetAddress(false, false, 'xlA1', false)) === ${J(range)}`
     : `x.GetType() === ${J(r.type)} && ${r.type === 'xlExpression' ? 'true' : `x.GetOperator() === ${J(r.operator)}`} && String(x.GetFormula1()).replace(/^=/, '') === ${J(r.formula1)}${r.formula2 ? ` && String(x.GetFormula2()).replace(/^=/, '') === ${J(r.formula2)}` : ''}
       && (fill && typeof fill.GetRGB === 'function' ? fill.GetRGB() : null) === ${r.fill} && String(x.GetAppliesTo().GetAddress(false, false, 'xlA1', false)) === ${J(range)}`;
   return `const fc = ws.GetRange(${J(range)}).GetFormatConditions();
+  const rgbOf = v => (v && typeof v.GetRGB === 'function' ? v.GetRGB() : null);
   const hits = [];
   for (let i = 1; i <= fc.GetCount(); i += 1) {
     const x = fc.GetItem(i);
@@ -315,7 +383,11 @@ function verifyPreservation(op, before, after) {
   const a = gate(after.primary, op);
   const others = g => g.list.filter(x => !identical(x, op.rule, op.selector.range)).map(x => JSON.stringify(x)).sort();
   const kept = b.ok && a.ok && JSON.stringify(others(b)) === JSON.stringify(others(a));
-  return { ok: rest.ok && kept, evidence: { ...rest.evidence, otherRulesKept: kept } };
+  // X-L13/6: once tiered, report preservationScope FULL -- cfReads is keyed by the exact requested
+  // (sheet,range) pair (xlsx-driver.cjs's own `cfAsked` loop), never a used-range scan, and the check above
+  // was ALREADY scoped to the op's own range even below 45000 -- tiering reduces nothing. Below 45000 unchanged.
+  const tiered = before.primary.tier === 'tiered';
+  return { ok: rest.ok && kept, evidence: { ...rest.evidence, otherRulesKept: kept, ...(tiered ? { preservationScope: 'FULL' } : {}) } };
 }
 
 function wholeTaskChecks(op, finalObservation) {
@@ -327,4 +399,7 @@ function wholeTaskChecks(op, finalObservation) {
 const windowsOf = () => [];
 const liveExtras = op => ({ cfRanges: [{ sheet: op.selector.sheet, range: op.selector.range }] });
 
-module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };
+// the write-side enums, exported so the READ projection (cf-read.cjs) inverts the SAME tables instead of a copy
+const CF_ENUMS = Object.freeze({ OPS1, OPS2, DATABAR_FILL, DATABAR_DIRECTION, DATABAR_AXIS, ICON_SETS });
+
+module.exports = { CF_ENUMS, INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };

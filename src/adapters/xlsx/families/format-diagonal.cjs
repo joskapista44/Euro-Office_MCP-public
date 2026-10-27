@@ -1,7 +1,7 @@
 'use strict';
 
 const { readKey, unobservable } = require('../style-axis.cjs');
-const { DIAGONAL, API_DIAGONAL, API_STYLE, diagonalSidesList } = require('./format-maps.cjs');
+const { DIAGONAL, API_DIAGONAL, API_STYLE, STYLE_REV, diagonalSidesList } = require('./format-maps.cjs');
 
 /**
  * X-B05 (diagonal borders) -- split out of format.cjs (review, point 2: qlty smells grew in
@@ -72,4 +72,29 @@ function diagonalLine(op, colour) {
   return op.diagonal.codes.map(c => `c.SetBorders(${JSON.stringify(API_DIAGONAL[c])}, ${JSON.stringify(API_STYLE[style])}, ${colour(color)});`).join(' ');
 }
 
-module.exports = { isDiagonalSides, diagonalExpectation, diagonalWant, diagonalConflict, diagonalLine };
+/** L-16/1: the diagonal a ClearFormats()-based restore must bring back, read from the cell's own `before`.
+ * null = no diagonal drawn. A diagonal that IS drawn but cannot be re-issued exactly (a style code outside our
+ * write vocabulary, or the shared `border.d` set while neither direction flag is true) is `{ bad: <why> }` --
+ * the caller refuses BEFORE the write (the restore must never fabricate or drop a diagonal). Direction flags
+ * that are unreadable are already refused by the STYLE_KEYS observability loop of both callers. MEASURED
+ * (l16-diagonal-probe-live-20261016, zero): DD / DU / both restore byte-exact with this body. */
+function diagonalRestoreOf(cell) {
+  const d = readKey(cell, 'border.d');
+  if (!d || typeof d !== 'object' || !(d.s > 0)) return null;
+  const dd = readKey(cell, 'border.dd') === true;
+  const du = readKey(cell, 'border.du') === true;
+  if (!(d.s in STYLE_REV)) return { bad: d.s };
+  if (!dd && !du) return { bad: 'no-direction' };
+  return { style: API_STYLE[STYLE_REV[d.s]], color: d.c, dd, du };
+}
+
+/** the restore-script lines for one cell's diagonal (`rs.diagonal`, `rgbFn` = the caller's colour helper). */
+function diagonalRestoreScript(rgbFn) {
+  return `
+    if (rs.diagonal) {
+      if (rs.diagonal.dd) c.SetBorders(${JSON.stringify(API_DIAGONAL.dd)}, rs.diagonal.style, ${rgbFn}(rs.diagonal.color));
+      if (rs.diagonal.du) c.SetBorders(${JSON.stringify(API_DIAGONAL.du)}, rs.diagonal.style, ${rgbFn}(rs.diagonal.color));
+    }`;
+}
+
+module.exports = { diagonalRestoreOf, diagonalRestoreScript, isDiagonalSides, diagonalExpectation, diagonalWant, diagonalConflict, diagonalLine };

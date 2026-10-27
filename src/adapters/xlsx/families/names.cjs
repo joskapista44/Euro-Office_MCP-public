@@ -3,7 +3,7 @@
 const formula = require('../formula.cjs');
 const { parseRange, colName, colNum, MAX_COL, overlaps } = require('../a1.cjs');
 const cells = require('./cells.cjs');
-const { nameUses } = require('../dependencies.cjs');
+const { nameUses, refOnTarget } = require('../dependencies.cjs');
 const { formulaEntries } = require('../inventory.cjs');
 
 /**
@@ -65,7 +65,32 @@ function printAreaRefersTo(step, at, q) {
       if (overlaps(parsed[i], parsed[j])) return { ok: false, detail: `${at}: areas must not overlap` };
     }
   }
-  return { refersTo: `=${parsed.map(g => `${q}!$${colName(g.c1)}$${g.r1}:$${colName(g.c2)}$${g.r2}`).join(',')}` };
+  return { refersTo: areasRefersTo(q, parsed) };
+}
+
+/** The comma-joined absolute reference of parsed rectangles, in the GIVEN order (the engine does not reorder on save, X-P02). */
+const areasRefersTo = (q, parsed) => `=${parsed.map(g => `${q}!$${colName(g.c1)}$${g.r1}:$${colName(g.c2)}$${g.r2}`).join(',')}`;
+
+/**
+ * X-P01 (owner decision "A", internal tracker; LIVE: test/live/xlsx-xp01-print-area-repoint-probe.live.cjs): ws.AddDefName on a
+ * sheet whose Print_Area already exists OVERWRITES it -- public AND model reader MOVED, exactly ONE Print_Area, session and after two
+ * reopens (no Delete first, no duplicate). The overwrite is a compare-and-swap, not a blind re-point: the step must NAME the area it
+ * replaces (`replaces`: one A1 range, or an array of ranges in the stored order), and the write happens only while the sheet's CURRENT
+ * area equals it. Without `replaces` an existing area with another reference stays refused (xlsx-name-exists-with-another-reference).
+ */
+function printAreaReplaces(step, at, q) {
+  if (!('replaces' in step)) return { refersTo: null };
+  if (step.intent !== 'set_print_area') return { ok: false, detail: `${at}: replaces applies to set_print_area only` };
+  const raw = Array.isArray(step.replaces) ? step.replaces : [step.replaces];
+  if (!raw.length) return { ok: false, detail: `${at}: replaces must be one A1 range or a non-empty array of A1 ranges` };
+  const parsed = [];
+  for (const one of raw) {
+    const g = typeof one === 'string' ? parseRange(one) : null;
+    if (!g) return { ok: false, detail: `${at}: replaces must be one plain A1 range or an array of them` };
+    parsed.push(g);
+  }
+  for (let i = 0; i < parsed.length; i += 1) for (let j = i + 1; j < parsed.length; j += 1) if (overlaps(parsed[i], parsed[j])) return { ok: false, detail: `${at}: replaces areas must not overlap` };
+  return { refersTo: areasRefersTo(q, parsed) };
 }
 
 /**
@@ -91,16 +116,20 @@ function planPrint(step, index) {
   const at = `step ${index}: ${step.intent}`;
   const set = step.intent.startsWith('set_');
   const area = PRINT[step.intent] === 'Print_Area';
-  const fields = ['intent', 'id', 'sheet', ...(set ? (area ? ['range', 'areas'] : ['rows', 'columns']) : [])];
+  const fields = ['intent', 'id', 'sheet', ...(set ? (area ? ['range', 'areas', 'replaces'] : ['rows', 'columns']) : [])];
   const unknown = Object.keys(step).filter(k => !fields.includes(k));
   if (unknown.length) return { ok: false, detail: `${at} does not support field(s): ${unknown.join(', ')}` };
   if (typeof step.sheet !== 'string' || step.sheet === '') return { ok: false, detail: `${at} requires a sheet name` };
   const q = /^[A-Za-z_][\w.]*$/.test(step.sheet) ? step.sheet : `'${step.sheet.replace(/'/g, "''")}'`;
   let refersTo = null;
+  let replacesRefersTo = null;
   if (set && area) {
     const r = printAreaRefersTo(step, at, q);
     if (r.ok === false) return r;
     refersTo = r.refersTo;
+    const rep = printAreaReplaces(step, at, q);
+    if (rep.ok === false) return rep;
+    replacesRefersTo = rep.refersTo;
   } else if (set) {
     if (!('rows' in step) && !('columns' in step)) return { ok: false, detail: `${at} requires at least one of rows ('n:m') or columns ('A:B')` };
     const parts = [];
@@ -122,7 +151,7 @@ function planPrint(step, index) {
   const name = PRINT[step.intent];
   return { ok: true, operation: { id: step.id || `s${index}`, intent: step.intent, family: 'names',
     selector: Object.freeze({ sheet: `\u0000name:${step.sheet.toLowerCase()}!${name.toLowerCase()}`, range: 'A1', name, claims: Object.freeze([`name:${step.sheet.toLowerCase()}!${name.toLowerCase()}`]) }),
-    name, refersTo, scope: step.sheet, cells: Object.freeze([]), preservationMode: 'PRIMITIVE_INTEGRAL' } };
+    name, refersTo, ...(replacesRefersTo ? { replacesRefersTo } : {}), scope: step.sheet, cells: Object.freeze([]), preservationMode: 'PRIMITIVE_INTEGRAL' } };
 }
 
 function planName(step, index) {
@@ -176,6 +205,9 @@ function gate(p, op) {
   if (!p.complete) return { ok: false, reason: p.truncated ? 'xlsx-observation-truncated' : 'xlsx-observation-unreadable-getters', unsupported: p.unsupported };
   if (!Array.isArray(p.definedNames)) return { ok: false, reason: 'xlsx-names-unobservable' };
   if (!p.dependencies || !p.dependencies.complete) return { ok: false, reason: 'xlsx-names-dependency-observation-incomplete', unobservable: p.dependencies ? p.dependencies.unobservable.slice(0, 20) : 'not-read' };
+  // the scope sheet of a sheet-level name is the sheet the write changes (a workbook-level name: none)
+  const ref = refOnTarget(p.dependencies, op.scope ? [op.scope] : []);
+  if (ref) return { ok: false, ...ref };
   const problem = scopeProblem(p, op);
   return problem ? { ok: false, ...problem } : { ok: true, hits: scopedHits(p, op) };
 }
@@ -197,10 +229,13 @@ function classify(p, op) {
   if (writes(op)) {
     if (g.hits.length > 1) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-name-ambiguous', name: op.name } };
     if (g.hits.length === 1) {
-      return canon(g.hits[0].ref) === canon(op.refersTo)
-        ? { state: 'SATISFIED', evidence: { name: op.name, refersTo: op.refersTo, proof: 'fresh-live-name-with-the-reference' } }
-        : { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-name-exists-with-another-reference', name: op.name, now: g.hits[0].ref } };
+      if (canon(g.hits[0].ref) === canon(op.refersTo)) return { state: 'SATISFIED', evidence: { name: op.name, refersTo: op.refersTo, proof: 'fresh-live-name-with-the-reference' } };
+      // X-P01: an existing area is overwritten ONLY while it is exactly the one the step names (compare-and-swap)
+      if (op.replacesRefersTo && canon(g.hits[0].ref) === canon(op.replacesRefersTo)) return { state: 'APPLY', evidence: { name: op.name, refersTo: op.refersTo, replaces: op.replacesRefersTo, proof: 'fresh-live-area-equals-replaces' } };
+      return { state: 'FAIL_CLOSED', evidence: { reason: op.replacesRefersTo ? 'xlsx-print-area-replaces-mismatch' : 'xlsx-name-exists-with-another-reference', name: op.name, now: g.hits[0].ref, ...(op.replacesRefersTo ? { replaces: op.replacesRefersTo } : {}) } };
     }
+    // X-P01: `replaces` names an area that is not there (cleared meanwhile, or never set) -- the step's premise is stale, nothing is written
+    if (op.replacesRefersTo) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-print-area-replaces-mismatch', name: op.name, now: null, replaces: op.replacesRefersTo } };
     return { state: 'APPLY', evidence: { name: op.name, refersTo: op.refersTo } };
   }
   if (g.hits.length === 0) return { state: 'SATISFIED', evidence: { name: op.name, proof: 'fresh-live-name-absent' } };
@@ -255,7 +290,13 @@ function verifyPreservation(op, before, after) {
   const others = x => (x.definedNames || []).filter(d => !(d.scopeSheet === scopeOf(op) && sameName(d.name, op.name))).map(d => `${key(d)}=${canon(d.ref)}`).sort();
   const namesKept = Array.isArray(b.definedNames) && Array.isArray(a.definedNames) && JSON.stringify(others(b)) === JSON.stringify(others(a));
   const rulesKept = !!b.rules && !!a.rules && JSON.stringify(b.rules.bySheet) === JSON.stringify(a.rules.bySheet);
-  return { ok: rest.ok && namesKept && rulesKept, evidence: { ...rest.evidence, otherNamesKept: namesKept, rulesKept } };
+  // X-L13/5: print-area intents, once tiered, report preservationScope FULL -- the check above already covers
+  // every FULL-tier axis (every OTHER defined name + every sheet's rules), workbook-wide via the dependents
+  // bridge, unbounded by MAX_READ_CELLS. Intent-scoped on purpose: set_defined_name/delete_defined_name (already
+  // migrated, X-L13/1, LIVE PASS) keep their receipt byte-identical -- this is not a blanket family change.
+  const PRINT_AREA_INTENTS = ['set_print_area', 'clear_print_area', 'set_print_titles', 'clear_print_titles'];
+  const tieredPrintArea = b.tier === 'tiered' && PRINT_AREA_INTENTS.includes(op.intent);
+  return { ok: rest.ok && namesKept && rulesKept, evidence: { ...rest.evidence, otherNamesKept: namesKept, rulesKept, ...(tieredPrintArea ? { preservationScope: 'FULL' } : {}) } };
 }
 
 function wholeTaskChecks(op, finalObservation) {

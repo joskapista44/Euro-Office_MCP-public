@@ -65,7 +65,7 @@ async function main() {
   log.info('starting', { product: rel.PRODUCT, sourceCommit: rel.SOURCE_COMMIT, artifactVersion: rel.ARTIFACT_VERSION, configIdentity: cfg.identity, pid: process.pid });
 
   // every tool is built; only the exposure gate's subset is served (M11.3b.2: product_status + xlsx_read + docx_read)
-  const { tools, gate } = buildServerTools({ config: cfg.config, configIdentity: cfg.identity });
+  const { tools, gate, sessions } = buildServerTools({ config: cfg.config, configIdentity: cfg.identity, log });
   const server = createMcpServer({ tools, info: { version: rel.ARTIFACT_VERSION }, log });
   let shuttingDown = false;
   for (const sig of ['SIGTERM', 'SIGINT']) {
@@ -77,9 +77,12 @@ async function main() {
       // SHUTDOWN_TIMEOUT_MS; the hard deadline exits even if a call never settles (the browser child dies with its pipe)
       setTimeout(() => { log.error('shutdown deadline reached, exiting', { timeoutMs: SHUTDOWN_TIMEOUT_MS }); process.exit(0); }, SHUTDOWN_TIMEOUT_MS + SHUTDOWN_GRACE_MS).unref();
       gate.shutdown({ timeoutMs: SHUTDOWN_TIMEOUT_MS }).then(r => log.info('session cleanup', r));
+      // GH #100 U2: a held warm session (none unless the switch is on) is closed the same bounded way
+      sessions.shutdown({ timeoutMs: SHUTDOWN_TIMEOUT_MS }).then(r => { if (r.sessions) log.info('warm session cleanup', r); });
     });
   }
   const reason = await server.start();
+  await sessions.shutdown({ timeoutMs: SHUTDOWN_TIMEOUT_MS }); // the server stopped on its own (stdin closed): a held browser must not outlive it
   log.info('stopped', { reason });
   return 0;
 }

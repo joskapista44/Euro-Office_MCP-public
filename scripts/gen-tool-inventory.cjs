@@ -22,7 +22,7 @@ file drifts from the code.
 \`\`\`text
 TOOL_INVENTORY_TOTAL=${TOOL_ROWS.length} MCP tools + ${caps.length} capabilities (DOCX ${caps.filter(r => r.FORMAT === 'DOCX').length}, XLSX ${caps.filter(r => r.FORMAT === 'XLSX').length})
 TOOLS_EXPOSED=${exposed} (${exposedTools().join(', ')})
-TOOLS_WITHHELD=${TOOL_ROWS.length - exposed} MCP tools + all ${caps.length} capabilities
+TOOLS_WITHHELD=${TOOL_ROWS.length - exposed} MCP tools + ${caps.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'YES').length} of ${caps.length} capabilities
 EXPOSURE_GATE=${g.state} (released capability tools: ${g.releasedCapabilityTools.length})
 \`\`\`
 
@@ -35,8 +35,10 @@ EXPOSURE_GATE=${g.state} (released capability tools: ${g.releasedCapabilityTools
    unknown), the requester-own broker route (M11.2), one editor session per process. The exact exposed set is pinned by
    \`test/static/tool-exposure-exact-set-guard.test.cjs\`.
 3. **M11.4b.1 (owner decision, owner channel)** adds the XLSX WRITE tool \`xlsx_execute_task\`: exactly the six
-   accepted intents, exposed only while the WRITE release gate holds (M11.4a.1/2/3 CLOSED, the exact six-intent allowlist,
-   DOCX_WRITE_ACCEPTED empty). **\`docx_execute_task\` and every routed write capability stay withheld.**
+   accepted intents, exposed only while the WRITE release gate holds (M11.4a.1/2/3 CLOSED, the exact XLSX allowlist).
+4. **GH #228 (PROPOSED STATE, owner decision pending, \`docs/GH228-DOCX-WRITE-RELEASE-GATE-PROPOSAL.md\`)** adds the DOCX WRITE
+   tool \`docx_execute_task\` with the accepted DOCX allowlist (\`rewrite_paragraph\`; GH #233 adds \`insert_paragraph_before\` / \`insert_paragraph_after\` (\`docs/GH233-PARAGRAPH-INSERT-PRODUCT-DECISION.md\`), GH #234 adds \`delete_paragraph\` (\`docs/GH234-PARAGRAPH-DELETE-PRODUCT-DECISION.md\`), GH #235 adds \`move_paragraph_before\` / \`move_paragraph_after\` (\`docs/GH235-PARAGRAPH-MOVE-PRODUCT-DECISION.md\`), GH #236 adds \`apply_list\` / \`set_list_level\` / \`set_list_type\` (\`docs/GH236-LIST-APPLY-TYPE-LEVEL-PRODUCT-DECISION.md\`), GH #237 adds \`indent_list_item\` / \`outdent_list_item\` / \`remove_list\` (\`docs/GH237-LIST-INDENT-OUTDENT-REMOVE-PRODUCT-DECISION.md\`)). The WRITE release gate is **per format**: the XLSX
+   tool waits only on the XLSX allowlist, the DOCX tool only on the DOCX allowlist. **Every other routed write capability stays withheld.**
 
 ## MCP tools
 

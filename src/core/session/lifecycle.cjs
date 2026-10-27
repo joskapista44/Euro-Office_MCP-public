@@ -1,6 +1,6 @@
 'use strict';
 
-const { openSession, awaitReady, closeSession } = require('./open.cjs');
+const { openSession, reuseSession, releaseSession, awaitReady, closeSession } = require('./open.cjs');
 const { STATES, LifecycleState } = require('./state.cjs');
 const { Metrics, collectMetrics } = require('../metrics/collect.cjs');
 const {
@@ -23,28 +23,48 @@ const { currentGeneration } = require('../mutation-epoch.cjs');
  * The lifecycle owner, not the executor, holds the authoritative AppliedOperations register. That
  * is what makes owner requirement 20/K provable: if the executor THROWS after a verified write,
  * the register still exists, the predicate still fires, and the barrier still runs.
+ *
+ * GH #100 U4 -- the optional WARM-SESSION path. `options.reuse = { registry, key, fetchFreshKey, decide, now? }` (all injected; the core imports nothing
+ * from the server). Absent, or with a registry that is not enabled, nothing below changes: no health / config-fetch / release call is made and the
+ * result carries no `reuse` field. Enabled: the call may take the kept session (rule `decide`, every unknown a "no") instead of opening, and a call
+ * that ended clean RELEASES its session into the registry instead of closing it. Any other end closes it, exactly as before.
  */
 async function withSession(options, adapter, fn) {
   const metrics = new Metrics({ now: options.now });
   const lifecycle = new LifecycleState();
   const appliedOperations = new AppliedOperations();
+  const reuse = options.reuse && options.reuse.registry && options.reuse.registry.enabled === true ? options.reuse : null;
+  const nowMs = reuse && typeof reuse.now === 'function' ? reuse.now : Date.now;
 
   let handle = null;
   let execution = null;
   let persistence = null;
   let cleanup = null;
+  let activeDriver = options.driver;
+  let session = { openedAt: nowMs(), calls: 1 };
+  let reuseReport = reuse ? { attempted: true, reused: false, reason: null, kept: false, keepReason: null } : null;
+  let keepCandidate = false;
+  let wroteVerified = false;
 
   lifecycle.transition(STATES.OPENING);
   try {
-    handle = await openSession({
-      driver: options.driver,
-      url: options.url,
-      user: options.user,
-      pass: options.pass,
-      fileId: options.fileId,
-      adapterKind: adapter.kind,
-      metrics,
-    });
+    const warm = reuse ? await admitWarmSession(reuse) : null;
+    if (warm) reuseReport = { ...reuseReport, ...warm.report };
+    if (warm && warm.taken) {
+      activeDriver = warm.taken.driver;
+      session = { openedAt: warm.taken.openedAt, calls: warm.taken.calls + 1 };
+      handle = reuseSession({ driver: activeDriver, opened: warm.taken.opened, fileId: options.fileId, adapterKind: adapter.kind, metrics });
+    } else {
+      handle = await openSession({
+        driver: options.driver,
+        url: options.url,
+        user: options.user,
+        pass: options.pass,
+        fileId: options.fileId,
+        adapterKind: adapter.kind,
+        metrics,
+      });
+    }
   } catch (err) {
     // F1: OPENING failed. No handle exists, so there is nothing to close and no barrier to run.
     lifecycle.transition(STATES.CLOSING).transition(STATES.CLOSED);
@@ -62,6 +82,7 @@ async function withSession(options, adapter, fn) {
       cleanup: { ok: true, outcome: 'not-applicable', detail: 'no session was opened' },
       metrics,
       openFailure: err.openFailure || { ok: false, detail: err.message },
+      reuse: reuseReport,
     });
   }
 
@@ -112,36 +133,107 @@ async function withSession(options, adapter, fn) {
     // The persistence decision reads the AUTHORITATIVE execution state, never a receipt. The
     // barrier runs ONLY for verified writes; an uncertain-only task is deliberately not saved.
     const decision = decidePersistence(execution);
+    wroteVerified = decision.barrierRequired === true;
     if (decision.barrierRequired) {
       lifecycle.transition(STATES.PERSISTING);
       persistence = await persist(handle, options.persistence || {});
     } else if (decision.uncertain) {
-      persistence = { ok: true, outcome: 'uncertain-not-persisted', authority: null };
+      persistence = { ok: true, outcome: 'uncertain-may-persist', authority: null };
     } else {
       persistence = { ok: true, outcome: 'not-required', authority: null };
     }
+    // only a call that ran to a certain, persisted (or nothing-to-persist) end may keep its session
+    keepCandidate = !!reuse && ready.ok === true && execution.executionOk === true && !hasUncertainWrites(execution)
+      && persistence.ok === true && persistence.outcome !== 'uncertain-may-persist';
   } finally {
     // Close always runs, after any required persistence (invariant 10). Its outcome is captured,
     // never swallowed: a close failure is explicit in FinalTaskResult, not metrics-only (F8).
     if (lifecycle.state !== STATES.CLOSING && lifecycle.state !== STATES.CLOSED) {
       lifecycle.transition(STATES.CLOSING);
     }
-    cleanup = await closeSession(handle);
+    if (keepCandidate) {
+      const ended = await endCallKeepingSession({ reuse, handle, driver: activeDriver, session, wroteVerified });
+      cleanup = ended.cleanup;
+      reuseReport = { ...reuseReport, kept: ended.kept, keepReason: ended.reason };
+    } else {
+      if (reuse) reuseReport = { ...reuseReport, keepReason: 'call-not-clean' };
+      cleanup = await closeSession(handle);
+    }
     lifecycle.transition(STATES.CLOSED);
     metrics.clock.mark('closed').span('totalElapsedMs', 'openEntry', 'closed');
   }
 
-  return finalize({ lifecycle, execution, persistence, cleanup, metrics });
+  return finalize({ lifecycle, execution, persistence, cleanup, metrics, reuse: reuseReport });
 }
+
+/**
+ * Call start on the warm-session path (GH #100 U4): takes the kept session for this call's key and asks the injected rule whether it may serve.
+ * { taken, report }: `taken` is the session to reuse, or null -- then any kept session has ALREADY been closed here (never left held, never served)
+ * and the caller opens a fresh one. Never throws; every failure is a "no" with its reason in the report.
+ */
+async function admitWarmSession(reuse) {
+  const no = (reason, extra = {}) => ({ taken: null, report: { reused: false, reason, ...extra } });
+  let taken;
+  try { taken = await reuse.registry.take(reuse.key); } catch { return no('registry-take-threw'); }
+  if (!taken) return no('no-warm-session');
+  let decision;
+  try {
+    const driver = taken.driver;
+    const health = await driver.health();
+    const openedKey = driver.documentKey();
+    let freshKey = null;
+    try { freshKey = await reuse.fetchFreshKey(); } catch { freshKey = null; } // a failed fetch is a "no", never "unchanged"
+    // GH #100 U4c: the operation axis (docs/GH100-U4C-READ-REUSE-DESIGN.md sec. 4). `reuse.operation`
+    // defaults to 'WRITE' -- every caller of withSession today IS the write path; a future read-path
+    // caller (or a read-tools.cjs that migrates onto withSession) would set it to 'READ'.
+    decision = taken.opened
+      ? reuse.decide({ health, openedKey, freshKey, lastRelease: taken.lastRelease, requestedOperation: reuse.operation || 'WRITE', openedOperation: taken.opened.operation })
+      : { reuse: false, reason: 'no-recorded-open-descriptor' };
+    if (decision.reuse) {
+      const reset = driver.resetForNextCall();
+      if (!reset || reset.ok !== true) decision = { reuse: false, reason: 'reset-failed' };
+    }
+  } catch {
+    decision = { reuse: false, reason: 'reuse-check-threw' };
+  }
+  if (decision.reuse) return { taken, report: { reused: true, reason: decision.reason } };
+  let closed;
+  try { closed = await taken.driver.close(); } catch (err) { closed = { ok: false, detail: String(err && err.message || err).slice(0, 200) }; }
+  return no(decision.reason, { warmClosed: !!(closed && closed.ok) });
+}
+
+/**
+ * Call end on the warm-session path (GH #100 U4): release() instead of close(). The session is kept only when the release is ok AND carries the
+ * claim the call needs (a write call: `confirmed`; a write-free call: confirmed or none) AND the registry accepts it. Every other outcome is the
+ * old path -- a real close() whose result is the cleanup -- so a kept session is never a weaker claim than a closed one.
+ */
+async function endCallKeepingSession({ reuse, handle, driver, session, wroteVerified }) {
+  const released = await releaseSession(handle);
+  const state = released.confirmation && released.confirmation.state;
+  const claimOk = released.ok === true && (wroteVerified ? state === 'confirmed' : (!released.confirmation || state === 'confirmed'));
+  if (!claimOk) return { kept: false, reason: released.ok === true ? 'release-claim-not-confirmed' : 'release-not-ok', cleanup: await closeSession(handle) };
+  let held;
+  try {
+    held = await reuse.registry.hold(reuse.key, driver, {
+      openedAt: session.openedAt, calls: session.calls, lastRelease: { ok: true, confirmation: released.confirmation },
+      opened: { id: handle.id, frame: handle.frame, apiWhere: handle.apiWhere, operation: reuse.operation || 'WRITE' },
+    });
+  } catch { held = { held: false, reason: 'registry-hold-threw' }; }
+  if (held && held.held === true) return { kept: true, reason: 'held', cleanup: released };
+  return { kept: false, reason: (held && held.reason) || 'hold-refused', cleanup: await closeSession(handle) };
+}
+
+/** What an UNCERTAIN_MAY_PERSIST receipt means for the caller (measured, guncprobe 2026-10-19 on DS 9.3.5: the unsaved edit became durable on its own within ~9 s, and another editor's forcesave saved it too). */
+const UNCERTAIN_MAY_PERSIST_MEANING = 'no save was requested, but the unsaved edit of the uncertain operation may become durable on the Document Server without any further call; re-read the document before deciding anything';
 
 /** The barrier's outcome and the save claim it supports (M7 save contract), with the reason for that claim. */
 function saveStateOf(persistence, cleanup) {
   if (persistence.outcome === 'not-required') {
     return { persistenceOutcome: 'NOT_REQUIRED', persistenceState: PERSISTENCE_STATE.NOT_REQUIRED, saveReason: 'no-verified-write' };
   }
-  if (persistence.outcome === 'uncertain-not-persisted') {
-    // Never reported as NOT_REQUIRED: that is exactly the collapse the policy exists to prevent.
-    return { persistenceOutcome: 'UNCERTAIN_NOT_PERSISTED', persistenceState: PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED, saveReason: 'only-uncertain-writes' };
+  if (persistence.outcome === 'uncertain-may-persist') {
+    // Never reported as NOT_REQUIRED, and never as "not persisted": no barrier ran, but the Document Server may make the unsaved edit durable by itself (see verified-writes.cjs).
+    return { persistenceOutcome: 'UNCERTAIN_MAY_PERSIST', persistenceState: PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST, saveReason: 'only-uncertain-writes-may-persist' };
   }
   if (persistence.ok !== true) {
     return { persistenceOutcome: 'FAILED', persistenceState: PERSISTENCE_STATE.FAILED, saveReason: persistence.outcome || 'barrier-failed' };
@@ -172,7 +264,7 @@ function confirmedSaveReason(persistence, cleanup) {
  * finalizeTask — M0 4.2. The ONLY final task-completion result, and it can exist only after the
  * lifecycle has finished: execution, persistence and cleanup are all already decided here.
  */
-function finalize({ lifecycle, execution, persistence, cleanup, metrics, openFailure = null }) {
+function finalize({ lifecycle, execution, persistence, cleanup, metrics, openFailure = null, reuse = null }) {
   const documentOutcome = execution.executionOk ? 'SUCCESS' : 'FAILED';
 
   // Mutation certainty is ORTHOGONAL to the save state (owner decision, point 7): a task can reach a confirmed save
@@ -209,7 +301,7 @@ function finalize({ lifecycle, execution, persistence, cleanup, metrics, openFai
     reason: saveReason,
     meaning: persistenceState === PERSISTENCE_STATE.FORCESAVE_CONFIRMED
       ? 'the server reported the save of this acknowledged editor state as successful'
-      : null,
+      : (persistenceState === PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST ? UNCERTAIN_MAY_PERSIST_MEANING : null),
     storedContentVerified: false,
   });
 
@@ -237,6 +329,8 @@ function finalize({ lifecycle, execution, persistence, cleanup, metrics, openFai
     receiptEvidence: execution.receiptEvidence || null,
     metrics: collectMetrics(metrics),
     lifecycleTrace: lifecycle.trace,
+    // GH #100 U4: present only when the warm-session path was configured; the reason of every reuse / discard / keep decision
+    ...(reuse ? { reuse: Object.freeze({ ...reuse }) } : {}),
   });
 }
 

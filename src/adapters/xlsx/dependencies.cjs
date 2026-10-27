@@ -17,18 +17,33 @@ const { addr } = require('./a1.cjs');
  *   objects      PUBLIC: per sheet { charts, pivots, names } (the W3c readers)
  * A reader that is absent, threw, or returned an unexpected shape is a reason string ('UNOBSERVABLE:..'),
  * never an empty list (owner rule). So is a reference that cannot be resolved: an unknown or ambiguous
- * name, a '#REF!', a sheet that does not exist, an external / structured reference, INDIRECT, a name
+ * name, a sheet that does not exist, an external / structured reference, INDIRECT, a name
  * whose text starts with '=' (W3e: the engine never resolves it), an unmeasured rule or series shape.
  * Anything UNOBSERVABLE makes the whole dependency set incomplete: delete and copy refuse before the write.
+ * A '#REF!' points at nothing: it is no dependency (dependencies.broken keeps where it sits, refOnTarget refuses it
+ * on the sheets a write changes).
  */
 
 /**
  * Conditional-format types whose reference-carrying getters were measured LIVE: xlExpression (W3e); xlCellValue
  * (W6 probe C1/C2, the whole-sheet public read: GetType / GetOperator / GetFormula1 / GetFormula2 / GetAppliesTo, in
  * session and after a reopen; M7 S1, owner GO 2026-09-30) -- only with the operators that read measured.
+ * GH #141 (docs/GH141-CF-DEPENDENCY-OBSERVABILITY-20261018.md): xlAboveAverageCondition / xlTop10 /
+ * xlUniqueValues added -- not a new measurement, a structural fact: cf.cjs's own doc comment records that
+ * these types' Formula1/Formula2 getters THROW (the engine has no formula concept for them), so there is
+ * nothing unmeasured to guess at; only appliesTo (already LIVE-measured for every CF type via cf.cjs's
+ * deleteBody) is read for them. xlColorScale / xlDatabar / xlIconSets stay OUT: their CFVO stops/criteria can
+ * be formula-typed in Excel, and no reader in this codebase has ever called the getter that would show it.
  */
-const MEASURED_CF_TYPES = Object.freeze(['xlExpression', 'xlCellValue']);
-const MEASURED_CELL_VALUE_OPERATORS = Object.freeze({ xlGreater: 1, xlBetween: 2 });
+const MEASURED_CF_TYPES = Object.freeze(['xlExpression', 'xlCellValue', 'xlAboveAverageCondition', 'xlTop10', 'xlUniqueValues']);
+// X-L13/7: the remaining six xlCellValue operators round-trip through BOTH readers this module
+// consumes (the whole-sheet `conditional` reader AND `cfReads`) after a reopen -- operator /
+// formula1 / formula2 byte-identical to what was written, on a dedicated sheet each. All eight of
+// Excel's xlFormatConditionOperator values are now measured; none remain to add.
+const MEASURED_CELL_VALUE_OPERATORS = Object.freeze({
+  xlGreater: 1, xlBetween: 2,
+  xlLess: 1, xlLessEqual: 1, xlGreaterEqual: 1, xlEqual: 1, xlNotEqual: 1, xlNotBetween: 2,
+});
 const ERROR_LITERALS = /#(N\/A|DIV\/0!|VALUE!|NAME\?|NUM!|NULL!|GETTING_DATA)/gi;
 const unobs = x => typeof x === 'string' && x.startsWith('UNOBSERVABLE');
 
@@ -39,8 +54,15 @@ const notAName = (id, next, prev) => next === '(' || /^[A-Za-z]{1,3}\d+$/.test(i
 function referenceText(text) {
   const toks = formula.tokenize(String(text).replace(/^=/, ''));
   if (!toks) return { problem: 'unparsable' };
-  const other = toks.map(t => (t.kind === 'other' ? t.text : ' ')).join('');
-  if (/#REF!/i.test(other)) return { problem: 'broken-reference' };
+  // A broken reference (#REF!, also with a trailing cell / range such as '#REF!A1' or '#REF!$A$1:$B$2', and with a sheet
+  // prefix such as 'Data!#REF!') points at NOTHING, so it is no dependency: the whole token is dropped and the rest of the
+  // formula is read as before. Only the TOKEN goes -- a trailing 'A1' is NOT left behind to be misread as a same-sheet reference.
+  // (formula.sheetRefs still names the 'Data' of 'Data!#REF!': a conservative sheet dependency, never a missing one.)
+  // L-18/1 measured the old rule (any #REF! made the whole workbook's dependencies incomplete) blocking every delete on a book
+  // that held one broken formula anywhere. Where a #REF! sits is kept in dependencies.broken: refOnTarget below.
+  const other = toks.map(t => (t.kind === 'other' ? t.text : ' ')).join('')
+    .replace(/(?:[A-Za-z_\u00C0-\uFFFF][\w.\u00C0-\uFFFF]*!)?#REF!(?:\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?|\$?[A-Z]{1,3}:\$?[A-Z]{1,3}|\$?\d+:\$?\d+)?/gi, ' ');
+  if (/#REF/i.test(other)) return { problem: 'broken-reference' };
   if (/\[/.test(other)) return { problem: 'external-or-structured-reference' };
   if (/\bINDIRECT\s*\(/i.test(other)) return { problem: 'indirect' };
   return { other };
@@ -92,7 +114,8 @@ function resolveRef(text, host, ctx, depth = 0, seen = new Set()) {
   if (depth > 8) return { problem: 'name-chain-too-deep' };
   const refs = formula.sheetRefs(`=${t}`);
   const uses = nameUses(t);
-  const early = !refs.ok ? 'unparsable' : refs.external ? 'external-or-structured-reference' : uses.problem;
+  // GH #298 C: a structured reference stays unresolvable here (its table's sheet is not read) -- fail-closed as before
+  const early = !refs.ok ? 'unparsable' : refs.external || refs.structured ? 'external-or-structured-reference' : uses.problem;
   if (early) return { problem: early };
   const sheets = new Set();
   for (const n of refs.names) {
@@ -170,13 +193,16 @@ function readerGaps(sheets, raw) {
 function collector(ctx) {
   const unobservable = [];
   const refs = [];
+  const broken = [];
   const note = (axis, why, host = null) => unobservable.push({ axis, why, host });
   const add = (kind, host, id, text) => {
+    // a #REF! is no dependency (referenceText drops it), but WHERE it sits is kept: refOnTarget decides per write
+    if (/#REF!/i.test(String(text || ''))) broken.push({ kind, host, name: id, text: String(text) });
     const r = resolveRef(text, host, ctx);
     if (r.problem) note(`${kind}:${host || '*'}:${id}`, `UNOBSERVABLE:${r.problem}`, host);
     else if (r.sheets.length) refs.push({ kind, host, name: id, sheets: r.sheets });
   };
-  return { unobservable, refs, note, add };
+  return { unobservable, refs, broken, note, add };
 }
 
 /** A chart series field: empty, a reference ('=...', measured), or an unmeasured shape (a gap). */
@@ -228,10 +254,25 @@ function analyze(sheets, cells, raw) {
   const rulesComplete = !gaps.validations && sheets.every(n => !gaps.conditional[n]);
   return {
     names: gaps.names ? null : raw.names.map(d => ({ name: d.name, ref: d.ref, scopeSheet: d.scopeSheet })),
-    dependencies: { complete: col.unobservable.length === 0, unobservable: col.unobservable, refs: col.refs },
+    dependencies: { complete: col.unobservable.length === 0, unobservable: col.unobservable, refs: col.refs, broken: col.broken },
     rules: { complete: rulesComplete, unobservable: col.unobservable.filter(u => u.axis === 'data-validation' || u.axis.startsWith('conditional-formatting:')),
       bySheet: rulesComplete ? Object.fromEntries(sheets.map(n => [n, rulesOf(raw.validations, gaps.cf, n)])) : null },
   };
 }
 
-module.exports = { analyze, resolveRef, nameUses, MEASURED_CF_TYPES };
+/**
+ * The ONE pre-write guard for a broken reference: a #REF! (cell formula, validation, conditional format, defined name,
+ * chart series, pivot source) hosted on a sheet the write changes -- copy_sheet: the copied sheet. What the engine does
+ * with such a text under the write (shift, delete, rename, copy) is not measured, so it is refused, named apart from the
+ * reader-gap refusals; a #REF! on any OTHER sheet is no dependency and does not block. Null when none; a workbook-level
+ * name (host null) sits on no sheet.
+ */
+function refOnTarget(deps, targets) {
+  const want = new Set((targets || []).filter(t => typeof t === 'string').map(t => t.toLowerCase()));
+  const list = deps && Array.isArray(deps.broken) ? deps.broken : null;
+  if (list === null) return { reason: 'xlsx-ref-on-target-unmeasured', refs: 'not-read' };
+  const hit = list.filter(b => b.host !== null && want.has(String(b.host).toLowerCase()));
+  return hit.length ? { reason: 'xlsx-ref-on-target-unmeasured', refs: hit.slice(0, 20), count: hit.length } : null;
+}
+
+module.exports = { analyze, resolveRef, nameUses, refOnTarget, MEASURED_CF_TYPES };

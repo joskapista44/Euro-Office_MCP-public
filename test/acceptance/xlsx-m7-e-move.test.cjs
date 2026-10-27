@@ -16,12 +16,10 @@ const book = (extraP = {}, extraQ = {}) => [
   { name: 'Q', cells: { B1: { v: 4, f: '=P!H2+1' }, A9: { v: 'keep' }, ...extraQ } },
 ];
 const NAMES = () => [{ name: 'N1', ref: 'P!$H$1:$H$2' }];
-const CELLS = [[{ t: 'number', v: '1' }], [{ t: 'formula', f: '=H1*3' }]];
-const move = (target, { targetSheet = 'P', cells = CELLS } = {}) => {
-  const end = target.replace(/\d+/, n => String(Number(n) + 1));
-  return { id: 'm7-e-r7', steps: [{ intent: 'move_range', sheet: 'P', range: 'H1:H2', target, ...(targetSheet !== 'P' ? { targetSheet } : {}),
-    expect: { version: 1, fileId: 'disposable', source: { sheet: 'P', range: 'H1:H2' }, target: { sheet: targetSheet, range: `${target}:${end}` }, cells } }] };
-};
+// L-06/b: the caller no longer supplies `expect` -- classify() builds it from the SAME fixture's own
+// cell content (the book()/custom-cells setup at each call site already IS the pre-move state).
+const move = (target, { targetSheet = 'P' } = {}) =>
+  ({ id: 'm7-e-r7', steps: [{ intent: 'move_range', sheet: 'P', range: 'H1:H2', target, ...(targetSheet !== 'P' ? { targetSheet } : {}) }] });
 
 async function run(store, t, script = {}) {
   let n = 0;
@@ -35,7 +33,7 @@ const op = result => result.execution.appliedOperations[0];
 const reason = result => op(result).evidence.evidence.reason;
 const withNames = b => { const s = createStore(b); s.names = NAMES(); return s; };
 
-test('R7: a block referenced in every measured shape moves; every reference and the name follow; retry SATISFIED 0/0', async () => {
+test('R7: a block referenced in every measured shape moves; every reference and the name follow; the reopened retry is REFUSED named, 0/0 (L-06/b: never SATISFIED)', async () => {
   const store = withNames(book());
   const a = await run(store, move('J5'));
   assert.equal(a.result.ok, true, JSON.stringify([op(a.result).evidence, a.result.execution.primitiveVerification, a.result.execution.preservationVerification]));
@@ -44,7 +42,8 @@ test('R7: a block referenced in every measured shape moves; every reference and 
   assert.equal(store.names[0].ref, 'P!$J$5:$J$6');
   const again = await run(store, move('J5'));
   assert.equal(again.m.commands, 0);
-  assert.equal(op(again.result).status, OPERATION_STATUS.SATISFIED);
+  assert.equal(again.result.ok, false);
+  assert.equal(reason(again.result), 'xlsx-move-already-applied-not-provable');
 });
 
 test('R7: a cross-sheet move gives a bare reference the target sheet', async () => {
@@ -52,8 +51,7 @@ test('R7: a cross-sheet move gives a bare reference the target sheet', async () 
   b[0].cells = { H1: { v: 1 }, H2: { v: 3 }, C2: { v: 6, f: '=H2*2' } };
   b[1].cells = { A9: { v: 'keep' } };
   const store = createStore(b);
-  const cells = [[{ t: 'number', v: '1' }], [{ t: 'number', v: '3' }]];
-  const a = await run(store, move('D1', { targetSheet: 'Q', cells }));
+  const a = await run(store, move('D1', { targetSheet: 'Q' }));
   assert.equal(a.result.ok, true, JSON.stringify([op(a.result).evidence, a.result.execution.preservationVerification]));
   assert.equal(S(store, 'P').C2.f, '=Q!D2*2');
 });
@@ -77,7 +75,7 @@ test('R7 RED: the editor leaves an outside reference where it was (no name invol
 for (const [name, b, t, why] of [
   ['a reference that only partly overlaps the block', book({ C5: { v: 4, f: '=SUM(H1:H3)' } }), move('J5'), 'partial-or-whole-line-reference'],
   ['a whole-row reference into the block', book({ C5: { v: 4, f: '=SUM(1:1)' } }), move('J5'), 'partial-or-whole-line-reference'],
-  ['a sheet-qualified reference into a block moved to another sheet', (() => { const x = book(); x[0].cells = { H1: { v: 1 }, H2: { v: 3 } }; return x; })(), move('D1', { targetSheet: 'Q', cells: [[{ t: 'number', v: '1' }], [{ t: 'number', v: '3' }]] }), 'qualified-reference-into-a-block-moved-to-another-sheet'],
+  ['a sheet-qualified reference into a block moved to another sheet', (() => { const x = book(); x[0].cells = { H1: { v: 1 }, H2: { v: 3 } }; return x; })(), move('D1', { targetSheet: 'Q' }), 'qualified-reference-into-a-block-moved-to-another-sheet'],
   ['an inner reference of a block moved to another sheet', (() => { const x = book(); x[0].cells = { H1: { v: 1 }, H2: { v: 3, f: '=H1*3' } }; x[1].cells = { A9: { v: 'keep' } }; return x; })(), move('D1', { targetSheet: 'Q' }), 'inner-reference-of-a-block-moved-to-another-sheet'],
 ]) {
   test(`R7 refused before the write: ${name}`, async () => {

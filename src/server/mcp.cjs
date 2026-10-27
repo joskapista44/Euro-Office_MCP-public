@@ -53,8 +53,11 @@ function createMcpServer({ tools, info, log, input = process.stdin, output = pro
         const name = params && params.name;
         const tool = tools[name];
         if (!tool) { fail(id, -32602, `Unknown tool: ${name}`); return; }
+        const t0 = Date.now();
         try {
           const out = await tool.handler((params && params.arguments) || {});
+          // GH #76: the wall time of every call (the tool, its outcome code -- no arguments, no content)
+          log.info('tool call', { tool: name, ms: Date.now() - t0, ok: !!(out && out.ok), code: (out && out.code) || null });
           reply(id, { content: [{ type: 'text', text: JSON.stringify(out, null, 2) }], structuredContent: out, isError: false });
         } catch (e) {
           log.error('tool failed', { tool: name, error: String(e && e.message || e) });

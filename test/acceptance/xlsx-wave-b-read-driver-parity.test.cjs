@@ -224,18 +224,81 @@ test('B13 gaps and the stated deviations: model gap stays a gap; a non-string re
   assert.deepEqual([d1.dataRef, d2.dataRef], ['UNOBSERVABLE:BRIDGE:pivot-name-ambiguous', 'UNOBSERVABLE:BRIDGE:pivot-name-ambiguous'], 'never one picked for the other');
 });
 
+// X-O10 r6 (zero LIVE): the data field's aggregation FUNCTION + the pivot field's
+// layout-form state, both now read alongside dataRef/proof above -- same pivotBook/newPivots
+// harness, with GetFunction/GetLayoutForm/GetLayoutCompactRow/GetLayoutSubtotals added to the
+// field mocks only where a test needs them (pivotBook's own fields stay untouched elsewhere).
+function pivotWithFields(dataFields, pivotFields) {
+  const grid = v => ({ GetAddress: () => 'A1:B2', GetValue: () => v });
+  const p = {
+    GetName: () => 'P', GetSource: () => ({ GetAddress: () => 'H!$A$1:$B$2' }),
+    GetTableRange1: () => grid([['a', 'b']]), GetDataBodyRange: () => grid([['1']]),
+    GetPivotFields: () => pivotFields, GetRowFields: () => [], GetColumnFields: () => [], GetDataFields: () => dataFields,
+    pivot: { asc_getDataRef: () => 'Data!$A$1:$B$2' },
+  };
+  const h = { GetName: () => 'H', GetIndex: () => 0, GetUsedRange: () => null, GetAllPivotTables: () => [p], GetRange: () => grid([['k', 'v']]) };
+  const data = { GetName: () => 'Data', GetIndex: () => 1, GetUsedRange: () => null, GetAllPivotTables: () => [], GetRange: () => grid([['k', 'v']]) };
+  return { GetSheets: () => [h, data], GetSheet: n => [h, data].find(s => s.GetName() === n), WorksheetFunction: { COUNT: () => 0 } };
+}
+
+test('X-O10 r6: functions (GetFunction per data field) and fieldLayout (GetLayoutForm/CompactRow/Subtotals per pivot field), well-behaved mocks', () => {
+  const Api = pivotWithFields(
+    // GH #302 G3: + GetSourceName (the data field's source field, read beside its function)
+    [{ GetName: () => 'Sum of Sales', GetFunction: () => -4157, GetSourceName: () => 'Sales' }],
+    [{ GetName: () => 'Region', GetLayoutForm: () => 0, GetLayoutCompactRow: () => true, GetLayoutSubtotals: () => true }],
+  );
+  installBridge(Api);
+  const pv = newPivots(Api).H.pivots[0];
+  assert.deepEqual(pv.functions, [{ name: 'Sum of Sales', function: -4157, field: 'Sales' }]);
+  assert.deepEqual(pv.fieldLayout, [{ name: 'Region', form: 0, compactRow: true, subtotals: true }]);
+});
+
+test('X-O10 r6: a per-field getter throwing names ONLY that field, the rest of the list stays intact', () => {
+  const Api = pivotWithFields(
+    [{ GetName: () => 'X', GetFunction: () => { throw new Error('only on a data field'); } }],
+    [
+      { GetName: () => { throw new Error('boom'); }, GetLayoutForm: () => 0, GetLayoutCompactRow: () => true, GetLayoutSubtotals: () => true },
+      { GetName: () => 'Year', GetLayoutForm: () => { throw new Error('nope'); }, GetLayoutCompactRow: () => false, GetLayoutSubtotals: () => false },
+    ],
+  );
+  installBridge(Api);
+  const pv = newPivots(Api).H.pivots[0];
+  assert.equal(pv.functions[0].name, 'X');
+  assert.match(pv.functions[0].function, /^UNOBSERVABLE:Error: only on a data field/);
+  assert.match(pv.fieldLayout[0].name, /^UNOBSERVABLE:Error: boom/);
+  assert.deepEqual([pv.fieldLayout[0].compactRow, pv.fieldLayout[0].subtotals], [true, true], 'the name throwing does not hide its siblings');
+  assert.equal(pv.fieldLayout[1].name, 'Year');
+  assert.match(pv.fieldLayout[1].form, /^UNOBSERVABLE:Error: nope/);
+  assert.deepEqual([pv.fieldLayout[1].compactRow, pv.fieldLayout[1].subtotals], [false, false]);
+});
+
+test('X-O10 r6: GetDataFields/GetPivotFields returning a non-array (no .map) is the WHOLE field named UNOBSERVABLE, not a crash', () => {
+  const Api = pivotWithFields({ weird: true }, 'nope');
+  installBridge(Api);
+  const pv = newPivots(Api).H.pivots[0];
+  assert.match(pv.functions, /^UNOBSERVABLE:/);
+  assert.match(pv.fieldLayout, /^UNOBSERVABLE:/);
+});
+
 // ---- the /3 runtime ----
 test('a /3 runtime refuses every migrated axis -- the shipped old.txt block AND the /4 block reporting /3; no direct-read fallback', () => {
   const { cells, Api: aApi } = alignBook({ A1: AL() });
   const pApi = printBook({ D: printModel() });
   const vApi = pivotBook({ H: [['P', 'Data!$A$1:$B$2', true]], Data: [] });
-  for (const [label, wrap] of [['old.txt /3', api => installV3(api)], ['/4 reporting /3', api => { installBridge(api); return withPatch(api); }]]) {
+  // DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): old.txt (historical 9.3.4.60, documentServerVersion
+  // 9.3.4) now fails at the RUNTIME level -- 9.3.4 is not accepted at all, not just the wrong patch. The /4-reporting-/3
+  // wrap (installBridge -> withPatch) inherits documentServerVersion 9.3.5 from the now-9.3.5-reporting installBridge(),
+  // so it still fails at the PATCH level, as before.
+  for (const [label, wrap, reason] of [
+    ['old.txt /3', api => installV3(api), 'UNOBSERVABLE:RUNTIME_VERSION_MISMATCH'],
+    ['/4 reporting /3', api => { installBridge(api); return withPatch(api); }, 'UNOBSERVABLE:PATCH_VERSION_MISMATCH'],
+  ]) {
     const a = newAlign(wrap({ ...aApi }), 'A1');
-    for (const k of KEYS) assert.equal(a[k], 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', `${label} ${k}`);
-    assert.equal(newPrint(wrap({ ...pApi }), true).D, 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', `${label} print`);
+    for (const k of KEYS) assert.equal(a[k], reason, `${label} ${k}`);
+    assert.equal(newPrint(wrap({ ...pApi }), true).D, reason, `${label} print`);
     const pv = newPivots(wrap({ ...vApi })).H.pivots[0];
-    assert.equal(pv.dataRef, 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', `${label} pivot`);
-    assert.equal(pv.proof, 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', `${label} proof`);
+    assert.equal(pv.dataRef, reason, `${label} pivot`);
+    assert.equal(pv.proof, reason, `${label} proof`);
   }
   assert.ok(cells.A1, 'fixture sanity');
 });

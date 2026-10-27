@@ -1,7 +1,7 @@
 {
- "generated": "2026-10-10",
- "repo_head": "de3ab87e08c517560a1e5ed836b49eaf1f16bea8",
- "repo_head_note": "Census assembled against be98da7 (the dispatched HEAD); the worktree moved to de3ab87 during the census (a maintainer, 2026-10-10 09:49, scripts/build-artifact.cjs + 4 test files, tmp-dir hygiene). git diff --stat be98da7..de3ab87 touches NO cited file (src/, docs/, the cited test/live harnesses unchanged).",
+ "generated": "2026-10-14",
+ "repo_head": "a25d159a29d2bd785c317ffaf7374f1dfe17642c",
+ "repo_head_note": "L-06/b (2026-10-15, owner decision KER): RETRY_EVIDENCE of move_range replaced (the M10 G3_MOVE retry-SATISFIED pair is stale for this one axis -- the caller no longer supplies `expect`; classify() builds it server-side from the same observation that proves APPLIED, so a retry against an already-moved source is now a NAMED REFUSAL xlsx-move-already-applied-not-provable, never SATISFIED), and CLASS_REASON updated to name this and cite the release-l06b LIVE harness (test/live/release-l06b-move-range-product.live.cjs, not yet run as of this edit); the class stays ACCEPTED_WRITE and the other five axes are unchanged, patched by hand because gen-census.cjs is pinned to external checkouts (the same text is in the generator). L-06 (2026-10-15, owner decision L-06): CLASS_REASON of copy_range extended with the L-06 LIVE measurement (docs/evidence/l06-range-copy-fail-closed-20261015/) of the release's new write shapes; the class stays ACCEPTED_WRITE and every axis is unchanged, patched by hand because gen-census.cjs is pinned to external checkouts (the same text is in the generator). L-07 (2026-10-15, owner decision L-07): FAIL_CLOSED_EVIDENCE added for set_chart and PRESERVATION_EVIDENCE for set_chart_legend (docs/evidence/l07-charts-fail-closed-20261015/) -> both ACCEPTED_WRITE, patched by hand in these rows because gen-census.cjs is pinned to external checkouts (the same entries are in the generator); every other row unchanged. L-05/2 (2026-10-15, owner decision L-05): FAIL_CLOSED_EVIDENCE added for move_sheet (docs/evidence/l05-sheets-fail-closed-20261015/) -> ACCEPTED_WRITE, patched by hand in this row because gen-census.cjs is pinned to external checkouts (the same FC entry is in the generator); every other row unchanged. L-04 (2026-10-15, owner decision 2026-10-14): FAIL_CLOSED_EVIDENCE added for insert_columns (docs/evidence/l04-columns-fail-closed-20261015/) -> ACCEPTED_WRITE, patched by hand in this row because gen-census.cjs is pinned to external checkouts (the same FC entry is in the generator); every other row unchanged. W1e (2026-10-14, GH #106): FAIL_CLOSED_EVIDENCE added for clear_range (docs/evidence/w1e-clear-range-fail-closed-20261014/) -> ACCEPTED_WRITE; every other row unchanged. W1d (2026-10-13): FAIL_CLOSED_EVIDENCE added for the 11 W1c census-PARTIAL intents (docs/evidence/w1c-fail-closed-20261013/), set_chart_axis_title/set_chart_legend axes refreshed from stale 2026-10-06/07 runs to the same W1c run. 10 of the 11 move to ACCEPTED_WRITE; set_chart_legend stays PARTIAL (PRESERVATION_EVIDENCE still NONE_FOUND -- the xo04 harness never cites L3). Every OTHER row is unchanged from the prior census (diffed row-for-row against it). Prior provenance note, kept for history: \"Census assembled against be98da7 (the dispatched HEAD); the worktree moved to de3ab87 during the census (a maintainer, 2026-10-10 09:49, scripts/build-artifact.cjs + 4 test files, tmp-dir hygiene). git diff --stat be98da7..de3ab87 touches NO cited file (src/, docs/, the cited test/live harnesses unchanged).\" || L-05/3 (2026-10-15, owner decision the owner owner channel \"A\"): copy_sheet TEMPORARY_BOUNDARY -> ACCEPTED_WRITE (the B03 boundary lifted; DIRECT_INTERNAL_DEPENDENCY none: the write path is the DS Bridge WRITE worksheet.copy/v1), legacy_dependents.B03 emptied; patched by hand because gen-census.cjs is pinned to external checkouts (the same change is in the generator); every other row unchanged. L-06 (2026-10-15, owner decision L-06): CLASS_REASON of copy_range extended with the L-06 LIVE measurement (docs/evidence/l06-range-copy-fail-closed-20261015/) of the release's new write shapes; the class stays ACCEPTED_WRITE and every axis is unchanged, patched by hand because gen-census.cjs is pinned to external checkouts (the same text is in the generator). L-07 (2026-10-15, owner decision L-07): FAIL_CLOSED_EVIDENCE added for set_chart and PRESERVATION_EVIDENCE for set_chart_legend (docs/evidence/l07-charts-fail-closed-20261015/) -> both ACCEPTED_WRITE, patched by hand in these rows because gen-census.cjs is pinned to external checkouts (the same entries are in the generator); every other row unchanged. L-05/2 (2026-10-15, owner decision L-05): FAIL_CLOSED_EVIDENCE added for move_sheet (docs/evidence/l05-sheets-fail-closed-20261015/) -> ACCEPTED_WRITE, patched by hand in this row because gen-census.cjs is pinned to external checkouts (the same FC entry is in the generator); every other row unchanged. L-04 (2026-10-15, owner decision 2026-10-14): FAIL_CLOSED_EVIDENCE added for insert_columns (docs/evidence/l04-columns-fail-closed-20261015/) -> ACCEPTED_WRITE, patched by hand in this row because gen-census.cjs is pinned to external checkouts (the same FC entry is in the generator); every other row unchanged. W1e (2026-10-14, GH #106): FAIL_CLOSED_EVIDENCE added for clear_range (docs/evidence/w1e-clear-range-fail-closed-20261014/) -> ACCEPTED_WRITE; every other row unchanged. W1d (2026-10-13): FAIL_CLOSED_EVIDENCE added for the 11 W1c census-PARTIAL intents (docs/evidence/w1c-fail-closed-20261013/), set_chart_axis_title/set_chart_legend axes refreshed from stale 2026-10-06/07 runs to the same W1c run. 10 of the 11 move to ACCEPTED_WRITE; set_chart_legend stays PARTIAL (PRESERVATION_EVIDENCE still NONE_FOUND -- the xo04 harness never cites L3). Every OTHER row is unchanged from the prior census (diffed row-for-row against it). Prior provenance note, kept for history: \"Census assembled against be98da7 (the dispatched HEAD); the worktree moved to de3ab87 during the census (a maintainer, 2026-10-10 09:49, scripts/build-artifact.cjs + 4 test files, tmp-dir hygiene). git diff --stat be98da7..de3ab87 touches NO cited file (src/, docs/, the cited test/live harnesses unchanged).\"",
  "rows": [
   {
    "FORMAT": "DOCX",
@@ -478,10 +478,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w1b-clear-range.live.cjs:156-159 G3_FIRST+G3_INDEPENDENT+G4_RETRY: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w1b-clear-range.live.cjs:156-159 G3_FIRST+G3_INDEPENDENT+G4_RETRY: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w1b-clear-range.live.cjs:156-159 G3_FIRST+G3_INDEPENDENT+G4_RETRY: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w1b-clear-range.live.cjs:156-159 (G3_FIRST requires l3 PASS + FORCESAVE_CONFIRMED; G3_INDEPENDENT format/bold kept; G4_RETRY SATISFIED 0/0))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-clear-range-fail-closed.live.cjs:40,51 G_MERGED_REFUSED: refused00 xlsx-clear-in-merged-area-refused | :41,52 G_SHEET_REFUSED: refused00 xlsx-sheet-not-found (docs/evidence/w1e-clear-range-fail-closed-20261014/README.md | docs/evidence/w1e-clear-range-fail-closed-20261014/w1e-fc-r1.json, VERDICT PASS)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: S32 cap)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: S32 cap)."
   },
   {
    "FORMAT": "XLSX",
@@ -558,10 +558,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w4-appearance.live.cjs:125 G3_FREEZE_ROWS / G3_FREEZE_ROWS_AND_COLUMNS (non-inert branch): SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w4-appearance.live.cjs:125 G3_FREEZE_ROWS / G3_FREEZE_ROWS_AND_COLUMNS (non-inert branch): same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w4-appearance.live.cjs:125 G3_FREEZE_ROWS / G3_FREEZE_ROWS_AND_COLUMNS (non-inert branch): applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w4-appearance.live.cjs:133 G6_FREEZE_GUARD_NOT_FOUND: refused(GUARD_FREEZE_NOT_FOUND) xlsx-sheet-not-found, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-w4-r1.json)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: X-L08/L09/L10). UNSURE: w4 has a refusal gate only on the inert branch (own-pane reader unproven, w4:124); the measured branch has no refusal case."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: X-L08/L09/L10)."
   },
   {
    "FORMAT": "XLSX",
@@ -574,10 +574,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w4-appearance.live.cjs:125 G3_UNFREEZE (non-inert branch): SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w4-appearance.live.cjs:125 G3_UNFREEZE (non-inert branch): same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w4-appearance.live.cjs:125 G3_UNFREEZE (non-inert branch): applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w4-appearance.live.cjs:134 G6_UNFREEZE_GUARD_NOT_FOUND: refused(GUARD_UNFREEZE_NOT_FOUND) xlsx-sheet-not-found, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-w4-r1.json)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: --)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: ACCEPTED (limit: --)."
   },
   {
    "FORMAT": "XLSX",
@@ -622,10 +622,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:168 G3_INSERT_COLUMNS: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:168 G3_INSERT_COLUMNS: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:168 G3_INSERT_COLUMNS: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/l04-columns-measure.live.cjs LAST2/CHI: refused 0/0 xlsx-observation-truncated (docs/evidence/l04-columns-fail-closed-20261015/README.md | docs/evidence/l04-columns-fail-closed-20261015/l04-measure-r2.json, VERDICT MEASURED)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: as insert_rows)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression; FAIL_CLOSED from the L-04 LIVE measurement (docs/evidence/l04-columns-fail-closed-20261015), not from the M10 final regression. M11.0 checkpoint: PARTIAL (limit: as insert_rows)."
   },
   {
    "FORMAT": "XLSX",
@@ -657,7 +657,7 @@
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-s1.live.cjs:118 G_GUARD_COPY_NAME | test/live/xlsx-m7-s1.live.cjs:120-122 G_NEG_READER_THROWS / G_NEG_READER_PARTIAL / G_GUARD_INDIRECT (observation incomplete -> refused) | test/live/xlsx-m7-s1.live.cjs:124-125 G_L3_NEG_NAME / G_L3_NEG_RULE | test/live/xlsx-w5-w9-families.live.cjs:172 G6_COPY_GUARD_OCCUPIED | test/live/xlsx-m7-s32b.live.cjs:165,173 NC_10K / FI_49K negative arms refused 0/0",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
    "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
-   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: name/rule-reached block, occupied target refused)."
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: name/rule-reached block, occupied target refused). L-06 (2026-10-15): the release's new write shapes -- the explicit formula write after the Copy and the cross-sheet copy without the editor's Copy (typed values + planner formulas; the format is not carried, notProven) -- are covered by the L-06 LIVE measurement (docs/evidence/l06-range-copy-fail-closed-20261015), not by the M10 rows; the axes above are unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -668,12 +668,12 @@
    "LIVE_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:175 G3_MOVE: FIRST APPLIED/LIVE_VERIFY; row XLSX-w5-w9-families PASS in M10 final regression | docs/evidence/M10-RC-ACCEPTANCE-INDEX-20261009.md#6 (FINAL_REGRESSION_PASS=64/66, run on the RC 0afec191 artifact code)",
    "PERSISTENCE_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:175 G3_MOVE: applied() requires persistenceState=FORCESAVE_CONFIRMED (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158))",
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:175 G3_MOVE: SECOND run in a NEW editor session observes the target state (SATISFIED)",
-   "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:175 G3_MOVE: same task re-run -> SATISFIED, writes=0 commands=0",
+   "RETRY_EVIDENCE": "test/live/release-l06b-move-range-product.live.cjs verdict() <key>_retry_refused_not_satisfied -- a reopened retry against an already-moved (blank) source is refused xlsx-move-already-applied-not-provable, 0 writes 0 commands (NEVER SATISFIED; classify() short-circuits before dependentGuard/classifyMove, src/adapters/xlsx/families/range.cjs) (L-06/b, owner decision 2026-10-15; supersedes the stale M10 G3_MOVE retry-SATISFIED pair for this axis)",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:175 G3_MOVE: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158))",
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-s1.live.cjs:119 G_GUARD_MOVE_CF | test/live/xlsx-m7-e.live.cjs:168 G_NEG_PARTIAL_REFERENCE_REFUSED | test/live/xlsx-m7-e.live.cjs:170 G_NEG_REPOINTED_REWRITTEN_NOT_APPLIED | test/live/xlsx-w5-w9-families.live.cjs:176-177 G6_MOVE_GUARD_TARGET_DIFFERS / G6_MOVE_GUARD_OTHER_DOCUMENT",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
    "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
-   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: partly referenced / overlap refused; only step)."
+   "CLASS_REASON": "five axes (LIVE, PERSISTENCE, REOPEN, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: partly referenced / overlap refused; only step). L-06/b (2026-10-15, owner decision): the RETRY axis changed -- the caller no longer supplies `expect`; it is built server-side from the same observation that proves APPLIED, and a retry against an already-moved source is now a NAMED REFUSAL, never SATISFIED. The M10 G3_MOVE retry-SATISFIED pair is STALE for this one axis; current RETRY evidence is the release-l06b LIVE harness (see RETRY_EVIDENCE), not the M10 row. The other five axes are unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -702,10 +702,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:180 G3_VALIDATION_SET: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:180 G3_VALIDATION_SET: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:180 G3_VALIDATION_SET: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:191 G6_VALIDATION_SET_GUARD_NOT_FOUND: refused(GUARD_VALID_SET_NOT_FOUND) xlsx-sheet-not-found, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-w5w9-r1.json, VERDICT PASS)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: date/custom refused; modify refused)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: date/custom refused; modify refused). L-22a (this release): + type 'time' -- min/max/value as 24-hour text, min<=max as a day-fraction order (not re-derived here), the read-back AM/PM-or-24h locale text parsed back for the L1/retry compare -- an unparseable text is a NAMED gap (xlsx-validation-time-unparseable), never guessed. The six axes above are UNCHANGED (wholeNumber-type measurement, M10 final regression); the type 'time' evidence is family-level: the L-22 probe (test/live/xlsx-l22-validation-types-probe.live.cjs, MEASURED_OK) + test/acceptance/xlsx-m7-d-rules.test.cjs's own R17 time cases. UNSURE: the product-level LIVE for type 'time' (test/live/release-l22a-validation-time-product.live.cjs) is NEW with this release and its run is PENDING, not yet executed through the installed product MCP. L-22b (same standing GO; the same L-22 probe, custom, MEASURED): + type 'custom' -- NO operator, a single `formula` whose every cell/range reference must be bare (same sheet) and fully absolute ($COL$ROW); a relative/mixed reference, another sheet, an external/array '[' syntax, a defined name, INDIRECT/OFFSET or any other function are ALL refused, named (absoluteOnlyProblem()), never guessed -- none of those is measured. L1/retry compares formula1 through formula.cjs's own canonical() (the SAME helper range.cjs/structure.cjs/sheet-copy.cjs already use), not a bare string, since the editor re-renders the formula ('= ' + case/space canonicalization). Family-level evidence: the L-22 probe (custom, MEASURED: relative re-anchors, absolute stays unchanged, session=reopen) + test/acceptance/xlsx-m7-d-rules.test.cjs's own R17 custom cases. UNSURE: the product-level LIVE for type 'custom' (test/live/release-l22b-validation-custom-product.live.cjs) is NEW with this release and its run is PENDING, not yet executed through the installed product MCP. L-22d v2 (this release): + type 'date' -- min/max/value as ISO 'YYYY-MM-DD' text, ANY real calendar date 1900-03-01..9999-12-31, written as the 1900-system serial. Identity (L1/retry) is the DS Bridge rules.bySheet row's raw serial (dependencies.cjs rulesOf()), never the locale-ambiguous public GetFormula1 text -- the L-22d bridge probe (agents/an internal branch/euro-mcp-l22d-date-probe-20261017/l22d-r1.out, MEASURED, canonical: BRIDGE_SERIAL) found the bridge carries the written serial for EVERY date, including the genuinely ambiguous one, session and reopen, FILE x14 too -- so the v1 locale-readability restriction (day above 12 or day==month) is lifted. The public text is a secondary cross-check only: a parseable reading that disagrees with the bridge is xlsx-validation-date-read-conflict, unparseable text is ignored. A pre-existing rule whose bridge serial differs is the existing xlsx-validation-exists-different; the bridge axis itself unobservable is the existing xlsx-validation-rules-unobservable. Evidence: docs/L22D-VALIDATION-DATE-ANALYSIS.md + docs/L22D-VALIDATION-DATE-RELEASE.md + test/acceptance/xlsx-m7-d-rules.test.cjs and l22d-validation-date-release.test.cjs. UNSURE: no product-level LIVE for type 'date' exists yet."
   },
   {
    "FORMAT": "XLSX",
@@ -718,10 +718,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:181 G3_VALIDATION_CLEAR: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:181 G3_VALIDATION_CLEAR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:181 G3_VALIDATION_CLEAR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:193 G6_VALIDATION_CLEAR_GUARD_NOT_FOUND: refused(GUARD_VALID_CLEAR_NOT_FOUND) xlsx-sheet-not-found, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-w5w9-r1.json)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: rule beyond target refused)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: rule beyond target refused)."
   },
   {
    "FORMAT": "XLSX",
@@ -750,10 +750,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:183 G3_CF_DELETE: SECOND run in a NEW editor session observes the target state (SATISFIED) | test/live/xlsx-m7-o01-cf-slice.live.cjs:172-183 G_*_DEL_PAIR: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:183 G3_CF_DELETE: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-o01-cf-slice.live.cjs:172-183 G_*_DEL_PAIR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:183 G3_CF_DELETE: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158)) | test/live/xlsx-m7-o01-cf-slice.live.cjs:172-183 G_*_DEL_PAIR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-o01-cf-slice.live.cjs:164)",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:196 G6_CF_DELETE_GUARD_NOT_FOUND: refused(GUARD_CF_DELETE_NOT_FOUND) xlsx-sheet-not-found, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-w5w9-r1.json)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: unidentifiable rule type)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: unidentifiable rule type)."
   },
   {
    "FORMAT": "XLSX",
@@ -782,10 +782,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:185 G3_FILTER_CLEAR: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:185 G3_FILTER_CLEAR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:185 G3_FILTER_CLEAR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:199 G6_FILTER_CLEAR_GUARD_NOT_FOUND: refused(GUARD_FILTER_CLEAR_NOT_FOUND) xlsx-sheet-not-found, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-w5w9-r1.json)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: borderline: also unhides manual rows)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: ACCEPTED (limit: borderline: also unhides manual rows)."
   },
   {
    "FORMAT": "XLSX",
@@ -846,10 +846,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-m7-f.live.cjs:112 G_Q2_AREA_CLEAR_PAIR: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-m7-f.live.cjs:112 G_Q2_AREA_CLEAR_PAIR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-m7-f.live.cjs:112 G_Q2_AREA_CLEAR_PAIR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-f.live.cjs:101)",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-f.live.cjs:123 G6_CLEAR_AREA_GUARD_NOT_FOUND: refused00(CAC_NOT_FOUND) xlsx-sheet-not-found, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-m7f-r1.json, VERDICT PASS)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: --)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: ACCEPTED (limit: --)."
   },
   {
    "FORMAT": "XLSX",
@@ -878,10 +878,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-m7-f.live.cjs:114 G_Q5_TITLES_CLEAR_PAIR: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-m7-f.live.cjs:114 G_Q5_TITLES_CLEAR_PAIR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-m7-f.live.cjs:114 G_Q5_TITLES_CLEAR_PAIR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-f.live.cjs:101)",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "GH #138 U2 (product-release): test/live/release-gh138-u2-print-titles-product.live.cjs:95,128 noSheet: clear_print_titles on a sheet that was never created refused xlsx-sheet-not-found, 0 write | test/acceptance/gh138-u2-print-titles-release.test.cjs 'a nonexistent sheet is refused named xlsx-sheet-not-found' (offline, fake editor)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: --)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: --). GH #138 U2 (maintainer, product-release round): the missing FAIL_CLOSED_EVIDENCE supplied (see above) -- the other five axes were already cited and are unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -894,10 +894,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:357-358 G3_CREATE + G4_CREATE: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:357-358 G3_CREATE + G4_CREATE: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:357-358 G3_CREATE + G4_CREATE: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187)",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:368 G6_CREATE_GUARD_NAME_TAKEN: refused(GUARD_CREATE_NAME_TAKEN) xlsx-create-name-taken-by-a-non-empty-sheet, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-w3-r1.json)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: measured name class)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: measured name class)."
   },
   {
    "FORMAT": "XLSX",
@@ -942,26 +942,26 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:362-364 G3_MOVE + G4_MOVE + G3_MOVE_ORDER: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:362-364 G3_MOVE + G4_MOVE + G3_MOVE_ORDER: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:362-364 G3_MOVE + G4_MOVE + G3_MOVE_ORDER: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187)",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/l05-sheets-measure.live.cjs MOV_SELF / MOV_NOREF: refused 0/0 (refused before dispatch: a sheet cannot be moved relative to itself | xlsx-move-reference-not-found) (docs/evidence/l05-sheets-fail-closed-20261015/README.md | docs/evidence/l05-sheets-fail-closed-20261015/l05-measure.json, the move_sheet arms; the harness VERDICT is MEASURED_INCOMPLETE only for the MOV_BOTH arm)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: --)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression; FAIL_CLOSED from the L-05 LIVE measurement (docs/evidence/l05-sheets-fail-closed-20261015), not from the M10 final regression. M11.0 checkpoint: ACCEPTED (limit: --)."
   },
   {
    "FORMAT": "XLSX",
    "INTENT": "copy_sheet",
    "READ_WRITE": "WRITE",
    "CURRENT_STATUS": "ROUTED_BY_ADAPTER (M6/M7; released only via the final regression + EXPOSED_CAPABILITY_TOOLS) (src/server/tools.cjs:66 capabilityInventory)",
-   "PUBLIC_OR_BRIDGE": "INTERNAL(B03)",
+   "PUBLIC_OR_BRIDGE": "BRIDGE (worksheet.copy/v1, a DS Bridge WRITE; the B03 direct internals were removed, M11.5c.4/5)",
    "LIVE_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:382-383 G6_COPY_APPLIED + G4_COPY: FIRST APPLIED/LIVE_VERIFY; row XLSX-w3-sheets PASS in M10 final regression | test/live/xlsx-b03-copy-retry-interrupted.live.cjs:185-187,189 G_RETRY_FIRST_APPLIED / SECOND_SATISFIED_0_0 / FILE_UNCHANGED / SOURCE_PRESERVED: FIRST APPLIED/LIVE_VERIFY; row NOT_A_M10_ROW (B03 exit run, docs/evidence/b03-copy-acceptance-20261009/run2-PASS.json; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B03 exit) | docs/evidence/M10-RC-ACCEPTANCE-INDEX-20261009.md#6 (FINAL_REGRESSION_PASS=64/66, run on the RC 0afec191 artifact code)",
    "PERSISTENCE_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:382-383 G6_COPY_APPLIED + G4_COPY: applied() requires persistenceState=FORCESAVE_CONFIRMED (test/live/xlsx-w3-sheets.live.cjs:185-187) | test/live/xlsx-b03-copy-retry-interrupted.live.cjs:185-187,189 G_RETRY_FIRST_APPLIED / SECOND_SATISFIED_0_0 / FILE_UNCHANGED / SOURCE_PRESERVED: applied() requires persistenceState=FORCESAVE_CONFIRMED (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported))",
    "REOPEN_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:382-383 G6_COPY_APPLIED + G4_COPY: SECOND run in a NEW editor session observes the target state (SATISFIED) | test/live/xlsx-b03-copy-retry-interrupted.live.cjs:185-187,189 G_RETRY_FIRST_APPLIED / SECOND_SATISFIED_0_0 / FILE_UNCHANGED / SOURCE_PRESERVED: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:382-383 G6_COPY_APPLIED + G4_COPY: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-b03-copy-retry-interrupted.live.cjs:185-187,189 G_RETRY_FIRST_APPLIED / SECOND_SATISFIED_0_0 / FILE_UNCHANGED / SOURCE_PRESERVED: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:382-383 G6_COPY_APPLIED + G4_COPY: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187) | test/live/xlsx-b03-copy-retry-interrupted.live.cjs:185-187,189 G_RETRY_FIRST_APPLIED / SECOND_SATISFIED_0_0 / FILE_UNCHANGED / SOURCE_PRESERVED: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported))",
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w3-sheets.live.cjs:381,390 G6_COPY_SELF_REFERENCE_REFUSED / G6_COPY_PIVOT_REFUSED | test/live/xlsx-m7-d2.live.cjs:125 G_NEG_COPY_QUOTED_REFUSED | test/live/xlsx-m7-s2b.live.cjs:137 G_COPY_REFUSE_IMAGE_SHAPE | test/live/xlsx-b03-copy-retry-interrupted.live.cjs:188,190 G_NEG_TAMPERED_TARGET_REFUSED_0_0 / G_PARTIAL_TARGET_REFUSED_0_0 (B03 exit run, not a M10 row)",
-   "DIRECT_INTERNAL_DEPENDENCY": "B03",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B03 (test/static/direct-internal-rules.cjs:46-48 (B03 tokens in drivers/eurooffice/xlsx-driver.cjs); xlsx-driver.cjs:674-690 copyInFrame -> e.asc_copyWorksheet; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B03); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B03; image/shape source refused)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression and the B03 exit run (NOT a M10 row). The B03 TEMPORARY_RC_BOUNDARY is LIFTED by owner decision (the owner, owner channel, 2026-10-15, \"A\"): the write path is the DS Bridge WRITE worksheet.copy/v1 (the B03 direct internals were removed, M11.5c.4/5), served on /8 .. /12; the L-05 LIVE measurement (docs/evidence/l05-sheets-fail-closed-20261015) shows CPY_BASIC writable on /12 and CPY_EXISTS refused named. M11.0 checkpoint: PARTIAL (limit: B03; image/shape source refused)."
   },
   {
    "FORMAT": "XLSX",
@@ -974,10 +974,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:187 G3_CHART: SECOND run in a NEW editor session observes the target state (SATISFIED) | test/live/xlsx-m7-d2.live.cjs:123 G_C3_SETUP_CHART_PAIR: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:187 G3_CHART: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-d2.live.cjs:123 G_C3_SETUP_CHART_PAIR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:187 G3_CHART: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158)) | test/live/xlsx-m7-d2.live.cjs:123 G_C3_SETUP_CHART_PAIR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-d2.live.cjs:111)",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/l07-charts-measure.live.cjs CH_TAKEN / CH_SCATTER / CH_ONECOL: refused 0/0 (xlsx-chart-exists-with-another-identity | a closed type | a range without a category column and data) (docs/evidence/l07-charts-fail-closed-20261015/README.md | docs/evidence/l07-charts-fail-closed-20261015/l07-measure.json, VERDICT MEASURED)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: 5 types; non-bar types not in M10 rows)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression; FAIL_CLOSED, and the seven types, from the L-07 LIVE measurement (docs/evidence/l07-charts-fail-closed-20261015), not from the M10 final regression. M11.0 checkpoint: PARTIAL (limit: 5 types; non-bar types not in M10 rows)."
   },
   {
    "FORMAT": "XLSX",
@@ -990,10 +990,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:188 G3_CHART_RENAME: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:188 G3_CHART_RENAME: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:188 G3_CHART_RENAME: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:203 G6_CHART_RENAME_GUARD_NOT_FOUND: refused(GUARD_CHART_RENAME_NOT_FOUND) xlsx-sheet-not-found, 0 writes (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-w5w9-r1.json)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: --)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: ACCEPTED (limit: --)."
   },
   {
    "FORMAT": "XLSX",
@@ -1017,15 +1017,15 @@
    "READ_WRITE": "WRITE",
    "CURRENT_STATUS": "ROUTED_BY_ADAPTER (M6/M7; released only via the final regression + EXPOSED_CAPABILITY_TOOLS) (src/server/tools.cjs:66 capabilityInventory)",
    "PUBLIC_OR_BRIDGE": "PUBLIC",
-   "LIVE_EVIDENCE": "LIVE_STALE: test/live/xlsx-xo04-chart-legend-live-acceptance.live.cjs:19-36,176 FIRST APPLIED per position; docs/evidence/xo04-chart-legend-file-per-position-acc5-PASS-20261006.json + docs/evidence/ds-bridge-wave-a-xo04-rerun-PASS-20261007.json (NOT a M10 row; M11.0 section 5 gap 5)",
-   "PERSISTENCE_EVIDENCE": "LIVE_STALE: xo04 harness lines 31-37 (+176 verdict): FILE_PERSISTENCE_PROOF per position (c:legendPos in the saved chart part, resolved by sheet+chart name); acc5 PASS 2026-10-06",
-   "REOPEN_EVIDENCE": "LIVE_STALE: xo04 harness lines 23-24,35-36,133: EDITOR_REOPEN_PROOF -- fresh session reads the requested position (SATISFIED)",
-   "RETRY_EVIDENCE": "LIVE_STALE: xo04 harness lines 23-24: SECOND fresh session same task -> SATISFIED 0 writes 0 commands",
-   "PRESERVATION_EVIDENCE": "NONE_FOUND",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "LIVE_EVIDENCE": "test/live/xlsx-xo04-chart-legend-live-acceptance.live.cjs:129 roundOk(first,'APPLIED',1): FIRST APPLIED per position (top/left/right/bottom/none), whole-task PASS; docs/evidence/w1c-fail-closed-20261013/w1c-xo04leg-r1.json ROUNDS[*].first (NOT a M10 row)",
+   "PERSISTENCE_EVIDENCE": "xo04 harness: FIRST requires persistenceState=FORCESAVE_CONFIRMED (roundOk/firstOk); docs/evidence/w1c-fail-closed-20261013/w1c-xo04leg-r1.json ROUNDS[*].FILE_PERSISTENCE_PROOF=PASS (c:legendPos resolved by sheet+chart name, 'none' = no c:legend element)",
+   "REOPEN_EVIDENCE": "xo04 harness:136 roundOk(second,'SATISFIED',0) on a NEW driver/session per round (runProductTask creates a fresh driver each call): docs/evidence/w1c-fail-closed-20261013/w1c-xo04leg-r1.json ROUNDS[*].secondOk=true",
+   "RETRY_EVIDENCE": "xo04 harness:136: SECOND same task, new session -> SATISFIED, writes=0 commands=0; docs/evidence/w1c-fail-closed-20261013/w1c-xo04leg-r1.json ROUNDS[*].second",
+   "PRESERVATION_EVIDENCE": "test/live/l07-charts-measure.live.cjs LEG_TOP / LEG_LEFT / LEG_RIGHT / LEG_NONE: APPLIED with the first run's L3 (preservation) verdict PASS (docs/evidence/l07-charts-fail-closed-20261015/README.md | docs/evidence/l07-charts-fail-closed-20261015/l07-measure.json, VERDICT MEASURED)",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-xo04-chart-legend-live-acceptance.live.cjs:188 GUARD_LEGEND_CHART_NOT_FOUND_OK: refused xlsx-chart-not-found, 0 writes 0 commands (docs/evidence/w1c-fail-closed-20261013/README.md | docs/evidence/w1c-fail-closed-20261013/w1c-xo04leg-r1.json, VERDICT PASS)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "LIVE_STALE_ONLY: missing/not-current axes: LIVE_EVIDENCE,PERSISTENCE_EVIDENCE,REOPEN_EVIDENCE,RETRY_EVIDENCE,FAIL_CLOSED_EVIDENCE,PRESERVATION_EVIDENCE (stale-LIVE only: LIVE_EVIDENCE,PERSISTENCE_EVIDENCE,REOPEN_EVIDENCE,RETRY_EVIDENCE). M11.0 checkpoint: NOT_MEASURED (limit: on-main LIVE PASS (xo04), harness not a matrix row). UNSURE: stale (2026-10-06/07, not a M10 row); PRESERVATION not asserted by the xo04 harness (executor L3 may still run, not cited). UNSURE: stale LIVE evidence (DOCX: pre-B19/B20 cutover M8 run; XLSX: run outside the M10 final regression) was counted as \"some LIVE evidence\" (PARTIAL); if the owner treats it as inadmissible, this row is NOT_MEASURED."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "axes LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED cited from the xo04 harness' current LIVE run (2026-10-13, NOT a M10 row); PRESERVATION from the L-07 LIVE measurement (docs/evidence/l07-charts-fail-closed-20261015). M11.0 checkpoint: NOT_MEASURED (limit: on-main LIVE PASS (xo04), harness not a matrix row)."
   },
   {
    "FORMAT": "XLSX",
@@ -1033,15 +1033,31 @@
    "READ_WRITE": "WRITE",
    "CURRENT_STATUS": "ROUTED_BY_ADAPTER (M6/M7; released only via the final regression + EXPOSED_CAPABILITY_TOOLS) (src/server/tools.cjs:66 capabilityInventory)",
    "PUBLIC_OR_BRIDGE": "PUBLIC",
-   "LIVE_EVIDENCE": "LIVE_STALE: test/live/xlsx-xo05-chart-axis-datalabels-live-acceptance.live.cjs:171-173 G_CHART_CREATE / G_AXIS_HOR_ADD_PAIR / G_AXIS_VER_ADD_PAIR; docs/evidence/xo05-axis-titles-acc5-on-main-PASS-20261006.json (NOT a M10 row)",
-   "PERSISTENCE_EVIDENCE": "LIVE_STALE: xo05:163 finished() requires FORCESAVE_CONFIRMED; xo05:174-175 G_FILE_AXIS_HOR/VER FILE_PERSISTENCE_PROOF PASS",
-   "REOPEN_EVIDENCE": "LIVE_STALE: xo05:172-173 pair(): second fresh session SATISFIED",
-   "RETRY_EVIDENCE": "LIVE_STALE: xo05:172-173 pair(): SATISFIED writes=0 commands=0",
-   "PRESERVATION_EVIDENCE": "LIVE_STALE: xo05:164 applied() requires l3.length===1 && l3[0].verdict PASS",
-   "FAIL_CLOSED_EVIDENCE": "LIVE_STALE: test/live/xlsx-xo05-chart-axis-datalabels-live-acceptance.live.cjs:176-177 G_NEG_CHART_NOT_FOUND_AXIS / G_NEG_AXIS_INVALID; docs/evidence/xo05-axis-titles-acc5-on-main-PASS-20261006.json (2026-10-06, not a M10 row)",
+   "LIVE_EVIDENCE": "test/live/xlsx-xo05-chart-axis-datalabels-live-acceptance.live.cjs:171-173 G_CHART_CREATE / G_AXIS_HOR_ADD_PAIR / G_AXIS_VER_ADD_PAIR; docs/evidence/w1c-fail-closed-20261013/w1c-xo05ax-r1.json TARGET.{CHART_CREATE,AXIS_HOR_ADD,AXIS_VER_ADD} (fresh rerun, NOT a M10 row)",
+   "PERSISTENCE_EVIDENCE": "xo05:163 finished() requires FORCESAVE_CONFIRMED; xo05:174-175 G_FILE_AXIS_HOR/VER FILE_PERSISTENCE_PROOF PASS; docs/evidence/w1c-fail-closed-20261013/w1c-xo05ax-r1.json TARGET.AXIS_{HOR,VER}_ADD.FILE_PERSISTENCE_PROOF=PASS",
+   "REOPEN_EVIDENCE": "xo05:172-173 pair(): second fresh session SATISFIED; docs/evidence/w1c-fail-closed-20261013/w1c-xo05ax-r1.json TARGET.AXIS_{HOR,VER}_ADD.second (authority LIVE_READ, writes=0)",
+   "RETRY_EVIDENCE": "xo05:172-173 pair(): SATISFIED writes=0 commands=0; docs/evidence/w1c-fail-closed-20261013/w1c-xo05ax-r1.json TARGET.AXIS_{HOR,VER}_ADD.second",
+   "PRESERVATION_EVIDENCE": "xo05:164 applied() requires l3.length===1 && l3[0].verdict PASS; docs/evidence/w1c-fail-closed-20261013/w1c-xo05ax-r1.json TARGET.CHART_CREATE.l3[0]=PASS (compared 2446, changedCount 0)",
+   "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-xo05-chart-axis-datalabels-live-acceptance.live.cjs:176-177 G_NEG_CHART_NOT_FOUND_AXIS / G_NEG_AXIS_INVALID; docs/evidence/w1c-fail-closed-20261013/w1c-xo05ax-r1.json (fresh rerun, VERDICT PASS; not a M10 row)",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "LIVE_STALE_ONLY: missing/not-current axes: LIVE_EVIDENCE,PERSISTENCE_EVIDENCE,REOPEN_EVIDENCE,RETRY_EVIDENCE,FAIL_CLOSED_EVIDENCE,PRESERVATION_EVIDENCE (stale-LIVE only: LIVE_EVIDENCE,PERSISTENCE_EVIDENCE,REOPEN_EVIDENCE,RETRY_EVIDENCE,FAIL_CLOSED_EVIDENCE,PRESERVATION_EVIDENCE). M11.0 checkpoint: NOT_MEASURED (limit: on-main LIVE PASS (xo05, 2026-10-09), not a matrix row). UNSURE: every axis is evidenced, but only by a 2026-10-06 run outside the M10 regression (stale vs the XLSX read cutovers B11/WaveB/B15); would be ACCEPTED_WRITE if that run is admissible. UNSURE: stale LIVE evidence (DOCX: pre-B19/B20 cutover M8 run; XLSX: run outside the M10 final regression) was counted as \"some LIVE evidence\" (PARTIAL); if the owner treats it as inadmissible, this row is NOT_MEASURED."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: NOT_MEASURED (limit: on-main LIVE PASS (xo05, 2026-10-09), not a matrix row). UNSURE: every axis evidenced by a 2026-10-13 fresh LIVE rerun, methodologically equivalent to the other LIVE citations but outside the frozen M10 final regression matrix snapshot."
+  },
+  {
+   "FORMAT": "XLSX",
+   "INTENT": "move_chart",
+   "READ_WRITE": "WRITE",
+   "CURRENT_STATUS": "ROUTED_BY_ADAPTER (charts.cjs INTENTS, X-O06-6); GH #139 U2 wires it into write-tools.cjs XLSX_WRITE_ALLOWLIST + tools.cjs ACCEPTED_XLSX_WRITE_ALLOWLIST (src/server/tools.cjs:66 capabilityInventory)",
+   "PUBLIC_OR_BRIDGE": "PUBLIC",
+   "LIVE_EVIDENCE": "docs/evidence/x-o06-move-chart-live-rebased-PASS-20261012.json FIRST/SECOND/THIRD = APPLIED/SATISFIED/APPLIED (ADAPTER-LEVEL: withSession -> xlsxAdapter -> createExecutor, NOT through the product MCP surface) | docs/evidence/x-o06-6-move-chart-live-acceptance-20261007.json + x-o06-6b-move-chart-live-rerun-20261007.json + x-o06-6c-move-chart-negctl-20261007.json (earlier adapter-level runs, same shape) | GH #139 U2 product-level LIVE harness test/live/release-gh139-u2-move-chart-product.live.cjs is NEW with this release -- its run is PENDING (NOT_RUN by this patch; docs/GH139-U2-MOVE-CHART-RELEASE.md names this)",
+   "PERSISTENCE_EVIDENCE": "x-o06-move-chart-live-rebased-PASS-20261012.json FIRST.persistenceState=FORCESAVE_CONFIRMED (adapter-level); the product-level FORCESAVE_CONFIRMED proof is the NEW live harness, run PENDING",
+   "REOPEN_EVIDENCE": "x-o06-move-chart-live-rebased-PASS-20261012.json THIRD (a fresh withSession call after FIRST/SECOND) sees the moved position; the product-level NEW-MCP-process reopen proof is the NEW live harness, run PENDING",
+   "RETRY_EVIDENCE": "x-o06-move-chart-live-rebased-PASS-20261012.json SECOND: writes=0, commands=0, persistenceState=NOT_REQUIRED (adapter-level retry); the product-level retry proof is the NEW live harness, run PENDING",
+   "FAIL_CLOSED_EVIDENCE": "test/acceptance/xlsx-x-o06-move-chart.test.cjs:54-55 xlsx-chart-not-found / xlsx-chart-name-ambiguous (family-level offline, refused BEFORE dispatch, 0 writes) | the product-level NEG case (a nonexistent chart name, 0 write) is test/acceptance/gh139-u2-move-chart-release.test.cjs's own offline case + the NEW live harness's noChart step, run PENDING",
+   "PRESERVATION_EVIDENCE": "x-o06-move-chart-live-rebased-PASS-20261012.json FILE.CONTROL.posOk=true (an untouched control chart's position unchanged, adapter-level) + test/acceptance/xlsx-x-o06-move-chart.test.cjs (the moved chart's own +/-1 EMU size drift does NOT fail L3, sizeBlind hook)",
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes cited from the adapter-level X-O06 LIVE evidence (2026-10-07 / 2026-10-12 PASS runs, pre-dating this product-surface release) plus the family-level offline FAIL_CLOSED cases; GH #139 U2 wires the SAME adapter primitive into the product WRITE tool (schema + allowlist + offline acceptance: test/acceptance/gh139-u2-move-chart-release.test.cjs, test/acceptance/release-gh139-u2-move-chart-product.test.cjs). UNSURE: the product-level LIVE harness (test/live/release-gh139-u2-move-chart-product.live.cjs) is NEW with this release and its run is PENDING -- not yet executed through the installed product MCP; until it runs, the product-surface LIVE/PERSISTENCE/REOPEN/RETRY/FAIL_CLOSED axes are evidenced by the adapter-level LIVE + family-level offline only, not a product-level rerun."
   },
   {
    "FORMAT": "XLSX",
@@ -1054,10 +1070,10 @@
    "REOPEN_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:189 G3_PAGE_LAYOUT: SECOND run in a NEW editor session observes the target state (SATISFIED)",
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:189 G3_PAGE_LAYOUT: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:189 G3_PAGE_LAYOUT: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158))",
-   "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
+   "FAIL_CLOSED_EVIDENCE": "GH #138 U3 (product-release): test/live/release-gh138-u3-page-layout-product.live.cjs noSheet: set_page_layout on a sheet that was never created refused xlsx-sheet-not-found, 0 write | test/acceptance/gh138-u3-page-layout-release.test.cjs (offline, fake editor): a nonexistent sheet refused named, a margin over 200 mm / an unknown orientation / no field refused before dispatch",
    "DIRECT_INTERNAL_DEPENDENCY": "none",
-   "PRODUCT_RELEASE_CLASS": "PARTIAL",
-   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: public setters; margin cap 200 mm)."
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "missing/not-current axes: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: ACCEPTED (limit: public setters; margin cap 200 mm). GH #138 U3 (product-release round): the missing FAIL_CLOSED_EVIDENCE supplied (see above) -- the other five axes were already cited and are unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1071,9 +1087,9 @@
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:190 G3_PRINT_FIT: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-p06-fit-off-scale.live.cjs:79-80 G_PRODUCT_FIT_OFF_APPLIED / G_PRODUCT_FIT_OFF_RETRY_00: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-p49-print-fit-center-off.live.cjs:132-134 G_FIT_ON/OFF_APPLIED + G_FIT_OFF_RETRY_SATISFIED: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:190 G3_PRINT_FIT: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158)) | test/live/xlsx-m7-p06-fit-off-scale.live.cjs:79-80 G_PRODUCT_FIT_OFF_APPLIED / G_PRODUCT_FIT_OFF_RETRY_00: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-p06-fit-off-scale.live.cjs:81-85 (after-product + 2 reopen reads, other print fields + neighbour unchanged)) | test/live/xlsx-m7-p49-print-fit-center-off.live.cjs:132-134 G_FIT_ON/OFF_APPLIED + G_FIT_OFF_RETRY_SATISFIED: applied() requires L3 (preservation) verdict PASS (p49 applied())",
    "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
-   "DIRECT_INTERNAL_DEPENDENCY": "B10",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: B10)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: B10). GH #138 U4 (product-release round): the write path migrated off B10 onto the DS Bridge WRITE sheet.printSettings.write/v1 (/7+) in M11.5b.4 (print.cjs own header comment) -- the same migration set_page_layout (U3) already rode; every other axis above is unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1087,9 +1103,9 @@
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:191 G3_PRINT_HEADER: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-f2.live.cjs:124-126 G_Q9_FOOTER_SET/CLEAR, HEADER_CLEAR pairs: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-p07-header-footer-first-even.live.cjs:90-91,95 G_H_FIRST_HEADER/EVEN_FOOTER pairs, G_C_TEXT_SET_THEN_CLEAR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:191 G3_PRINT_HEADER: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158)) | test/live/xlsx-m7-f2.live.cjs:124-126 G_Q9_FOOTER_SET/CLEAR, HEADER_CLEAR pairs: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-f2.live.cjs:117) | test/live/xlsx-m7-p07-header-footer-first-even.live.cjs:90-91,95 G_H_FIRST_HEADER/EVEN_FOOTER pairs, G_C_TEXT_SET_THEN_CLEAR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-p07-header-footer-first-even.live.cjs:96-101 (after-product + 2 reopen reads, other fields + neighbour unchanged))",
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-p07-header-footer-first-even.live.cjs:102 G_NEG_PLAN_REFUSED (centerHeader slot refused at plan)",
-   "DIRECT_INTERNAL_DEPENDENCY": "B10",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10; odd/first/even text only)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10; odd/first/even text only). GH #138 U4 (product-release round): the write path migrated off B10 onto the DS Bridge WRITE sheet.printSettings.write/v1 (/7+) in M11.5b.4 (print.cjs own header comment) -- the same migration set_page_layout (U3) already rode; every other axis above is unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1103,9 +1119,9 @@
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:192 G3_PRINT_BREAK: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-f2.live.cjs:127-129 G_Q11/Q12 break add/remove pairs: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:192 G3_PRINT_BREAK: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158)) | test/live/xlsx-m7-f2.live.cjs:127-129 G_Q11/Q12 break add/remove pairs: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-f2.live.cjs:117)",
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-f2.live.cjs:133 G_NEG_OTHER_BREAK_REMOVED_NOT_APPLIED",
-   "DIRECT_INTERNAL_DEPENDENCY": "B10",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10; automatic-break removal refused)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10; automatic-break removal refused). GH #138 U4 (product-release round): the write path migrated off B10 onto the DS Bridge WRITE sheet.printSettings.write/v1 (/7+) in M11.5b.4 (print.cjs own header comment) -- the same migration set_page_layout (U3) already rode; every other axis above is unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1119,9 +1135,9 @@
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:193 G3_PRINT_FIRST_PAGE: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-f2.live.cjs:130 G_Q14_FIRST_PAGE_CLEAR_PAIR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:193 G3_PRINT_FIRST_PAGE: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158)) | test/live/xlsx-m7-f2.live.cjs:130 G_Q14_FIRST_PAGE_CLEAR_PAIR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-f2.live.cjs:117)",
    "FAIL_CLOSED_EVIDENCE": "NONE_FOUND",
-   "DIRECT_INTERNAL_DEPENDENCY": "B10",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: B10)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: FAIL_CLOSED_EVIDENCE. M11.0 checkpoint: PARTIAL (limit: B10). GH #138 U4 (product-release round): the write path migrated off B10 onto the DS Bridge WRITE sheet.printSettings.write/v1 (/7+) in M11.5b.4 (print.cjs own header comment) -- the same migration set_page_layout (U3) already rode; every other axis above is unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1135,9 +1151,9 @@
    "RETRY_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:194 G3_PRINT_CENTER: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-f2.live.cjs:131-132 G_Q15_VERTICAL / HORIZONTAL_FALSE pairs: same task re-run -> SATISFIED, writes=0 commands=0 | test/live/xlsx-m7-p49-print-fit-center-off.live.cjs:135-137 G_VCENTER_ON/OFF_APPLIED + RETRY_SATISFIED: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-w5-w9-families.live.cjs:194 G3_PRINT_CENTER: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-w3-sheets.live.cjs:185-187 (imported applied/satisfied; pair() at xlsx-w5-w9-families.live.cjs:158)) | test/live/xlsx-m7-f2.live.cjs:131-132 G_Q15_VERTICAL / HORIZONTAL_FALSE pairs: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-f2.live.cjs:117) | test/live/xlsx-m7-p49-print-fit-center-off.live.cjs:135-137 G_VCENTER_ON/OFF_APPLIED + RETRY_SATISFIED: applied() requires L3 (preservation) verdict PASS (p49 applied())",
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-f2.live.cjs:134 G_NEG_SIDE_FOOTER_NOT_APPLIED (task VS = set_print_centering, line 97)",
-   "DIRECT_INTERNAL_DEPENDENCY": "B10",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10). GH #138 U4 (product-release round): the write path migrated off B10 onto the DS Bridge WRITE sheet.printSettings.write/v1 (/7+) in M11.5b.4 (print.cjs own header comment) -- the same migration set_page_layout (U3) already rode; every other axis above is unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1151,9 +1167,9 @@
    "RETRY_EVIDENCE": "test/live/xlsx-m7-p05-scale-paper.live.cjs:79 G_SCALE_75_PAIR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-m7-p05-scale-paper.live.cjs:79 G_SCALE_75_PAIR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-p05-scale-paper.live.cjs:80-88 (after-product + 2 reopen reads, other fields + neighbour unchanged))",
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-p05-scale-paper.live.cjs:89 G_NEG_UNKNOWN_PAPER_REFUSED (scale401 refused at plan)",
-   "DIRECT_INTERNAL_DEPENDENCY": "B10",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10; 10-400%)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10; 10-400%). GH #138 U4 (product-release round): the write path migrated off B10 onto the DS Bridge WRITE sheet.printSettings.write/v1 (/7+) in M11.5b.4 (print.cjs own header comment) -- the same migration set_page_layout (U3) already rode; every other axis above is unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1167,9 +1183,9 @@
    "RETRY_EVIDENCE": "test/live/xlsx-m7-p05-scale-paper.live.cjs:77-78 G_PAPER_LETTER_PAIR / G_PAPER_A4_PAIR: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-m7-p05-scale-paper.live.cjs:77-78 G_PAPER_LETTER_PAIR / G_PAPER_A4_PAIR: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-p05-scale-paper.live.cjs:80-88 (after-product + 2 reopen reads, other fields + neighbour unchanged))",
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-p05-scale-paper.live.cjs:89 G_NEG_UNKNOWN_PAPER_REFUSED (unknownPaper / rawMm refused at plan)",
-   "DIRECT_INTERNAL_DEPENDENCY": "B10",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10; 13 named sizes)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10; 13 named sizes). GH #138 U4 (product-release round): the write path migrated off B10 onto the DS Bridge WRITE sheet.printSettings.write/v1 (/7+) in M11.5b.4 (print.cjs own header comment) -- the same migration set_page_layout (U3) already rode; every other axis above is unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1183,9 +1199,9 @@
    "RETRY_EVIDENCE": "test/live/xlsx-m7-p07-header-footer-first-even.live.cjs:92-94 G_H_DIFF_FIRST / DIFF_ODD_EVEN pairs, G_C_FLAG_ON_THEN_OFF: same task re-run -> SATISFIED, writes=0 commands=0",
    "PRESERVATION_EVIDENCE": "test/live/xlsx-m7-p07-header-footer-first-even.live.cjs:92-94 G_H_DIFF_FIRST / DIFF_ODD_EVEN pairs, G_C_FLAG_ON_THEN_OFF: applied() requires L3 (preservation) verdict PASS (test/live/xlsx-m7-p07-header-footer-first-even.live.cjs:96-101 (after-product + 2 reopen reads, other fields + neighbour unchanged))",
    "FAIL_CLOSED_EVIDENCE": "test/live/xlsx-m7-p07-header-footer-first-even.live.cjs:102 G_NEG_PLAN_REFUSED (unknownFlag / numericFlag refused at plan)",
-   "DIRECT_INTERNAL_DEPENDENCY": "B10",
-   "PRODUCT_RELEASE_CLASS": "TEMPORARY_BOUNDARY",
-   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10)."
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "write path uses legacy direct-internal B10 (test/static/direct-internal-rules.cjs:52-55 (print.cjs tokens); print.cjs:273-292 lower(): ws.worksheet + PagePrintOptions.asc_getPageSetup + AscCommon.History for EVERY print.cjs intent; NEEDS print.cjs:235-244; docs/M10-ACCEPTED-DIRECT-INTERNAL-BOUNDARIES.md#B10 field table); evidence axes not current-LIVE: none. M11.0 checkpoint: PARTIAL (limit: B10). GH #138 U4 (product-release round): the write path migrated off B10 onto the DS Bridge WRITE sheet.printSettings.write/v1 (/7+) in M11.5b.4 (print.cjs own header comment) -- the same migration set_page_layout (U3) already rode; every other axis above is unchanged."
   },
   {
    "FORMAT": "XLSX",
@@ -1218,13 +1234,61 @@
    "DIRECT_INTERNAL_DEPENDENCY": "none",
    "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
    "CLASS_REASON": "all six axes (LIVE, PERSISTENCE, REOPEN, RETRY, FAIL_CLOSED, PRESERVATION) cited from LIVE harness gates of rows that PASSed in the M10 final regression. M11.0 checkpoint: PARTIAL (limit: quoted names / table sources refused)."
+  },
+  {
+   "FORMAT": "XLSX",
+   "INTENT": "insert_shape",
+   "READ_WRITE": "WRITE",
+   "CURRENT_STATUS": "ROUTED_BY_ADAPTER (drawings-insert.cjs INTENTS, X-O08); GH #139 U3 wires it into write-tools.cjs XLSX_WRITE_ALLOWLIST + tools.cjs ACCEPTED_XLSX_WRITE_ALLOWLIST (src/server/tools.cjs capabilityInventory)",
+   "PUBLIC_OR_BRIDGE": "PUBLIC",
+   "LIVE_EVIDENCE": "docs/evidence/xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json FIRST/SECOND/COLLISION = APPLIED x3 / SATISFIED x3 (fresh withSession, 0 writes/0 commands) / FAILED (xlsx-drawing-insert-exists-with-another-identity) (ADAPTER-LEVEL: withSession -> xlsxAdapter -> createExecutor, NOT through the product MCP surface) | docs/evidence/x-o08-6b-live-acceptance-20261007.json + x-o08-6b-live-rerun-shared-helpers-20261007.json + x-o08-6c-drawings-insert-negctl-20261007.json (earlier adapter-level runs, same shape) | docs/evidence/x-o08-7-stroke-width-readquery-diff-20261013.txt (v2 stroke, SAME readable-width axis) | GH #139 U3 product-level LIVE harness test/live/release-gh139-u3-insert-drawing-product.live.cjs is NEW with this release -- its run is PENDING (NOT_RUN by this patch; docs/GH139-U3-INSERT-DRAWING-RELEASE.md names this)",
+   "PERSISTENCE_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json FIRST.persistenceState=FORCESAVE_CONFIRMED (adapter-level); the product-level FORCESAVE_CONFIRMED proof is the NEW live harness, run PENDING",
+   "REOPEN_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json SECOND is a FRESH withSession (a new driver/session, not a continuation of FIRST) that sees FIRST's drawings and classifies them SATISFIED via a fresh drawings.observe() read -- the SAME proven mechanism charts.cjs already uses for 'chart' (the family's own CORRECTION comment, drawings-insert.cjs:38-48); FILE then reads the saved file's own xl/drawings/drawingN.xml directly (not via any session) and confirms posOk=true for S and I. NOT-MEASURED, named by the family itself: whether GetWidth()/GetHeight() read 0x0 after a reopen (X-O08-1b R3) -- irrelevant here since size is never exact-matched either way. The product-level NEW-MCP-process reopen proof is the NEW live harness, run PENDING",
+   "RETRY_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json SECOND: writes=0, commands=0, persistenceState=NOT_REQUIRED, statuses SATISFIED x3 (adapter-level retry); the product-level retry proof is the NEW live harness, run PENDING",
+   "FAIL_CLOSED_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json COLLISION: a THIRD withSession requesting insert_shape under the SAME name at a DIFFERENT cell -> FAILED, reason xlsx-drawing-insert-exists-with-another-identity, 0 writes (adapter-level LIVE) | test/acceptance/xlsx-x-o08-drawings-insert.test.cjs: the refused-before-dispatch loop (unknown field / bad sheet / bad name / bad geometry / bad fill / bad at / bad size / bad source), an unobservable drawing reader, and the RED case (ignored / wrong position / wrong kind -> L1 FAIL) -- all family-level offline, 0 writes; the product-level NEG case (a name collision, 0 write) is test/acceptance/release-gh139-u3-insert-drawing-product.test.cjs's own offline case + the NEW live harness's collision step, run PENDING",
+   "PRESERVATION_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json FILE.value.CONTROL.posOk=true (an untouched control shape's position unchanged across FIRST/SECOND/COLLISION, adapter-level) | test/acceptance/xlsx-x-o08-drawings-insert.test.cjs:61 'a DIFFERENT, unrelated drawing on the sheet is untouched' (family-level offline L3, drawings.drawingDiffs) + the RED case 'a drawing fault on an OTHER drawing after dispatch -> L3 FAIL'. Fill-colour (and stroke-colour when stroke is written) stay WRITE_ONLY, named in the receipt's semanticsNotProven (COLOUR_NOT_PROVEN(_WITH_STROKE)), never claimed as preservation-verified",
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes cited from the adapter-level X-O08 LIVE evidence (2026-10-07 / 2026-10-12 / 2026-10-13 runs, pre-dating this product-surface release) plus the family-level offline FAIL_CLOSED/preservation cases; GH #139 U3 wires the SAME adapter primitive into the product WRITE tool (schema + allowlist + offline acceptance: test/acceptance/gh139-u3-insert-drawing-release.test.cjs, test/acceptance/release-gh139-u3-insert-drawing-product.test.cjs). UNSURE: the product-level LIVE harness (test/live/release-gh139-u3-insert-drawing-product.live.cjs) is NEW with this release and its run is PENDING -- not yet executed through the installed product MCP; until it runs, the product-surface LIVE/PERSISTENCE/REOPEN/RETRY/FAIL_CLOSED axes are evidenced by the adapter-level LIVE + family-level offline only, not a product-level rerun. Fill/stroke-colour are NOT a preservation gap -- they are WRITE_ONLY by the driver's own reader (no colour field exists to compare), named explicitly in every whole-task check, never silently omitted."
+  },
+  {
+   "FORMAT": "XLSX",
+   "INTENT": "insert_image",
+   "READ_WRITE": "WRITE",
+   "CURRENT_STATUS": "ROUTED_BY_ADAPTER (drawings-insert.cjs INTENTS, X-O08); GH #139 U3 wires it into write-tools.cjs XLSX_WRITE_ALLOWLIST + tools.cjs ACCEPTED_XLSX_WRITE_ALLOWLIST (src/server/tools.cjs capabilityInventory)",
+   "PUBLIC_OR_BRIDGE": "PUBLIC",
+   "LIVE_EVIDENCE": "docs/evidence/xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json FIRST/SECOND/COLLISION = APPLIED x3 / SATISFIED x3 (fresh withSession, 0 writes/0 commands) / FAILED (xlsx-drawing-insert-exists-with-another-identity) (ADAPTER-LEVEL: withSession -> xlsxAdapter -> createExecutor, NOT through the product MCP surface) | docs/evidence/x-o08-6b-live-acceptance-20261007.json + x-o08-6b-live-rerun-shared-helpers-20261007.json + x-o08-6c-drawings-insert-negctl-20261007.json (earlier adapter-level runs, same shape) | docs/evidence/x-o08-7-stroke-width-readquery-diff-20261013.txt (v2 stroke, SAME readable-width axis) | GH #139 U3 product-level LIVE harness test/live/release-gh139-u3-insert-drawing-product.live.cjs is NEW with this release -- its run is PENDING (NOT_RUN by this patch; docs/GH139-U3-INSERT-DRAWING-RELEASE.md names this)",
+   "PERSISTENCE_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json FIRST.persistenceState=FORCESAVE_CONFIRMED (adapter-level); the product-level FORCESAVE_CONFIRMED proof is the NEW live harness, run PENDING",
+   "REOPEN_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json SECOND is a FRESH withSession (a new driver/session, not a continuation of FIRST) that sees FIRST's drawings and classifies them SATISFIED via a fresh drawings.observe() read -- the SAME proven mechanism charts.cjs already uses for 'chart' (the family's own CORRECTION comment, drawings-insert.cjs:38-48); FILE then reads the saved file's own xl/drawings/drawingN.xml directly (not via any session) and confirms posOk=true for S and I. NOT-MEASURED, named by the family itself: whether GetWidth()/GetHeight() read 0x0 after a reopen (X-O08-1b R3) -- irrelevant here since size is never exact-matched either way. The product-level NEW-MCP-process reopen proof is the NEW live harness, run PENDING",
+   "RETRY_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json SECOND: writes=0, commands=0, persistenceState=NOT_REQUIRED, statuses SATISFIED x3 (adapter-level retry); the product-level retry proof is the NEW live harness, run PENDING",
+   "FAIL_CLOSED_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json COLLISION: a THIRD withSession requesting insert_shape under the SAME name at a DIFFERENT cell -> FAILED, reason xlsx-drawing-insert-exists-with-another-identity, 0 writes (adapter-level LIVE) | test/acceptance/xlsx-x-o08-drawings-insert.test.cjs: the refused-before-dispatch loop (unknown field / bad sheet / bad name / bad geometry / bad fill / bad at / bad size / bad source), an unobservable drawing reader, and the RED case (ignored / wrong position / wrong kind -> L1 FAIL) -- all family-level offline, 0 writes; the product-level NEG case (a name collision, 0 write) is test/acceptance/release-gh139-u3-insert-drawing-product.test.cjs's own offline case + the NEW live harness's collision step, run PENDING",
+   "PRESERVATION_EVIDENCE": "xlsx-x-o08-drawings-insert-live-rebased-PASS-20261012.json FILE.value.CONTROL.posOk=true (an untouched control shape's position unchanged across FIRST/SECOND/COLLISION, adapter-level) | test/acceptance/xlsx-x-o08-drawings-insert.test.cjs:61 'a DIFFERENT, unrelated drawing on the sheet is untouched' (family-level offline L3, drawings.drawingDiffs) + the RED case 'a drawing fault on an OTHER drawing after dispatch -> L3 FAIL'. Fill-colour (and stroke-colour when stroke is written) stay WRITE_ONLY, named in the receipt's semanticsNotProven (COLOUR_NOT_PROVEN(_WITH_STROKE)), never claimed as preservation-verified",
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes cited from the adapter-level X-O08 LIVE evidence (2026-10-07 / 2026-10-12 / 2026-10-13 runs, pre-dating this product-surface release) plus the family-level offline FAIL_CLOSED/preservation cases; GH #139 U3 wires the SAME adapter primitive into the product WRITE tool (schema + allowlist + offline acceptance: test/acceptance/gh139-u3-insert-drawing-release.test.cjs, test/acceptance/release-gh139-u3-insert-drawing-product.test.cjs). UNSURE: the product-level LIVE harness (test/live/release-gh139-u3-insert-drawing-product.live.cjs) is NEW with this release and its run is PENDING -- not yet executed through the installed product MCP; until it runs, the product-surface LIVE/PERSISTENCE/REOPEN/RETRY/FAIL_CLOSED axes are evidenced by the adapter-level LIVE + family-level offline only, not a product-level rerun. Fill/stroke-colour are NOT a preservation gap -- they are WRITE_ONLY by the driver's own reader (no colour field exists to compare), named explicitly in every whole-task check, never silently omitted."
+  },
+  {
+   "FORMAT": "XLSX",
+   "INTENT": "format_run",
+   "READ_WRITE": "WRITE",
+   "CURRENT_STATUS": "ROUTED_BY_ADAPTER (format-run.cjs INTENTS, X-F04); GH #137 U2 wires it into write-tools.cjs XLSX_WRITE_ALLOWLIST + tools.cjs ACCEPTED_XLSX_WRITE_ALLOWLIST (src/server/tools.cjs capabilityInventory)",
+   "PUBLIC_OR_BRIDGE": "PUBLIC",
+   "LIVE_EVIDENCE": "docs/evidence/xlsx-xf04-live-rebased-PASS-20261012.json VERDICT=MEASURED (ADAPTER-LEVEL: withSession -> xlsxAdapter -> createExecutor, NOT through the product MCP surface) | docs/evidence/xlsx-xf04-live-run3-f045-20261007.json + xlsx-xf04-live-run4-verifier-v21-1-20261007.json (earlier adapter-level runs, the SAME 5-axis GetCharacters(start,len).GetFont() mechanism) | GH #137 U2 product-level LIVE harness test/live/release-gh137-u2-format-run-product.live.cjs is NEW with this release -- its run is PENDING (NOT_RUN by this patch; docs/GH137-U2-FORMAT-RUN-RELEASE.md names this)",
+   "PERSISTENCE_EVIDENCE": "xlsx-xf04-live-rebased-PASS-20261012.json SETTLE/SAVED_FILE_SIZE/FILE_PROOF (adapter-level, file bytes after settle); the product-level FORCESAVE_CONFIRMED proof is the NEW live harness, run PENDING",
+   "REOPEN_EVIDENCE": "xlsx-xf04-live-rebased-PASS-20261012.json FILE_PROOF reads the saved file's own run-map directly (not a live session getter) -- the SAME drawingReads-style file-level mechanism the family relies on for L1/L3, proven across reopen. The product-level NEW-MCP-process reopen proof is the NEW live harness, run PENDING",
+   "RETRY_EVIDENCE": "xlsx-xf04-live-rebased-PASS-20261012.json LIVE_APPLIED (adapter-level retry, 0 writes on a fresh run-map read matching the request); the product-level retry proof is the NEW live harness, run PENDING",
+   "FAIL_CLOSED_EVIDENCE": "test/acceptance/xlsx-m7-f04-format-run.test.cjs: an overlapping run, start/length out of the text's bounds, an empty runs array and an empty font object are all refused PRE_DISPATCH, 0 writes (family-level offline); the product-level NEG case (an overlapping run, a too-long cell, 0 write) is test/acceptance/release-gh137-u2-format-run-product.test.cjs's own offline case + the NEW live harness's own negative steps, run PENDING",
+   "PRESERVATION_EVIDENCE": "xlsx-xf04-live-rebased-PASS-20261012.json TREE (an untouched control cell's run-map unchanged, adapter-level) | test/acceptance/xlsx-m7-f04-format-run.test.cjs's own L3 case (a character outside every requested run keeps its font-tuple, the SAME run-map read before vs after). The run-map comparison covers ONLY the family's 5 measured axes -- format_range's own whole-cell effects (underline, strikeout, subscript, superscript) are NOT part of it, stated by the family's own header comment, never silently assumed unchanged.",
+   "DIRECT_INTERNAL_DEPENDENCY": "none",
+   "PRODUCT_RELEASE_CLASS": "ACCEPTED_WRITE",
+   "CLASS_REASON": "all six axes cited from the adapter-level X-F04 LIVE evidence (2026-10-07 / 2026-10-12 runs, pre-dating this product-surface release) plus the family-level offline FAIL_CLOSED/preservation cases; GH #137 U2 wires the SAME adapter primitive into the product WRITE tool (schema + allowlist + offline acceptance: test/acceptance/gh137-u2-format-run-release.test.cjs, test/acceptance/release-gh137-u2-format-run-product.test.cjs). UNSURE: the product-level LIVE harness (test/live/release-gh137-u2-format-run-product.live.cjs) is NEW with this release and its run is PENDING -- not yet executed through the installed product MCP; until it runs, the product-surface LIVE/PERSISTENCE/REOPEN/RETRY/FAIL_CLOSED axes are evidenced by the adapter-level LIVE + family-level offline only, not a product-level rerun. The RUN_MAP_CHAR_CEILING (256 chars) is a NAMED, TEMPORARY limit, not a gap in this release's own scope -- raising it is explicitly out of scope for this card."
   }
  ],
  "counts": {
   "byClass": {
-   "PARTIAL": 41,
-   "TEMPORARY_BOUNDARY": 14,
-   "ACCEPTED_WRITE": 21
+   "PARTIAL": 26,
+   "TEMPORARY_BOUNDARY": 13,
+   "ACCEPTED_WRITE": 41
   },
   "byFormat": {
    "DOCX": {
@@ -1232,29 +1296,18 @@
     "TEMPORARY_BOUNDARY": 4
    },
    "XLSX": {
-    "ACCEPTED_WRITE": 21,
-    "PARTIAL": 17,
-    "TEMPORARY_BOUNDARY": 10
+    "ACCEPTED_WRITE": 41,
+    "TEMPORARY_BOUNDARY": 9,
+    "PARTIAL": 2
    }
   }
  },
  "legacy_dependents": {
-  "B03": [
-   "XLSX:copy_sheet"
-  ],
+  "B03": [],
   "B05W": [
    "XLSX:format_range"
   ],
-  "B10": [
-   "XLSX:set_print_fit",
-   "XLSX:set_header_footer",
-   "XLSX:set_page_break",
-   "XLSX:set_first_page_number",
-   "XLSX:set_print_centering",
-   "XLSX:set_print_scale",
-   "XLSX:set_paper_size",
-   "XLSX:set_header_footer_flag"
-  ],
+  "B10": [],
   "B18": [
    "DOCX:outdent_list_item",
    "DOCX:remove_list"
@@ -1264,5 +1317,5 @@
    "DOCX:edit_footer"
   ]
  },
- "m11_0_reconciliation": "M11.0 source: docs/M11-0-INVENTORY-20261009.md section 5, NOT on main -- read via `git show e7ca37c:` (branch origin/an internal branch, commit e7ca37c, NOT an ancestor of HEAD be98da7). Its own total row is 18 ACCEPTED / 43 PARTIAL / 2 NOT_MEASURED / 13 NOT_MEASURED_M10* (the plan/roadmap \"15 NOT_MEASURED\" = 2 + 13). Rule difference: M11.0 ACCEPTED = LIVE on main + exercised by a M10 row + no named SCOPE limit; it did NOT require a per-intent FAIL_CLOSED LIVE case and did NOT know B21 (found later, M11.3a.1). This census: TEMPORARY_BOUNDARY first (B03/B05W/B10/B18/B21), then ACCEPTED_WRITE only with all six axes LIVE on current-generation code; named scope limits (shape refusals) are treated as fail-closed behaviour, NOT as partial axes. Consequences: (a) 9 DOCX ACCEPTED in M11.0 -> PARTIAL here (no DOCX M10-cycle row runs a refusal case; paragraph insert/delete/move also have INTEGRAL_PRESERVATION=NOT_REQUIRED); (b) several XLSX PARTIAL in M11.0 -> ACCEPTED_WRITE here (their M11.0 PARTIAL came from scope limits, while each has a LIVE refusal gate); (c) XLSX ACCEPTED in M11.0 without a LIVE refusal gate -> PARTIAL (unmerge_range is the exception: w4:105 refuses); (d) edit_header/edit_footer -> TEMPORARY_BOUNDARY (B21); (e) M11.0 NOT_MEASURED_M10* DOCX rows -> PARTIAL with LIVE_STALE_ONLY (M8 2026-10-05 evidence) or TEMPORARY_BOUNDARY. Per-intent differences (61, of which 14 are only the boundary relabel PARTIAL/NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY): DOCX:rewrite_paragraph M11.0=ACCEPTED -> PARTIAL; DOCX:insert_paragraph_before M11.0=ACCEPTED -> PARTIAL; DOCX:insert_paragraph_after M11.0=ACCEPTED -> PARTIAL; DOCX:delete_paragraph M11.0=ACCEPTED -> PARTIAL; DOCX:move_paragraph_before M11.0=ACCEPTED -> PARTIAL; DOCX:move_paragraph_after M11.0=ACCEPTED -> PARTIAL; DOCX:apply_list M11.0=ACCEPTED -> PARTIAL; DOCX:set_list_level M11.0=ACCEPTED -> PARTIAL; DOCX:indent_list_item M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:set_list_type M11.0=ACCEPTED -> PARTIAL; DOCX:outdent_list_item M11.0=NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY; DOCX:remove_list M11.0=PARTIAL -> TEMPORARY_BOUNDARY; DOCX:insert_table_row_before M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:delete_table_row M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:insert_table_column_before M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:delete_table_column M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:split_table_cell M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:add_bookmark M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:add_link M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:add_footnote M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:add_endnote M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:edit_header M11.0=NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY; DOCX:edit_footer M11.0=NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY; XLSX:write_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:format_range M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:layout_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:merge_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:unfreeze_panes M11.0=ACCEPTED -> PARTIAL; XLSX:insert_rows M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_rows M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_columns M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:copy_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:move_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:sort_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:add_conditional_format M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:filter_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:clear_filter M11.0=ACCEPTED -> PARTIAL; XLSX:set_defined_name M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_defined_name M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:set_print_area M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:clear_print_area M11.0=ACCEPTED -> PARTIAL; XLSX:set_print_titles M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:clear_print_titles M11.0=ACCEPTED -> PARTIAL; XLSX:rename_sheet M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_sheet M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:move_sheet M11.0=ACCEPTED -> PARTIAL; XLSX:copy_sheet M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:rename_chart M11.0=ACCEPTED -> PARTIAL; XLSX:set_chart_legend M11.0=NOT_MEASURED -> PARTIAL; XLSX:set_chart_axis_title M11.0=NOT_MEASURED -> PARTIAL; XLSX:set_page_layout M11.0=ACCEPTED -> PARTIAL; XLSX:set_print_fit M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_header_footer M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_page_break M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_first_page_number M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_print_centering M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_print_scale M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_paper_size M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_header_footer_flag M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:create_pivot M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:refresh_pivot M11.0=PARTIAL -> ACCEPTED_WRITE Transition table: DOCX ACCEPTED -> PARTIAL = 9 (rewrite_paragraph,insert_paragraph_before,insert_paragraph_after,delete_paragraph,move_paragraph_before,move_paragraph_after,apply_list,set_list_level,set_list_type); DOCX PARTIAL -> PARTIAL = 5 (format_text,replace_table_cell,insert_table_row_after,insert_table_column_after,merge_table_cells); DOCX NOT_MEASURED_M10* -> PARTIAL = 10 (indent_list_item,insert_table_row_before,delete_table_row,insert_table_column_before,delete_table_column,split_table_cell,add_bookmark,add_link,add_footnote,add_endnote); DOCX NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY = 3 (outdent_list_item,edit_header,edit_footer); DOCX PARTIAL -> TEMPORARY_BOUNDARY = 1 (remove_list); XLSX PARTIAL -> ACCEPTED_WRITE = 19 (write_range,layout_range,merge_range,insert_rows,delete_rows,delete_columns,copy_range,move_range,sort_range,add_conditional_format,filter_range,set_defined_name,delete_defined_name,set_print_area,set_print_titles,rename_sheet,delete_sheet,create_pivot,refresh_pivot); XLSX PARTIAL -> PARTIAL = 8 (clear_range,freeze_panes,insert_columns,set_validation,clear_validation,delete_conditional_format,create_sheet,set_chart); XLSX PARTIAL -> TEMPORARY_BOUNDARY = 10 (format_range,copy_sheet,set_print_fit,set_header_footer,set_page_break,set_first_page_number,set_print_centering,set_print_scale,set_paper_size,set_header_footer_flag); XLSX ACCEPTED -> ACCEPTED_WRITE = 2 (unmerge_range,set_chart_title); XLSX ACCEPTED -> PARTIAL = 7 (unfreeze_panes,clear_filter,clear_print_area,clear_print_titles,move_sheet,rename_chart,set_page_layout); XLSX NOT_MEASURED -> PARTIAL = 2 (set_chart_legend,set_chart_axis_title)"
+ "m11_0_reconciliation": "M11.0 source: docs/M11-0-INVENTORY-20261009.md section 5, NOT on main -- read via `git show e7ca37c:` (branch origin/an internal branch, commit e7ca37c, NOT an ancestor of HEAD be98da7). Its own total row is 18 ACCEPTED / 43 PARTIAL / 2 NOT_MEASURED / 13 NOT_MEASURED_M10* (the plan/roadmap \"15 NOT_MEASURED\" = 2 + 13). Rule difference: M11.0 ACCEPTED = LIVE on main + exercised by a M10 row + no named SCOPE limit; it did NOT require a per-intent FAIL_CLOSED LIVE case and did NOT know B21 (found later, M11.3a.1). This census: TEMPORARY_BOUNDARY first (B03/B05W/B10/B18/B21), then ACCEPTED_WRITE only with all six axes LIVE on current-generation code; named scope limits (shape refusals) are treated as fail-closed behaviour, NOT as partial axes. Consequences: (a) 9 DOCX ACCEPTED in M11.0 -> PARTIAL here (no DOCX M10-cycle row runs a refusal case; paragraph insert/delete/move also have INTEGRAL_PRESERVATION=NOT_REQUIRED); (b) several XLSX PARTIAL in M11.0 -> ACCEPTED_WRITE here (their M11.0 PARTIAL came from scope limits, while each has a LIVE refusal gate); (c) XLSX ACCEPTED in M11.0 without a LIVE refusal gate -> PARTIAL (unmerge_range is the exception: w4:105 refuses); (d) edit_header/edit_footer -> TEMPORARY_BOUNDARY (B21); (e) M11.0 NOT_MEASURED_M10* DOCX rows -> PARTIAL with LIVE_STALE_ONLY (M8 2026-10-05 evidence) or TEMPORARY_BOUNDARY. Per-intent differences (63, of which 14 are only the boundary relabel PARTIAL/NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY): DOCX:rewrite_paragraph M11.0=ACCEPTED -> PARTIAL; DOCX:insert_paragraph_before M11.0=ACCEPTED -> PARTIAL; DOCX:insert_paragraph_after M11.0=ACCEPTED -> PARTIAL; DOCX:delete_paragraph M11.0=ACCEPTED -> PARTIAL; DOCX:move_paragraph_before M11.0=ACCEPTED -> PARTIAL; DOCX:move_paragraph_after M11.0=ACCEPTED -> PARTIAL; DOCX:apply_list M11.0=ACCEPTED -> PARTIAL; DOCX:set_list_level M11.0=ACCEPTED -> PARTIAL; DOCX:indent_list_item M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:set_list_type M11.0=ACCEPTED -> PARTIAL; DOCX:outdent_list_item M11.0=NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY; DOCX:remove_list M11.0=PARTIAL -> TEMPORARY_BOUNDARY; DOCX:insert_table_row_before M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:delete_table_row M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:insert_table_column_before M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:delete_table_column M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:split_table_cell M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:add_bookmark M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:add_link M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:add_footnote M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:add_endnote M11.0=NOT_MEASURED_M10* -> PARTIAL; DOCX:edit_header M11.0=NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY; DOCX:edit_footer M11.0=NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY; XLSX:write_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:clear_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:format_range M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:layout_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:merge_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:freeze_panes M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:insert_rows M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_rows M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_columns M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:copy_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:move_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:sort_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:set_validation M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:clear_validation M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:add_conditional_format M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_conditional_format M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:filter_range M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:set_defined_name M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_defined_name M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:set_print_area M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:set_print_titles M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:clear_print_titles M11.0=ACCEPTED -> PARTIAL; XLSX:create_sheet M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:rename_sheet M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:delete_sheet M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:move_sheet M11.0=ACCEPTED -> PARTIAL; XLSX:copy_sheet M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_chart_legend M11.0=NOT_MEASURED -> PARTIAL; XLSX:set_chart_axis_title M11.0=NOT_MEASURED -> ACCEPTED_WRITE; XLSX:set_page_layout M11.0=ACCEPTED -> PARTIAL; XLSX:set_print_fit M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_header_footer M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_page_break M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_first_page_number M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_print_centering M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_print_scale M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_paper_size M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:set_header_footer_flag M11.0=PARTIAL -> TEMPORARY_BOUNDARY; XLSX:create_pivot M11.0=PARTIAL -> ACCEPTED_WRITE; XLSX:refresh_pivot M11.0=PARTIAL -> ACCEPTED_WRITE Transition table: DOCX ACCEPTED -> PARTIAL = 9 (rewrite_paragraph,insert_paragraph_before,insert_paragraph_after,delete_paragraph,move_paragraph_before,move_paragraph_after,apply_list,set_list_level,set_list_type); DOCX PARTIAL -> PARTIAL = 5 (format_text,replace_table_cell,insert_table_row_after,insert_table_column_after,merge_table_cells); DOCX NOT_MEASURED_M10* -> PARTIAL = 10 (indent_list_item,insert_table_row_before,delete_table_row,insert_table_column_before,delete_table_column,split_table_cell,add_bookmark,add_link,add_footnote,add_endnote); DOCX NOT_MEASURED_M10* -> TEMPORARY_BOUNDARY = 3 (outdent_list_item,edit_header,edit_footer); DOCX PARTIAL -> TEMPORARY_BOUNDARY = 1 (remove_list); XLSX PARTIAL -> ACCEPTED_WRITE = 25 (write_range,clear_range,layout_range,merge_range,freeze_panes,insert_rows,delete_rows,delete_columns,copy_range,move_range,sort_range,set_validation,clear_validation,add_conditional_format,delete_conditional_format,filter_range,set_defined_name,delete_defined_name,set_print_area,set_print_titles,create_sheet,rename_sheet,delete_sheet,create_pivot,refresh_pivot); XLSX PARTIAL -> TEMPORARY_BOUNDARY = 10 (format_range,copy_sheet,set_print_fit,set_header_footer,set_page_break,set_first_page_number,set_print_centering,set_print_scale,set_paper_size,set_header_footer_flag); XLSX ACCEPTED -> ACCEPTED_WRITE = 6 (unmerge_range,unfreeze_panes,clear_filter,clear_print_area,rename_chart,set_chart_title); XLSX PARTIAL -> PARTIAL = 2 (insert_columns,set_chart); XLSX ACCEPTED -> PARTIAL = 3 (clear_print_titles,move_sheet,set_page_layout); XLSX NOT_MEASURED -> PARTIAL = 1 (set_chart_legend); XLSX NOT_MEASURED -> ACCEPTED_WRITE = 1 (set_chart_axis_title)"
 }

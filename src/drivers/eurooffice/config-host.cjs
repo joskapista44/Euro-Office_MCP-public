@@ -27,11 +27,50 @@ const DENY = Object.freeze({ 'content-type': 'text/plain; charset=utf-8', 'cache
 const PAGE = Object.freeze({ 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY' });
 
-/** The editor page (unchanged contract: window.__ready / __error / __config / __docEditor). */
+/**
+ * The editor page (unchanged contract: window.__ready / __error / __config / __docEditor).
+ *
+ * GitHub #77: before this, only onDocumentReady was wired -- the open() wait (`window.__ready === true ||
+ * window.__error`) was blind to onError/onWarning/onInfo for 90s if the constructor itself never threw. Now:
+ *   onError   -> window.__error = { kind:'onError', code, description } (the constructor's own catch still sets
+ *               __error to a plain string on a THROWN error; the wait predicate does not care which shape)
+ *   onWarning -> pushed to window.__warnings[] -- does NOT set __ready/__error, the wait is unaffected on purpose
+ *               (a warning is not a terminal state; config-host.cjs's own driver-side reader is what surfaces it)
+ *   onInfo    -> window.__info = { mode } -- same: does not affect the wait
+ */
 function editorPage(config) {
   const api = `${config.documentServerUrl}web-apps/apps/api/documents/api.js?shardKey=${encodeURIComponent(config.document.key)}`;
   const safe = JSON.stringify(config).replace(/</g, '\\u003c');
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><script src="${api}"></script></head><body><div id="editor" style="width:1200px;height:800px"></div><script>window.__ready=false;window.__error=null;window.__config=${safe};window.__config.events={onDocumentReady:function(){window.__ready=true}};try{window.__docEditor=new DocsAPI.DocEditor('editor',window.__config)}catch(e){window.__error=String(e&&e.stack||e)}</script></body></html>`;
+  const events = "{onDocumentReady:function(){window.__ready=true},"
+    + "onError:function(e){window.__error={kind:'onError',code:e&&e.data&&e.data.errorCode,description:e&&e.data&&e.data.errorDescription}},"
+    + "onWarning:function(e){window.__warnings.push({code:e&&e.data&&e.data.errorCode,description:e&&e.data&&e.data.errorDescription})},"
+    + "onInfo:function(e){window.__info={mode:e&&e.data&&e.data.mode}}}";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><script src="${api}"></script></head><body><div id="editor" style="width:1200px;height:800px"></div><script>window.__ready=false;window.__error=null;window.__warnings=[];window.__info=null;window.__config=${safe};window.__config.events=${events};try{window.__docEditor=new DocsAPI.DocEditor('editor',window.__config)}catch(e){window.__error=String(e&&e.stack||e)}</script></body></html>`;
+}
+
+/**
+ * GitHub #77: the page-side read of what DS reported, for a driver's open() to call back after its ready/error
+ * wait times out (one evaluate() call; null if the page cannot be read at all, e.g. it already closed/crashed --
+ * kept DISTINCT from "nothing happened", which is a different fact).
+ */
+async function readDsOpenState(page) {
+  return page.evaluate(() => ({ error: window.__error || null, warnings: window.__warnings || [], info: window.__info || null })).catch(() => null);
+}
+
+/**
+ * GitHub #77: the OPEN_FAILED detail for a timed-out onReady/onError wait -- names the DS's own error code /
+ * description when onError actually fired, what onWarning/onInfo recorded even though neither stops the wait, or
+ * that literally no DS event arrived in the whole window ('no-ds-event', distinct from 'ds-state-unreadable').
+ */
+function openWaitFailureDetail(dsState) {
+  if (dsState === null) return 'ds-state-unreadable: window.__error/__warnings/__info could not be read after the timeout';
+  const { error, warnings, info } = dsState;
+  if (error) {
+    if (error && typeof error === 'object' && error.kind === 'onError') return `DS onError: code ${error.code}, ${error.description}`;
+    return `the editor constructor threw: ${error}`;
+  }
+  if ((warnings && warnings.length) || info) return `no-ds-ready-or-error: DS reported onWarning/onInfo only: ${JSON.stringify({ warnings, info })}`;
+  return 'no-ds-event: no onDocumentReady/onError/onWarning/onInfo observed in the wait window';
 }
 
 const sameText = (a, b) => {
@@ -80,4 +119,4 @@ function startConfigHost(config) {
   });
 }
 
-module.exports = { startConfigHost, editorPage, TOKEN_BYTES };
+module.exports = { startConfigHost, editorPage, TOKEN_BYTES, readDsOpenState, openWaitFailureDetail };

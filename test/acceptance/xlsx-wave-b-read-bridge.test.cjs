@@ -5,8 +5,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { BRIDGE_CAPABILITIES, BRIDGE_CLIENT_SRC } = require('../../src/drivers/eurooffice/ds-bridge.cjs');
-const { RUNTIMES } = require('../../src/core/runtime-identity.cjs');
-const { withPatch, OTHER_PATCH } = require('../fakes/ds-bridge-runtime.cjs');
 
 /**
  * Wave B READ (/4) -- range.alignmentExt.read/v1 (B05 READ), sheet.printSettings.read/v1 (B09), pivot.state.read/v1
@@ -139,12 +137,18 @@ test('manifest /5: the three Wave B ids stay READ / XLSX / mutation NO (/5 adds 
 });
 
 test('the MCP client refuses the new capabilities on the /3 runtime and when a capability is missing -- no fallback', () => {
-  const call = (api, cap) => new Function('Api', `${BRIDGE_CLIENT_SRC}; return __eoBridgeRead(${JSON.stringify(cap.id)}, ${cap.version}, ${JSON.stringify(RUNTIMES.xlsx)}, { sheet: 'P', pivot: 'PT' }, ${JSON.stringify(cap.valueType)});`)(api);
+  // DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): this test is about the SHIPPED historical
+  // /5 block's own capability mechanics (an existing capability vs. a wrong patch vs. missing), independent of
+  // what is currently accepted -- SERVED_RUNTIME names the identity THIS SOURCE block actually reports, so the
+  // "expected" param stays matched to it rather than to RUNTIMES.xlsx (now the retired /5 block no longer matches).
+  const SERVED_RUNTIME = { documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-v1/9.3.4.60/5' };
+  const call = (api, cap, expected = SERVED_RUNTIME) => new Function('Api', `${BRIDGE_CLIENT_SRC}; return __eoBridgeRead(${JSON.stringify(cap.id)}, ${cap.version}, ${JSON.stringify(expected)}, { sheet: 'P', pivot: 'PT' }, ${JSON.stringify(cap.valueType)});`)(api);
   const api = pivotApi([pivot('PT', 'D!$A$1:$B$2')]);
   bridgeOf(api); // installs the shipped block's Api.GetEuroOfficeBridge on this fake
   assert.deepEqual(call(api, BRIDGE_CAPABILITIES.PIVOT_STATE_READ), { ok: true, value: { dataRef: 'D!$A$1:$B$2' } }, 'POSITIVE CONTROL on the accepted runtime (/5)');
-  assert.equal(OTHER_PATCH, 'euro-office-bridge-v1/9.3.4.60/4');
-  assert.deepEqual(call(withPatch(api), BRIDGE_CAPABILITIES.PIVOT_STATE_READ), { ok: false, reason: 'PATCH_VERSION_MISMATCH' }, 'the previous revision (/4) refuses');
+  const PREVIOUS_PATCH = 'euro-office-bridge-v1/9.3.4.60/4';
+  const prevApi = { GetEuroOfficeBridge: () => { const b = bridgeOf(api); const m = b.manifest(); return { manifest: () => ({ ...m, patchVersion: PREVIOUS_PATCH }), read: b.read }; } };
+  assert.deepEqual(call(prevApi, BRIDGE_CAPABILITIES.PIVOT_STATE_READ), { ok: false, reason: 'PATCH_VERSION_MISMATCH' }, 'the previous revision (/4) refuses');
   const noCap = { GetEuroOfficeBridge: () => { const b = bridgeOf(api); const m = b.manifest(); return { manifest: () => ({ ...m, capabilities: m.capabilities.filter(c => c.id !== 'pivot.state.read/v1') }), read: b.read }; } };
   assert.deepEqual(call(noCap, BRIDGE_CAPABILITIES.PIVOT_STATE_READ), { ok: false, reason: 'CAPABILITY_MISSING' });
 });

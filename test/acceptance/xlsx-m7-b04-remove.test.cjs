@@ -123,23 +123,41 @@ for (const [fault, extra, cells] of [
   });
 }
 
-test('refused before the write, 0/0: a diagonal on the target cell (no public restore path); a merge in the window; an unmeasured axis anywhere in the window', async () => {
-  const diag = windowSeed();
-  diag.D2 = { ...blank, border: { b: thin } };
-  diag.D3 = { v: 'x', border: { t: thin, d: { s: 7, c: 0 }, dd: true } };
-  const r1 = await run(diag);
-  assert.deepEqual([r1.m.writes, r1.m.commands], [0, 0]);
-  assert.equal(op(r1.result).evidence.evidence.reason, 'xlsx-format-remove-diagonal-unsupported');
+test('L-16/1: a drawn diagonal on the target is RESTORED (no old reason); an unrestorable diagonal and an unmeasured axis anywhere in the window refuse before the write, 0/0; a merge in the window no longer does (L-16/3)', async () => {
+  for (const flags of [{ dd: true }, { du: true }, { dd: true, du: true }]) {
+    const diag = windowSeed();
+    diag.D2 = { ...blank, border: { b: thin } };
+    diag.D3 = { v: 'x', border: { t: thin, d: { s: 7, c: 0 }, ...flags } };
+    const r1 = await run(diag);
+    assert.ok(r1.m.writes > 0, JSON.stringify({ flags, ev: op(r1.result).evidence }));
+    assert.notEqual(op(r1.result).evidence && op(r1.result).evidence.evidence && op(r1.result).evidence.evidence.reason, 'xlsx-format-remove-diagonal-unsupported');
+  }
+  // the diagonal is carried into the restore data (and only a drawn one): direction flags + shared style/colour
+  const o = planOperations(task('D3:D3', ['top'])).operations[0];
+  const cell = (border, extra = {}) => ({ wrap: false, nf: 'General', fill: 'S:none', font: { bold: null, italic: null, name: 'Calibri', size: 11, color: 0 }, align: { h: null, v: 0 }, border: { t: { s: 0, c: 0 }, b: { s: 0, c: 0 }, l: { s: 0, c: 0 }, r: { s: 0, c: 0 }, d: { s: 0, c: 0 }, dd: false, du: false, ...border }, ...extra });
+  const lowerWith = d3 => require('../../src/adapters/xlsx/families/format.cjs').lower(o, { before: { D3: d3, D2: cell({}) } });
+  const withDiag = lowerWith(cell({ t: { s: 7, c: 255 }, d: { s: 7, c: 65280 }, dd: false, du: true }));
+  assert.deepEqual(withDiag.meta.restoreData.find(([a]) => a === 'D3')[1].diagonal, { style: 'Thin', color: 65280, dd: false, du: true });
+  assert.equal(lowerWith(cell({ t: { s: 7, c: 255 } })).meta.restoreData.find(([a]) => a === 'D3')[1].diagonal, null, 'NEG: no diagonal drawn -> none restored');
+  // NEG: a drawn shared style with NEITHER direction flag cannot be re-issued exactly -> refuse, never fabricate
+  const nodir = windowSeed();
+  nodir.D2 = { ...blank, border: { b: thin } };
+  nodir.D3 = { v: 'x', border: { t: thin, d: { s: 7, c: 0 }, dd: false, du: false } };
+  const r0 = await run(nodir);
+  assert.deepEqual([r0.m.writes, r0.m.commands], [0, 0]);
+  assert.equal(op(r0.result).evidence.evidence.reason, 'xlsx-format-remove-unrestorable-value');
+  assert.equal(op(r0.result).evidence.evidence.why, 'no-direction');
 
+  // L-16/3: the merge that FACES the removed top (D1:D2) is released through C5 (UnMerge -> composite -> Merge) -- no merge in the window refuses by itself any more; see xlsx-l16-3-c5-remove-merge.test.cjs
   const merged = windowSeed();
   merged.D2 = { ...blank, border: { b: thin } };
   merged.D3 = { v: 'x', border: { t: thin } };
-  const store2 = createStore([{ name: 'B', cells: { ...merged, E3: { v: 'm' } }, merges: ['E3:E4'] }]);
+  const store2 = createStore([{ name: 'B', cells: { ...merged, D1: { v: 'm' } }, merges: ['D1:D2'] }]);
   const driver2 = createFakeXlsxDriver(store2, {});
   let n2 = 0;
   const result2 = await withSession({ driver: driver2, fileId: 'disposable', now: () => (n2 += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } }, xlsxAdapter, createExecutor(task('D3:D3', ['top']), { observation: { live: liveScope(task('D3:D3', ['top'])) } }));
-  assert.deepEqual([result2.metrics.writes, result2.metrics.commands], [0, 0]);
-  assert.equal(op(result2).evidence.evidence.reason, 'xlsx-format-remove-merged-ring-refused');
+  assert.equal(result2.ok, true, JSON.stringify(op(result2).evidence));
+  assert.deepEqual([result2.metrics.writes, result2.metrics.commands], [1, 1]);
 
   // X-F02: an empty cell's font is now observable by default -- forcing the reader to
   // throw (emptyFontUnobservable) is what still leaves this removeCells() cell's kept axis unmeasured.
@@ -160,7 +178,7 @@ test('refused before the write, 0/0: a diagonal on the target cell (no public re
  * (cellGap) only to removeCells() cells; every other window cell gets the WEAK check (weakGap: border +
  * merge only, the same contract outline/inside/all already use for their own ring).
  */
-test('a non-removeCells() window cell only needs border + merge readability -- an unreadable font or a diagonal there does not block the removal; a merge there still does', async () => {
+test('a non-removeCells() window cell only needs border + merge readability -- an unreadable font or a diagonal there does not block the removal; a merge there does not either unless the composite writes it (L-16/2)', async () => {
   const base = () => { const c = windowSeed(); c.D2 = { ...blank, border: { b: thin } }; c.D3 = { v: 'x', border: { t: thin } }; return c; };
 
   // C2 is a ring CORNER -- not in removeCells() for a D3-top removal (only D3 and D2 are). Genuinely blank
@@ -180,14 +198,15 @@ test('a non-removeCells() window cell only needs border + merge readability -- a
   const r2 = await run(diagCorner);
   assert.equal(r2.result.ok, true, JSON.stringify(op(r2.result).evidence));
 
-  // a MERGE on that same non-target corner must still refuse -- weakGap keeps the merge check.
+  // L-16/2: a MERGE on that same non-target corner no longer refuses (the composite never writes it; LIVE-measured unchanged, test/live/xlsx-l16-2-merged-ring-probe.live.cjs);
+  // a merge that reaches a WRITTEN cell still does -- see xlsx-l16-2-merged-ring.test.cjs.
   const mergedCorner = base();
   const store3 = createStore([{ name: 'B', cells: { ...mergedCorner, C1: { v: 'm' } }, merges: ['C1:C2'] }]);
   const driver3 = createFakeXlsxDriver(store3, {});
   let n3 = 0;
   const result3 = await withSession({ driver: driver3, fileId: 'disposable', now: () => (n3 += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } }, xlsxAdapter, createExecutor(task('D3:D3', ['top']), { observation: { live: liveScope(task('D3:D3', ['top'])) } }));
-  assert.deepEqual([result3.metrics.writes, result3.metrics.commands], [0, 0]);
-  assert.equal(op(result3).evidence.evidence.reason, 'xlsx-format-remove-merged-ring-refused');
+  assert.equal(result3.ok, true, JSON.stringify(op(result3).evidence));
+  assert.deepEqual([result3.metrics.writes, result3.metrics.commands], [1, 1]);
 });
 
 /**
@@ -252,7 +271,10 @@ test('the command is one callCommand, data-driven, one call site each for SetBor
   assert.deepEqual(cmd.meta.removeClear, { D3: ['t'], D2: ['b'] });
   assert.doesNotThrow(() => new Function(cmd.body));
   assert.equal((cmd.body.match(/\.ClearFormats\(\)/g) || []).length, 1, 'one call site in a loop');
-  assert.equal((cmd.body.match(/\.SetBorders\(/g) || []).length, 1, 'one call site in a loop (remove\'s own loop; no outline/plain-cells border write coexists)');
+  // L-16/1: the loop's three SetBorders call sites are the kept sides + the two diagonal directions (each guarded by rs.diagonal)
+  assert.equal((cmd.body.match(/\.SetBorders\(/g) || []).length, 3, 'sides loop + DiagonalDown + DiagonalUp (no outline/plain-cells border write coexists)');
+  assert.equal((cmd.body.match(/\.SetBorders\("DiagonalDown", rs\.diagonal\.style, rgb\(rs\.diagonal\.color\)\)/g) || []).length, 1);
+  assert.equal((cmd.body.match(/\.SetBorders\("DiagonalUp", rs\.diagonal\.style, rgb\(rs\.diagonal\.color\)\)/g) || []).length, 1);
 
   // a maintainer review v3 #ref (point 3): the fake applies the NET effect, so a setter dropped from the generated
   // script would pass offline -- every restored axis must have exactly one setter call in the restore loop

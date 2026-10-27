@@ -47,15 +47,19 @@ test('set_chart: APPLIED with the derived series, retry SATISFIED 0/0', async ()
   assert.equal(r.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
 });
 
-// X-O03: lineNormal/area/pie/doughnut, LIVE-measured to hold the same series contract as bar.
-for (const type of ['lineNormal', 'area', 'pie', 'doughnut']) {
+// X-O03: lineNormal/area/pie/doughnut/radar/stock, LIVE-measured to hold the same series contract
+// as bar. radar's OWN read-side type is the measured "unknown" quirk (fake-xlsx-driver.cjs
+// simulates it, charts.cjs's READBACK_TYPE/readbackType() holds it fixed) -- `chartsOf()` here
+// reads the fake's INTERNAL store object directly (never through chartReadsOf), so it still shows
+// the real requested type, not the quirk.
+for (const type of ['lineNormal', 'area', 'pie', 'doughnut', 'radar', 'stock']) {
   test(`set_chart type=${type}: APPLIED with the derived series, retry SATISFIED 0/0`, async () => {
     const store = createStore(book());
     const a = await run(store, add({ type }));
     assert.equal(a.result.ok, true, JSON.stringify(a.result.execution.appliedOperations[0].evidence));
     assert.equal(chartsOf(store, 'K')[0].type, type);
     const r = await run(store, add({ type }));
-    assert.equal(r.m.commands, 0);
+    assert.equal(r.m.commands, 0, JSON.stringify(r.result.execution.appliedOperations[0].evidence));
     assert.equal(r.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
   });
 }
@@ -148,6 +152,7 @@ test('planner: one sheet name without quoting, bar only, one title line, a heade
   const refuse = (t, re) => { const p = planOperations(t); assert.equal(p.ok, false, JSON.stringify(t)); assert.match(p.detail, re); };
   refuse(add({ sheet: 'My Sheet' }), /needs no quoting/);
   refuse(add({ type: 'scatter' }), /type must be one of/);
+  refuse(add({ type: 'surface' }), /type must be one of/);
   refuse(add({ type: 'notachart' }), /type must be one of/);
   refuse(add({ title: 'a\nb' }), /one non-empty line/);
   refuse(add({ range: 'A1:A4' }), /header row, a category column and data/);
@@ -157,7 +162,9 @@ test('planner: one sheet name without quoting, bar only, one title line, a heade
   refuse(leg('topRight'), /legend must be one of/);
   refuse(leg('notalegend'), /legend must be one of/);
   refuse({ id: 'x', steps: [{ intent: 'set_chart_legend', sheet: 'K', name: 'C1', legend: 'top', extra: 1 }] }, /does not support field/);
-  refuse({ id: 'x', steps: [{ intent: 'delete_chart', sheet: 'K', name: 'C1' }] }, /./);
+  // X-O07/3: `delete_chart` is now a REAL intent too (chart.drawing.delete.write/v1) -- this
+  // "an unsupported intent name refuses" probe moves to a name that stays fictional.
+  refuse({ id: 'x', steps: [{ intent: 'erase_chart', sheet: 'K', name: 'C1' }] }, /./);
 });
 
 test('the command bodies: AddChart (columns, bar) + SetName + SetTitle; rename re-identified at dispatch', () => {
@@ -205,6 +212,19 @@ test('the driver reader: every chart with name / type / title / legend / series,
   const bad = { ...ws, GetName: () => 'B', GetAllCharts: () => { throw new Error('boom'); } };
   const Api = { GetSheets: () => [ws, bad], GetSheet: n => (n === 'K' ? ws : bad), WorksheetFunction: { COUNT: () => 0 } };
   const r = new Function('Api', readQuery([], { chartSheets: ['*'] }))(Api).chartReads;
-  assert.deepEqual(r.K, { charts: [{ name: 'C1', type: 'bar', title: 'Sales', legend: 'bottom', series: [{ name: '=K!$B$1', values: '=K!$B$2:$B$4', cat: '=K!$A$2:$A$4' }], horAxisTitle: null, verAxisTitle: null, dataLabels: { showSerName: false, showCatName: false, showVal: false, showPercent: false } }], pivots: ['PV'] });
+  // X-O05/4 round 2 (a maintainer's LIVE r1): GetValues() here is a formula STRING -- the REAL shape -- a single-column
+  // range $B$2:$B$4 (3 rows, same column) -> 3 points. This Api has no GetEuroOfficeBridge, so each point's
+  // bridge call fails BRIDGE_UNAVAILABLE -- verbatim per point, never a guessed {} or a thrown error.
+  // X-O04/10: gridlinesColor is unconditional per chart (this fake has no GetEuroOfficeBridge, so
+  // it fails BRIDGE_UNAVAILABLE the same way effectiveLabels does above); markerStyle is scoped to
+  // scatter+lineNormal series only -- absent here, this chart's type is 'bar'.
+  // X-O05/2: order is unconditional per series (unlike markerStyle), same BRIDGE_UNAVAILABLE path;
+  // gapOverlap is unconditional per chart (same as gridlinesColor), same path too.
+  // GH139 B /16: lineStyle.read is scoped to bar+lineNormal series (this chart's type is 'bar', so
+  // it applies here too, same BRIDGE_UNAVAILABLE path); markerSymbol.read is scoped to
+  // scatter+lineNormal only -- 'bar' is OUT of scope, so it is a NAMED UNOBSERVABLE (a maintainer's
+  // mechanism-probe #ref: an out-of-scope type must not simply omit the field), not absent.
+  assert.deepEqual(r.K, { charts: [{ name: 'C1', type: 'bar', title: 'Sales', legend: 'bottom', series: [{ name: '=K!$B$1', values: '=K!$B$2:$B$4', cat: '=K!$A$2:$A$4', order: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE', markerSymbol: 'UNOBSERVABLE:chart-type-not-in-scope:bar', lineStyle: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE' }], horAxisTitle: null, verAxisTitle: null, dataLabels: { showSerName: false, showCatName: false, showVal: false, showPercent: false },
+    effectiveLabels: { '0:0': 'UNOBSERVABLE:BRIDGE_UNAVAILABLE', '0:1': 'UNOBSERVABLE:BRIDGE_UNAVAILABLE', '0:2': 'UNOBSERVABLE:BRIDGE_UNAVAILABLE' }, gridlinesColor: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE', gapOverlap: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE' }], pivots: ['PV'] });
   assert.match(r.B, /^UNOBSERVABLE:/);
 });

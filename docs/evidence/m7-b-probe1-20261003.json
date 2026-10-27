@@ -1,5 +1,5 @@
 {
-  "FIXTURE": "Flotta közös/an internal branch/demo.xlsx",
+  "FIXTURE": "fixtures/EURO-MCP/demo.xlsx",
   "SCENARIOS": {
     "REMOVE": {
       "SCENARIO": "REMOVE",

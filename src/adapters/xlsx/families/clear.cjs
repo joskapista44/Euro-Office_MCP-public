@@ -32,7 +32,70 @@ const cells = require('./cells.cjs');
  */
 
 const MAX_CELLS = 1000;
-const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range']);
+const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range', 'scope']);
+
+/**
+ * L-14 / L-17 (standing release GO, internal tracker; LIVE-measured test/live/xlsx-l14-l17-clear-formats-probe.live.cjs, 1x3 + 2x2 merge,
+ * session and reopen): `scope` picks what the clear removes.
+ *   'contents' (the default, the code above UNCHANGED): the value only -- SetValue('') per cell, number format / fill / bold kept.
+ *   'formats'  : range.ClearFormats() -- every format axis back to its base, the VALUE (and formula) KEPT.
+ *   'all'      : range.Clear() -- value AND every format axis. (ClearContents() is NOT used: LIVE it equals Clear(), so it can never be the
+ *                'contents' primitive.)
+ * Both format scopes DISSOLVE a merge LIVE, so a range that touches any merged area (the anchor included) is refused by name before any
+ * dispatch; re-merging is not part of this step. The base axes asserted after the write are the ones with an unambiguous reader.
+ *
+ * GH #141 P1 (clear-formats-l1-teljes-alap, 2026-10-17): the base axes asserted were ONLY the six
+ * that existed when this file was written (nf/fill/bold/italic/wrap/rot) -- border, align.{h,v},
+ * readingOrder/indent/shrink and font.{underline,strike} were readable (the family's own windowsOf
+ * already asks for `style: true`, which the driver answers with ALL of these) but never compared
+ * back to their own base after a 'formats'/'all' clear. Their "never touched" base values are the
+ * SAME ones the family's own font/align/border readers already document and every existing test
+ * fixture (test/fakes/fake-xlsx-driver.cjs styleOf()) already encodes, cited per-axis below; a LIVE
+ * re-measurement of ClearFormats()/Clear() ITSELF against a cell carrying these axes is a SEPARATE,
+ * follow-up LIVE round (the existing release-l14-l17-clear-scope-product.live.cjs harness only
+ * seeds bold/italic) -- this file's own fail-closed shape (axesOffBase -> APPLY, never SATISFIED,
+ * on a regression) means an unconfirmed axis fails SAFE: it would show as "still not at base"
+ * rather than a silent false pass.
+ * font.name / font.size stay OUT of BASE_AXES on purpose: the documented base ('Calibri', 11) is
+ * THIS fixture's workbook default font, not a fixed engine constant (unlike wrap/rot/border/align/
+ * readingOrder/indent/shrink, which are ECMA-376 cell-format defaults independent of any theme) --
+ * asserting a hardcoded name/size after a clear would be wrong on a workbook with a different
+ * default font. NEM-MERT, not silently assumed.
+ */
+const SCOPES = Object.freeze(['contents', 'formats', 'all']);
+const BASE_NF = 'General';
+const noFill = fill => fill === null || fill === undefined || /^S:No Fill$/i.test(String(fill));
+/** border at base: all four sides + the diagonal read {s:0,c:0}, neither diagonal direction flag set
+ *  (m6-w4c-internal-align-border-probe-20260928.json I2: a never-touched side reads exactly this). */
+const BASE_BORDER_SIDE = side => !!side && typeof side === 'object' && side.s === 0 && side.c === 0;
+const isBaseBorder = b => !!b && typeof b === 'object' && ['t', 'b', 'l', 'r', 'd'].every(k => BASE_BORDER_SIDE(b[k])) && b.dd === false && b.du === false;
+/** align at base: horizontal unset (null, "General"), vertical the measured default 'bottom' (0) --
+ *  m7-s31c-probe1-20261005.json / the m6-w4c I2 control cell, both MEASURED. */
+const isBaseAlign = al => !!al && typeof al === 'object' && al.h === null && al.v === 0;
+/** font.underline/strike at base: underline has no boolean off-state, its untouched/off reader is the
+ *  enum string 'xlUnderlineStyleNone' (X-F05, m7-s21-probe1); strike is null (ambiguous with an
+ *  explicit false, the same ambiguity bold/italic's own reader has) -- both MEASURED, not assumed. */
+const isBaseFontEffects = f => !!f && typeof f === 'object' && f.underline === 'xlUnderlineStyleNone' && f.strike === null;
+const BASE_AXES = Object.freeze([
+  ['nf', c => c.nf, v => v === BASE_NF],
+  ['fill', c => c.fill, v => noFill(v)],
+  ['bold', c => c.bold, v => v === false],
+  ['italic', c => c.italic, v => v === false],
+  ['wrap', c => c.wrap, v => v === false],
+  ['rot', c => c.rot, v => v === 0],
+  // GH #141 P1 additions, all gated the SAME way as the original six: an 'UNOBSERVABLE:*' value on
+  // the read makes the whole axis unread (axesOffBase below), never silently treated as "at base".
+  ['align', c => c.align, v => isBaseAlign(v)],
+  ['border', c => c.border, v => isBaseBorder(v)],
+  ['readingOrder', c => c.readingOrder, v => v === 0],
+  ['indent', c => c.indent, v => v === 0],
+  ['shrink', c => c.shrink, v => v === false],
+  // underline/strike share ONE reader (font.{underline,strike}) -- a gap on either makes BOTH
+  // unread, the same "one capability, every axis it carries" rule align.h/v and border already use.
+  ['underline', c => c.font, v => isBaseFontEffects(v)],
+  ['strike', c => c.font, v => isBaseFontEffects(v)],
+]);
+const isFormatScope = op => op.scope === 'formats' || op.scope === 'all';
 
 function plan(step, index) {
   const unknown = Object.keys(step).filter(k => !FIELDS.includes(k));
@@ -41,12 +104,14 @@ function plan(step, index) {
   const g = parseRange(step.range);
   if (!g) return { ok: false, detail: `step ${index}: clear_range requires a plain A1 range on the named sheet (no Sheet!A1)` };
   if (g.count > MAX_CELLS) return { ok: false, detail: `step ${index}: clear_range range has ${g.count} cells, over the ${MAX_CELLS} ceiling` };
+  if ('scope' in step && !SCOPES.includes(step.scope)) return { ok: false, detail: `step ${index}: clear_range scope must be one of ${SCOPES.join(' | ')}` };
   return {
     ok: true,
     operation: {
       id: step.id || `s${index}`,
       intent: 'clear_range',
       selector: Object.freeze({ sheet: step.sheet, range: rangeText(g) }),
+      scope: step.scope || 'contents',
       cells: Object.freeze(cellsOf(g).map(a => Object.freeze({ a }))),
       preservationMode: 'PRIMITIVE_INTEGRAL',
     },
@@ -69,17 +134,45 @@ function gate(primary, op) {
   for (const { a } of op.cells) {
     const cell = cellAt(primary, op.selector.sheet, a);
     if (!cell) return { ok: false, reason: 'xlsx-target-cell-unread', cell: a };
-    if (cell.merge && cell.merge !== a) return { ok: false, reason: 'xlsx-clear-in-merged-area-refused', cell: a, mergeArea: cell.merge };
+    if (cell.merge && cell.merge !== a) return { ok: false, reason: isFormatScope(op) ? 'xlsx-clear-scope-dissolves-merge' : 'xlsx-clear-in-merged-area-refused', cell: a, mergeArea: cell.merge };
     if (!('nf' in cell) || !('fill' in cell)) return { ok: false, reason: 'xlsx-target-format-unread', cell: a };
     if (typeof cell.bold !== 'boolean') return { ok: false, reason: 'xlsx-target-bold-unobservable', cell: a, bold: 'bold' in cell ? cell.bold : 'UNOBSERVABLE:not-read' };
+    if (isFormatScope(op) && !('wrap' in cell && 'rot' in cell && 'italic' in cell && 'align' in cell && 'border' in cell && 'readingOrder' in cell && 'indent' in cell && 'shrink' in cell && 'font' in cell)) return { ok: false, reason: 'xlsx-target-style-unread', cell: a };
     found[a] = cell;
   }
   return { ok: true, cells: found };
 }
 
+/** The base axes that are NOT at base on a cell (an unreadable axis is not at base: null = unread). */
+function axesOffBase(cell) {
+  const off = [];
+  for (const [name, read, atBase] of BASE_AXES) {
+    const x = read(cell);
+    if (typeof x === 'string' && x.startsWith('UNOBSERVABLE')) return null;
+    if (!atBase(x)) off.push(name);
+  }
+  return off;
+}
+
+function classifyScoped(g, op) {
+  const unread = [];
+  const pending = [];
+  for (const { a } of op.cells) {
+    const cell = g.cells[a];
+    const off = axesOffBase(cell);
+    if (off === null) { unread.push(a); continue; }
+    if (op.scope === 'all' && isCleared(cell) !== true) pending.push(a);
+    else if (off.length) pending.push(a);
+  }
+  if (unread.length) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-target-style-unobservable', cells: unread.slice(0, 20) } };
+  if (!pending.length) return { state: 'SATISFIED', evidence: { sheet: op.selector.sheet, range: op.selector.range, scope: op.scope, proof: 'fresh-live-cells-already-at-base' } };
+  return { state: 'APPLY', evidence: { sheet: op.selector.sheet, range: op.selector.range, scope: op.scope, pending: pending.length } };
+}
+
 function classify(primary, op) {
   const g = gate(primary, op);
   if (!g.ok) return { state: 'FAIL_CLOSED', evidence: g };
+  if (isFormatScope(op)) return classifyScoped(g, op);
   const verdicts = op.cells.map(({ a }) => isCleared(g.cells[a]));
   if (verdicts.includes(null)) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-cell-type-unreadable' } };
   if (verdicts.every(Boolean)) return { state: 'SATISFIED', evidence: { sheet: op.selector.sheet, range: op.selector.range, proof: 'fresh-live-cells-already-blank' } };
@@ -96,6 +189,22 @@ function resolve(primary, selector, ctx = {}) {
 function lower(op) {
   const sheet = op.selector.sheet;
   const addrs = op.cells.map(({ a }) => a);
+  if (isFormatScope(op)) {
+    const call = op.scope === 'all' ? 'Clear' : 'ClearFormats';
+    return {
+      kind: 'callCommand',
+      body: `
+try {
+  const name = ${JSON.stringify(sheet)};
+  const ws = Api.GetSheet(name);
+  if (!ws || ws.GetName() !== name) return { ok: false, stage: 'sheet-identity' };
+  ws.GetRange(${JSON.stringify(op.selector.range)}).${call}();
+  return { ok: true, cleared: ${addrs.length} };
+} catch (err) { return { ok: false, stage: 'threw', error: String(err) }; }
+`,
+      meta: Object.freeze({ family: 'clear', action: op.scope === 'all' ? 'clear-all' : 'clear-formats', sheet, range: op.selector.range, cells: Object.freeze(addrs) }),
+    };
+  }
   return {
     kind: 'callCommand',
     body: `
@@ -112,8 +221,30 @@ try {
   };
 }
 
+/** L1 of the format scopes: every target cell's base axes are at base; 'formats' keeps value AND formula, 'all' leaves the cell blank. */
+function verifyScoped(op, before, after) {
+  const b = before && before.primary;
+  const a = after && after.primary;
+  const offBase = [];
+  const valueChanged = [];
+  const notBlank = [];
+  for (const { a: addr } of op.cells) {
+    const now = cellAt(a, op.selector.sheet, addr);
+    const was = cellAt(b, op.selector.sheet, addr);
+    const off = now ? axesOffBase(now) : null;
+    if (off === null || off.length) offBase.push({ cell: addr, axes: off === null ? 'unobservable' : off });
+    if (op.scope === 'formats') { if (!was || !now || was.f !== now.f || JSON.stringify(was.v) !== JSON.stringify(now.v)) valueChanged.push(addr); }
+    else if (isCleared(now) !== true) notBlank.push(addr);
+  }
+  return {
+    ok: offBase.length === 0 && valueChanged.length === 0 && notBlank.length === 0,
+    evidence: { sheet: op.selector.sheet, range: op.selector.range, scope: op.scope, cells: op.cells.length, offBase: offBase.slice(0, 20), valueChanged, notBlank, assertedAxes: BASE_AXES.map(x => x[0]), proof: 'fresh-live-base-axes-and-value' },
+  };
+}
+
 /** L1: every target cell blank AND its number format and fill equal to the read before the write. */
 function verifyPrimitive(op, before, after) {
+  if (isFormatScope(op)) return verifyScoped(op, before, after);
   const b = before && before.primary;
   const a = after && after.primary;
   const notBlank = [];
@@ -137,6 +268,7 @@ function verifyPrimitive(op, before, after) {
  */
 function verifyPreservation(op, before, after) {
   const rest = cells.verifyPreservation(op, before, after);
+  if (isFormatScope(op)) return rest;
   const b = before && before.primary;
   const a = after && after.primary;
   const boldChanged = [];
@@ -152,11 +284,16 @@ function verifyPreservation(op, before, after) {
 }
 
 function wholeTaskChecks(op, finalObservation) {
+  if (isFormatScope(op)) {
+    const v = verifyScoped(op, null, finalObservation);
+    const bad = v.evidence.offBase.map(x => x.cell).concat(v.evidence.notBlank);
+    return [{ name: `every cell of ${op.selector.sheet}!${op.selector.range} is at base format${op.scope === 'all' ? ' and blank' : ''}`, ok: bad.length === 0, detail: bad.length ? { cells: bad } : null }];
+  }
   const bad = op.cells.filter(({ a }) => isCleared(cellAt(finalObservation && finalObservation.primary, op.selector.sheet, a)) !== true).map(({ a }) => a);
   return [{ name: `every cell of ${op.selector.sheet}!${op.selector.range} is blank`, ok: bad.length === 0, detail: bad.length ? { notBlank: bad } : null }];
 }
 
 /** The target window, read WITH number format and fill (the proof needs both, before and after). */
-const windowsOf = op => [{ sheet: op.selector.sheet, range: op.selector.range, format: true }];
+const windowsOf = op => [{ sheet: op.selector.sheet, range: op.selector.range, ...(isFormatScope(op) ? { style: true } : { format: true }) }];
 
 module.exports = { plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, isCleared, MAX_CELLS };

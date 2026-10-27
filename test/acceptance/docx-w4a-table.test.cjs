@@ -129,12 +129,19 @@ test('negatives -> FAIL_CLOSED, 0 dispatch', async () => {
   dupCell[0].rows[1][2] = cell('r1c1');
   const nonPlain = tables();
   nonPlain[0].rows[1][1] = { ...cell('r1c1'), nonPlain: true };
+  // GH #289 (LIVE probe 3): an image / a PAGE field reads as runs with no text -- the cell looked plain
+  const withImage = tables(); withImage[0].rows[1][1] = { ...cell('r1c1'), inline: ['blipFill', 'image', 'paraDrawing'] };
+  const withField = tables(); withField[0].rows[1][1] = { ...cell('r1c1'), inline: ['pgNum'] };
+  const inlineUnread = tables(); inlineUnread[0].rows[1][1] = { ...cell('r1c1'), inline: null };
   const cases = [
     [task(step('nowhere', 'x')), store(), {}, 'table-cell-terminal-unprovable'],
     [task(step('r1c1', 'x')), store({ tables: dupCell }), {}, 'table-cell-ambiguous'],
     [task(step(A, 'x')), store(), {}, 'table-cell-terminal-unprovable'],
     [task(step('r1c1', 'r0c0')), store(), {}, 'table-cell-conflicting-old-and-new-state'],
     [task(step('r1c1', 'x')), store({ tables: nonPlain }), {}, 'table-cell-not-plain-paragraphs-of-runs'],
+    [task(step('r1c1', 'x')), store({ tables: withImage }), {}, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:table-cell-replacement-would-drop-inline:blipFill,image,paraDrawing'],
+    [task(step('r1c1', 'x')), store({ tables: withField }), {}, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:table-cell-replacement-would-drop-inline:pgNum'],
+    [task(step('r1c1', 'x')), store({ tables: inlineUnread }), {}, 'table-cell-inline-content-unreadable'],
     [task(step('r1c1', 'x')), store(), { tablesUnreadable: true }, 'tables-unreadable'],
     [task(step('r1c1', 'x')), store(), { docUnreadable: true }, 'tables-unreadable'],
     [task(step('r1c1', 'x')), store(), { tableReadMissesOne: true }, 'table-read-shape-mismatch'],
@@ -182,7 +189,7 @@ test('faults at L1: no write / wrong cell / appended / merged cell not collapsed
     assert.equal(status(x), OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN, fault);
     assert.equal(x.primitiveVerification[0].verdict, 'FAIL', fault);
     assert.equal(x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.VERIFY_CANNOT_PROVE_TERMINAL_STATE, fault);
-    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED, fault);
+    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST, fault);
     assert.equal(driver.calls.forceSave, 0, fault);
   }
 });
@@ -284,19 +291,54 @@ test('closure 4 A-E: a multi-paragraph cell -- one terminal paragraph; leftover 
   assert.equal(r.x.preservationVerification[0].verdict, 'FAIL', 'E');
 });
 
-test('closure 5: a colspan merge survives (LIVE-measured); a VERTICAL merge (rowspan) is refused before dispatch', async () => {
+test('closure 5: a colspan merge survives (LIVE-measured); GH #291: a VERTICAL merge (rowspan) in the table no longer refuses -- the owner and a cell outside the merge are written, the merge kept', async () => {
   // horizontal: the merged r2c0+r2c1 cell keeps colspan=2 and the other cells (see also the merged FIRST/SECOND test)
   const s = store();
   await firstAndSecond(s, task(step('r1c1', 'NEW r1c1')));
   assert.equal(durableCell(s, 2, 0).span, 2);
   // vertical, in the LIVE projection's shape (row probe 4): rowspan on the top, the continuation cell
-  // omitted from the HTML but kept (empty) by the driver read -> FAIL_CLOSED_UNSUPPORTED_SHAPE, 0 dispatch
+  // omitted from the HTML but kept (empty) by the driver read (GH #291 LIVE: docs/evidence/gh291-vmerge-table-probe-20261021.json)
   const vertical = () => { const t = tables(); t[0].rows[0][0] = { ...cell('rs'), rowspan: 2 }; t[0].rows[1][0] = { span: 1, vContinue: true, paras: [{ text: '', props: { ...PLAIN } }] }; return t; };
   for (const target of ['rs', 'r2c2']) {
-    const { x, driver } = await run(store({ tables: vertical() }), task(step(target, 'NEW')));
-    assert.equal(reason(x), 'FAIL_CLOSED_UNSUPPORTED_SHAPE:vertical-merge', target);
-    assert.equal(driver.calls.dispatch, 0);
+    const v = store({ tables: vertical() });
+    const { second } = await firstAndSecond(v, task(step(target, 'NEW')));
+    assert.deepEqual([second.m.writes, second.m.commands], [0, 0], `${target}: the retry writes nothing`);
+    assert.equal(v.durableDoc.tables[0].rows.flat().filter(c => c.paras[0].text === 'NEW').length, 1, target);
+    assert.equal(v.durableDoc.tables[0].rows.flat().filter(c => c.paras[0].text === target).length, 0, target);
+    assert.equal(durableCell(v, 0, 0).rowspan, 2, `${target}: the owner keeps its rowspan`);
+    assert.equal(durableCell(v, 1, 0).vContinue, true, `${target}: the continuation stays`);
   }
+  // a write that breaks the merge is never proven: L3 (HTML spans) FAIL
+  const r = await run(store({ tables: vertical() }), task(step('r2c2', 'NEW')), { fault: 'cell-break-vmerge' });
+  assert.equal(r.x.preservationVerification[0].verdict, 'FAIL');
+  assert.equal(r.x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.INTEGRAL_PRESERVATION_NOT_PROVEN);
+});
+
+// W06-3 (#ref point 2, LIVE-measured #ref READ_DIVERGENCE): the vertical-merge refusal is
+// PER-TABLE, not document-wide. Two tables, ONE document: 'PLN' (no merge) and 'VM' (a vertical
+// merge) -- a replace on PLN now APPLIES even with VM present elsewhere; a replace on VM itself
+// is UNCHANGED (still refused, same reason string as before this unit).
+const mergeAndPlainTables = () => {
+  const pln = { rows: [[cell('PLN r0c0'), cell('PLN r0c1')], [cell('PLN r1c0'), cell('PLN r1c1')]] };
+  const vm = { rows: [[{ ...cell('VM r0c0'), rowspan: 2 }, cell('VM r0c1')], [{ span: 1, vContinue: true, paras: [{ text: '', props: { ...PLAIN } }] }, cell('VM r1c1')]] };
+  return [pln, vm];
+};
+
+test('W06-3: a vertical merge in ONE table no longer refuses replace_table_cell on an UNRELATED, merge-free table in the same document', async () => {
+  const s = store({ tables: mergeAndPlainTables() });
+  await firstAndSecond(s, task(step('PLN r0c0', 'NEW PLN r0c0')));
+  assert.equal(durableCell(s, 0, 0, 0).paras[0].text, 'NEW PLN r0c0');
+  // the SECOND table (the one with the merge) is unchanged -- not touched, not refused as a side effect
+  assert.equal(durableCell(s, 0, 0, 1).rowspan, 2);
+  assert.equal(durableCell(s, 0, 0, 1).paras[0].text, 'VM r0c0');
+});
+
+test('GH #291: replace_table_cell on the vertical-merge TABLE ITSELF now applies (owner cell), EVEN WHILE another table in the document is merge-free -- the merge kept, the other table untouched', async () => {
+  const s = store({ tables: mergeAndPlainTables() });
+  await firstAndSecond(s, task(step('VM r0c0', 'NEW VM r0c0')));
+  assert.equal(durableCell(s, 0, 0, 1).paras[0].text, 'NEW VM r0c0');
+  assert.equal(durableCell(s, 0, 0, 1).rowspan, 2);
+  assert.equal(durableCell(s, 0, 0, 0).paras[0].text, 'PLN r0c0');
 });
 
 test('closure 6: two cells in one session, retry: both SATISFIED, 0 write, 0 command, no barrier', async () => {

@@ -5,7 +5,7 @@
   "target": "sdk-all.js",
   "original_sha256": "def79eed14771fc61bf28162dfd5a83868f3d1c549cc2c1079dff26515b0bd5a",
   "patched_sha256": "f1462d87f211c6d6cdfe999465c02b7a0f551139ab4738eefe02657b71d053ee",
-  "_patched_sha256_NOTE": "computed by zero (2026-10-09) from the SERVED /4 cell sdk-all.js (fetched over HTTPS from the production DS, sha256 = /4 patched_sha256 def79eed..., 20950564 bytes -- the accepted /4 artifact, jeff #59677); the /4 block occurs exactly once; output verified with the unmodified patch_sdk_all.py (--apply --output into a scratch file, re-check ALREADY_PATCHED, second apply NO WRITE, unknown input rc=3 NO WRITE). NOT applied to any Document Server (owner gate).",
+  "_patched_sha256_NOTE": "computed by a maintainer (2026-10-09) from the SERVED /4 cell sdk-all.js (fetched over HTTPS from the production DS, sha256 = /4 patched_sha256 def79eed..., 20950564 bytes -- the accepted /4 artifact); the /4 block occurs exactly once; output verified with the unmodified patch_sdk_all.py (--apply --output into a scratch file, re-check ALREADY_PATCHED, second apply NO WRITE, unknown input rc=3 NO WRITE). NOT applied to any Document Server (owner gate).",
   "original_size": 20950564,
   "patched_size": 20952345,
   "getters": [

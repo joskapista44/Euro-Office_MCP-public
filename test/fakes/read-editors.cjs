@@ -44,6 +44,12 @@ const AUTH_FRAME = `42${JSON.stringify(['message', { type: 'auth', result: 1 }])
 
 const ro = (o, log) => new Proxy(o, { get(t, k) { if (typeof k === 'string' && /^[A-Z]/.test(k) && !(k in t)) log.push(`missing:${k}`); return t[k]; } });
 
+/** The layout the fake XLSX editor answers (L-09): B is 20.43 wide, C hidden, row 2 is 30 high, row 3 hidden. */
+const LAYOUT = Object.freeze({ widths: Object.freeze({ B: 20.43 }), hiddenCols: Object.freeze(['C']), heights: Object.freeze({ 2: 30 }), hiddenRows: Object.freeze([3]) });
+
+/** The page layout the fake XLSX editor answers (L-10b): landscape, headings on, the public default margins in mm. */
+const PAGE = Object.freeze({ orientation: 'xlLandscape', printGridlines: false, printHeadings: true, topMargin: 19.1, bottomMargin: 19.1, leftMargin: 17.8, rightMargin: 17.8 });
+
 function xlsxApi(log) {
   const data = { A1: 'Item', B1: 'Amount', A2: 'Rent', B2: 1200, A3: 'Food', B3: 340 };
   const colNum = s => s.split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
@@ -53,9 +59,58 @@ function xlsxApi(log) {
   const cell = a => ro({ GetAddress: () => a, GetValue: () => (a in data ? String(data[a]) : ''), GetFormula: () => (a in data ? String(data[a]) : ''),
     MergeArea: ro({ GetAddress: () => a }, log), GetNumberFormat: () => 'General', GetFillColor: () => null }, log);
   const validation = ro({ GetType: () => 'xlValidateWholeNumber', GetAlertStyle: () => 'xlValidAlertStop', GetOperator: () => 'xlBetween', GetFormula1: () => '0', GetFormula2: () => '10000' }, log);
+  // L-22e (card an internal branch): a type 'custom' rule with a
+  // RELATIVE formula on C2:C4 -- the public Formula1 getter reports it relative to the SHEET's own
+  // current active cell (A1, this fixture's fixed answer), not C2 (the rule's own range). This is
+  // the EXACT shape the LIVE candidate (a maintainer, card comment #ref) found read_validations getting
+  // wrong: the driver captured activeCell but the read-tool projection did not re-anchor formula1
+  // before returning it. read-tools.cjs must shift it back to '=C2>0' (matching what was written).
+  const customValidation = ro({ GetType: () => 'xlValidateCustom', GetAlertStyle: () => 'xlValidAlertStop', GetOperator: () => 'xlBetween', GetFormula1: () => '=A1>0', GetFormula2: () => '' }, log);
+  // L-09: the column / row layout getters (GetEntireColumn / GetEntireRow), shaped as the W4b LIVE probe measured them: a hidden column reads width 0, a hidden row
+  // height null, an unset row reads the engine default 15. LAYOUT is the fixture the L-09 tests assert against.
+  const entireColumn = a1 => { const l = /^\$?([A-Z]+)/.exec(a1)[1]; const h = LAYOUT.hiddenCols.includes(l);
+    return ro({ GetColumnWidth: () => (h ? 0 : (LAYOUT.widths[l] ?? 8.43)), GetHidden: () => h }, log); };
+  const entireRow = a1 => { const r = /(\d+)$/.exec(a1)[1]; const h = LAYOUT.hiddenRows.includes(Number(r));
+    return ro({ GetRowHeight: () => (h ? null : (LAYOUT.heights[r] ?? 15)), GetHidden: () => h }, log); };
   const range = a1 => ro({ GetAddress: () => a1, GetValue: () => cell(cells(a1)[0]).GetValue(), ForEach: fn => cells(a1).forEach(a => fn(cell(a))),
-    GetValidation: () => (a1 === 'B2:B3' ? validation : null) }, log);
-  const ws = ro({ GetName: () => 'Budget', GetIndex: () => 0, GetUsedRange: () => range('A1:B3'), GetRange: a1 => range(a1), GetAllDrawings: () => [] }, log);
+    GetValidation: () => (a1 === 'B2:B3' ? validation : (a1 === 'C2:C4' ? customValidation : null)), GetEntireColumn: () => entireColumn(a1), GetEntireRow: () => entireRow(a1) }, log);
+  // X-O05/4: one fake chart over the Budget series -- series index 0, point 0 (Rent, 1200) falls through to SERIES
+  // level (findDLblByIdx returns null there); point 1 (Food, 340) carries a POINT-level override. `.Chart.chart.
+  // plotArea.charts[0].series[i].dLbls` is the REAL bridge-block's own internal shape (installBridge below runs the
+  // actual chart.dataLabels.effective.read/v1 implementation, not an imitation) -- not a public Builder API surface,
+  // so this one object is plain, not `ro()`-wrapped (nothing here should ever log a "missing:" public getter).
+  // X-O05/4 round 2 (a maintainer's LIVE r1, internal tracker): GetValues() is a FORMULA STRING in reality ('$B$2:$B$3'),
+  // never a plain array -- the fixture matches that now (a single-column, 2-row range: B2=Rent, B3=Food).
+  const chart1 = {
+    GetName: () => 'Spend', GetChartType: () => 'bar', GetTitle: () => null, GetLegendPos: () => 'none',
+    GetAllSeries: () => [{ GetName: () => 'Amount', GetValues: () => '=Budget!$B$2:$B$3', GetCatFormula: () => '=Budget!$A$2:$A$3' }],
+    GetHorAxisTitle: () => null, GetVerAxisTitle: () => null,
+    GetDataLabels: () => ({ showSerName: false, showCatName: false, showVal: false, showPercent: false }),
+    Chart: { chart: { plotArea: { charts: [{ dLbls: null, series: [{ dLbls: {
+      showSerName: false, showCatName: false, showVal: false, showPercent: false,
+      findDLblByIdx: idx => (idx === 1 ? { showSerName: true, showCatName: false, showVal: false, showPercent: false } : null),
+    } }] }] } } },
+  };
+  // X-O08 (/14): one fake shape -- the SAME public-getter set M7-S2b measured LIVE (kind/name/parent/pos/
+  // width/height/rotation/flip, docs/evidence/M7-S2B-DRAWING-PROBE.md), plus a stroke (X-O08-7: width PUBLIC-readable).
+  // GetLine()/GetFill() are plain, not `ro()`-wrapped: the Bridge's OWN handler calls them on this same object when a
+  // bridge revision serves FILL_LINE_COLOR_READ; the served fixture bridge is pinned at /5 (ds-bridge-runtime.cjs's
+  // own manifest.json), so that capability degrades to CAPABILITY_MISSING here, same as every pre-/14 runtime.
+  const shape1 = {
+    GetClassType: () => 'shape', GetName: () => 'Logo', GetParentSheet: () => ({ GetName: () => 'Budget' }),
+    GetPosition: () => ({ fromCol: 2, colOffset: 0, fromRow: 1, rowOffset: 0 }),
+    GetWidth: () => 914400, GetHeight: () => 457200, GetRotation: () => 0, GetFlipH: () => false, GetFlipV: () => false,
+    GetLine: () => ({ GetWidth: () => 19050, GetFill: () => ({ GetType: () => 'solid' }) }),
+    GetFill: () => ({ GetType: () => 'solid' }),
+  };
+  // L-10b: the public page getters (set_page_layout reads, W8b) and a sheet with NO AutoFilter (GetAutoFilter -> null = the driver's { range: null, filters: [] }). The print / freeze / filter-FIELD reads go
+  // through DS Bridge capabilities that need the editor's internal model, which this fake does not carry: they surface as NAMED 'UNOBSERVABLE:BRIDGE:...' gaps (asserted as such).
+  // L-22e: the sheet's own active cell, fixed at A1 -- NEVER C2 (the custom rule's own range above),
+  // so the fixture actually exercises the re-anchor rather than coincidentally matching it.
+  const ws = ro({ GetName: () => 'Budget', GetIndex: () => 0,
+    GetPageOrientation: () => PAGE.orientation, GetPrintGridlines: () => PAGE.printGridlines, GetPrintHeadings: () => PAGE.printHeadings,
+    GetTopMargin: () => PAGE.topMargin, GetBottomMargin: () => PAGE.bottomMargin, GetLeftMargin: () => PAGE.leftMargin, GetRightMargin: () => PAGE.rightMargin, GetAutoFilter: () => null, GetUsedRange: () => range('A1:B3'), GetRange: a1 => range(a1), GetAllDrawings: () => [shape1],
+    GetAllCharts: () => [chart1], GetAllPivotTables: () => [], GetActiveCell: () => cell('A1') }, log);
   const api = { GetSheets: () => [ws], GetSheet: n => (n === 'Budget' ? ws : null), GetActiveSheet: () => ws,
     WorksheetFunction: ro({ COUNT: r => (typeof data[r.GetAddress()] === 'number' ? 1 : 0) }, log) };
   installBridge(api);
@@ -88,10 +143,15 @@ function xlsxEditor() {
   return { log, api: { dispatch: 0, forceSave: 0 }, launches: () => launches, loadPlaywright: () => ({ ok: true, pw: { chromium: { launch: async () => { launches += 1; return browser; } } } }) };
 }
 
-// the three generated property-query bodies (B21: default | not requested | runtime not verified)
+// the four generated property-query bodies (B21: default | not requested | runtime not verified;
+// GH #225: not requested + numberingFormat -- read_numbering's own extra ToJSON() call, requested
+// ONLY for that operation, read-tools.cjs FORMATS.docx.read)
 const PROPERTY_QUERIES = Object.freeze({ [docx.propertyQuery()]: 'default',
   [docx.propertyQuery({ sectionVariantState: false, sectionVariantUnavailable: 'not-requested' })]: 'opt-out',
-  [docx.propertyQuery({ sectionVariantState: false, sectionVariantUnavailable: 'runtime-not-verified' })]: 'gated' });
+  [docx.propertyQuery({ sectionVariantState: false, sectionVariantUnavailable: 'runtime-not-verified' })]: 'gated',
+  [docx.propertyQuery({ sectionVariantState: false, sectionVariantUnavailable: 'not-requested', numberingFormat: true })]: 'opt-out-numbering',
+  // GH #269b: read_comments' own extra read (includeComments), requested ONLY for read_comments
+  [docx.propertyQuery({ sectionVariantState: false, sectionVariantUnavailable: 'not-requested', includeComments: true })]: 'opt-out-comments' });
 
 // ---- the DOCX fake editor: answers the driver's real property query ------------------------------------------------
 
@@ -106,6 +166,9 @@ const PROPERTY_RESULT = {
     sections: [{ header: { default: { paragraphs: 1, simple: true, paras: [{ text: 'Head', format: {} }] } }, footer: {}, titlePage: true, evenAndOdd: false }] },
 };
 
+// GH #269b: the rows the driver's page-side GetAllComments() read returns (the driver's own field names: solved, not resolved)
+const COMMENT_ROWS = [{ id: 'c1', text: 'a note', author: 'Ann', userId: 'u1', timeUtc: 1792420516000, quote: 'Hello', solved: false, replies: [{ text: 'a reply', author: 'Bob', userId: 'u2' }] }];
+
 function docxEditor() {
   const log = [];
   const ctl = { wsHandler: null, ws: null };
@@ -113,7 +176,7 @@ function docxEditor() {
     url: () => 'https://ds.example/9.3.4-x/web-apps/apps/documenteditor/main/index.html',
     evaluate: async (fn, arg) => {
       if (arg && arg.body === HANDSHAKE_BODY) { log.push('handshake'); return { ok: true, outcome: 'command-completed', result: null }; }
-      if (arg && PROPERTY_QUERIES[arg.body]) { log.push('read-query'); log.push(`read-query:${PROPERTY_QUERIES[arg.body]}`); return { ok: true, outcome: 'command-completed', result: PROPERTY_RESULT }; }
+      if (arg && PROPERTY_QUERIES[arg.body]) { log.push('read-query'); log.push(`read-query:${PROPERTY_QUERIES[arg.body]}`); return { ok: true, outcome: 'command-completed', result: PROPERTY_QUERIES[arg.body] === 'opt-out-comments' ? { ...PROPERTY_RESULT, document: { ...PROPERTY_RESULT.document, comments: COMMENT_ROWS } } : PROPERTY_RESULT }; }
       if (arg && arg.body) { log.push('command'); return { ok: true, outcome: 'command-completed', result: null }; }
       const src = String(fn);
       if (src.includes('asc_isDocumentCanSave')) { log.push('canSave'); return { ok: true, canSave: false }; }
@@ -144,4 +207,4 @@ const NON_MUTATION = (ed, out) => {
   assert.match(String(out.close), /no-save-traffic/, `close: ${out.close}`);
 };
 
-module.exports = { BROKER, TOKEN, FILE, editConfig, fakeBroker, xlsxEditor, docxEditor, NON_MUTATION, PROPERTY_QUERIES, PROPERTY_RESULT, HTML };
+module.exports = { LAYOUT, PAGE, BROKER, TOKEN, FILE, editConfig, fakeBroker, xlsxEditor, docxEditor, NON_MUTATION, PROPERTY_QUERIES, PROPERTY_RESULT, HTML };

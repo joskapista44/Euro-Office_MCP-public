@@ -67,7 +67,7 @@ test('B. integral: primitive PASS + preservation FAIL -> NOT APPLIED, uncertain;
   assert.notEqual(e.verification, 'LIVE_VERIFY', 'never a false APPLIED_VERIFIED');
   assert.equal(e.uncertainty.reason, UNCERTAINTY_REASON.INTEGRAL_PRESERVATION_NOT_PROVEN);
   assert.equal(r.result.metrics.writes, 0);
-  assert.equal(r.result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+  assert.equal(r.result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
   assert.equal(r.driver.calls.forceSave, 0);
 });
 

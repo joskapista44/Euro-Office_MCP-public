@@ -17,11 +17,15 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
  * internal tracker, DS5_POLICY=B05_ONLY_FAIL_CLOSED): B05-WRITE is a Bridge WRITE now, the capability exists only
  * on /6, so THIS write path alone is /6-only -- refused after the prewrite READ, before any write, everywhere else.
  * The capability contract itself: xlsx-b05w-bridge-write-cutover.test.cjs.
+ *
+ * DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): the entire 9.3.4.60 family (/5 through /16) is
+ * retired -- the accepted list is now the ONE 9.3.5.0/16 entry. The off-list examples below (9.3.4.60/4, /5, /17,
+ * /2 -- never accepted, now simply joined by every other 9.3.4.60 revision) are UNCHANGED: their role was already
+ * "not on the accepted list," which this retirement only widens.
  */
 
-const RT6 = '9.3.4|euro-office-bridge-v1/9.3.4.60/6';
-const RT7 = '9.3.4|euro-office-bridge-v1/9.3.4.60/7';
-const RT8 = '9.3.4|euro-office-bridge-v1/9.3.4.60/8';
+const RT6 = '9.3.5|euro-office-bridge-v1/9.3.5.0/16';
+const RT17 = '9.3.5|euro-office-bridge-v1/9.3.5.0/17';
 const book = () => [{ name: 'Data', cells: { A1: { v: 'x' }, B1: { v: 'y' } }, merges: [] }];
 const task = spec => ({ id: 'b05w', steps: [{ intent: 'format_range', sheet: 'Data', range: 'A1', format: spec }] });
 const INDENT = { align: { horizontal: 'left', indent: 2 } };
@@ -36,8 +40,10 @@ async function run(store, t, script = {}) {
 }
 const op = r => r.execution.appliedOperations[0];
 
+// DS9346: every one of these is simply not the one accepted runtime (9.3.5.0/16) -- a single-entry
+// accepted list has no "safely unclaimed number" to chase as the list grows.
 for (const [label, spec] of [['indent', INDENT], ['shrink', SHRINK]]) {
-  for (const rt of ['9.3.4|euro-office-bridge-v1/9.3.4.60/5', '9.3.4|euro-office-bridge-v1/9.3.4.60/4', '9.3.4|euro-office-bridge-v1/9.3.4.60/9', '9.3.4|euro-office-bridge-v1/9.3.4.60/2']) {
+  for (const rt of ['9.3.4|euro-office-bridge-v1/9.3.4.60/5', '9.3.4|euro-office-bridge-v1/9.3.4.60/4', '9.3.4|euro-office-bridge-v1/9.3.4.60/17', '9.3.4|euro-office-bridge-v1/9.3.4.60/2']) {
     test(`${label} on ${rt}: FAIL_CLOSED before the write -- 0 dispatch / 0 command / 0 Bridge write, nothing changed`, async () => {
       const store = createStore(book()); const before = JSON.stringify(store.durable);
       const { result, driver, m } = await run(store, task(spec), { runtime: rt });
@@ -73,9 +79,10 @@ test('scope (B05_ONLY): a PUBLIC align.horizontal on /5 is untouched by this gat
   assert.equal(driver.calls.dispatch, 1);
 });
 
-test('the driver second line: the SAME /6+/7+/8 list; a B05 command is refused WITHOUT an editor elsewhere; an unmarked one is not', async () => {
+// GH #326/#327: the format-side and driver-side B05 lists stay pinned to each other, now both /16 + /17.
+test('the driver second line: the SAME two-entry (9.3.5.0/16 + /17) list; a B05 command is refused WITHOUT an editor elsewhere; an unmarked one is not', async () => {
   assert.deepEqual([...format.B05_BRIDGE_WRITE_RUNTIMES], [...drv.B05_BRIDGE_WRITE_RUNTIMES]);
-  assert.deepEqual([...drv.B05_BRIDGE_WRITE_RUNTIMES], [RT6, RT7, RT8]);
+  assert.deepEqual([...drv.B05_BRIDGE_WRITE_RUNTIMES], [RT6, RT17]);
   const d = drv.createEuroOfficeXlsxDriver({ url: 'u', user: 'u', pass: 'p', loadPlaywright: () => ({ ok: false }) });
   const lowered = format.lower(planOperations(task(INDENT)).operations[0], { sheet: 'Data' });
   const r = await d.dispatch(null, lowered);

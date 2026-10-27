@@ -3,6 +3,7 @@
 const { cellsOf, parseRange } = require('../a1.cjs');
 const { cellAt } = require('../inventory.cjs');
 const { STYLE_KEYS, unobservable, readKey } = require('../style-axis.cjs');
+const { diagonalRestoreOf, diagonalRestoreScript } = require('./format-diagonal.cjs');
 const { OPPOSITE, REMOVED, H_REV, V_REV, STYLE_REV, API_SIDE, API_STYLE, neighbour, sidesList } = require('./format-maps.cjs');
 
 /**
@@ -59,22 +60,22 @@ function removeFacing(op, a) {
   return [...all].filter(x => !(own && op.remove.sides.includes(x)));
 }
 
-/** A window cell that is NOT itself cleared/restored (not in removeCells()) is only ever READ by this
- * family, never written -- it needs border + merge readability, nothing more. The same weaker contract
- * outline/inside/all's own window check already uses. */
+/** A window cell is only ever READ by the readability part of this check; it needs border + merge readability, nothing more (the same weaker contract outline/inside/all's own window
+ * check already uses). A merge never refuses on its own any more: a merge part the composite WRITES is released through C5 (UnMerge -> composite -> Merge, `c5Wrap`; L-16/3, LIVE-measured),
+ * and a merge it does not write is read back unchanged (L-16/2, LIVE-measured) -- the merge text must only be re-issuable (parseable); what C5 was not measured for is refused in `c5Gap`. */
 function weakGap(cell, a) {
   if (!cell || !('wrap' in cell)) return { reason: 'xlsx-target-format-unread', cell: a };
   const v = readKey(cell, 'border.t');
   if (v === undefined || unobservable(v)) return { reason: 'xlsx-format-remove-unmeasured-axis', cell: a, key: 'border.t', why: v === undefined ? 'not-read' : v };
-  return cell.merge && cell.merge !== a ? { reason: 'xlsx-format-remove-merged-ring-refused', cell: a, mergeArea: cell.merge } : null;
+  if (!cell.merge || cell.merge === a) return null;
+  return parseRange(cell.merge) ? null : { reason: 'xlsx-format-remove-merged-ring-refused', cell: a, mergeArea: cell.merge };
 }
 
 /** cell `a`'s own window-gap check for a removeCells() cell (review, point 4: split out of
  * removeWindowGap's loop body so each function carries its own, smaller complexity) -- fully style-readable
- * on EVERY axis (not just border -- the composite clears the whole cell), not merged, no diagonal. Diagonal
- * restore is NOT implemented here (a scope boundary, not a missing public path: P2.0, m7-b4-probe1-20261004,
- * measured that `SetBorders('DiagonalDown', ...)` after `ClearFormats()` DOES restore it byte-exact; zero
- * review #ref). */
+ * on EVERY axis (not just border -- the composite clears the whole cell); a merge part is allowed (L-16/3, C5: `c5Areas`). A drawn diagonal is
+ * RESTORED (L-16/1, MEASURED: DiagonalDown / DiagonalUp / both restore byte-exact after `ClearFormats()`); only a
+ * diagonal that cannot be re-issued exactly refuses (diagonalRestoreOf's `bad`). */
 function cellGap(cell, a) {
   const weak = weakGap(cell, a);
   if (weak) return weak;
@@ -82,8 +83,8 @@ function cellGap(cell, a) {
     const v = readKey(cell, k);
     if (v === undefined || unobservable(v)) return { reason: 'xlsx-format-remove-unmeasured-axis', cell: a, key: k, why: v === undefined ? 'not-read' : v };
   }
-  const d = readKey(cell, 'border.d');
-  return d && d.s > 0 ? { reason: 'xlsx-format-remove-diagonal-unsupported', cell: a } : null;
+  const dg = diagonalRestoreOf(cell);
+  return dg && dg.bad !== undefined ? { reason: 'xlsx-format-remove-unrestorable-value', cell: a, key: 'border.d', why: dg.bad } : null;
 }
 
 /** every removeCells() cell passes the STRONG check (cellGap); every other window cell -- a ring corner, a
@@ -97,7 +98,23 @@ function removeWindowGap(primary, op) {
     const bad = targets.has(a) ? cellGap(cell, a) : weakGap(cell, a);
     if (bad) return bad;
   }
-  return null;
+  return c5Gap(c5Areas(op, a => cellAt(primary, op.selector.sheet, a)));
+}
+
+/** L-16/3 (C5): the distinct merge areas the composite would write into -- every removeCells() cell that is a merge part names its area. The composite's ClearFormats() dissolves
+ * a merge (LIVE), so these areas are UnMerge()d first and Merge()d again after (C5); LIVE-measured on the realistic merged header and 2x2 / 1x3 / 3x1 x four sides, each alone. */
+function c5Areas(op, readOf) {
+  const out = new Set();
+  for (const a of removeCells(op).keys()) { const cell = readOf(a); if (cell && cell.merge && cell.merge !== a) out.add(cell.merge); }
+  return [...out];
+}
+const C5_MAX_CELLS = 400;
+/** What C5 was NOT measured for stays refused, named: more than one merge area in one write (adjacent merges), and an area too large for the in-body member guard. */
+function c5Gap(areas) {
+  if (areas.length > 1) return { reason: 'xlsx-format-remove-multi-merge-unmeasured', areas: areas.slice(0, 5), count: areas.length };
+  const m = areas.length ? parseRange(areas[0]) : null;
+  const size = m ? cellsOf(m).length : 0;
+  return size > C5_MAX_CELLS ? { reason: 'xlsx-format-remove-merge-too-large', mergeArea: areas[0], cells: size, max: C5_MAX_CELLS } : null;
 }
 
 /** [key, isBad, why] rows -- table-driven (review, point 3), so `unrestorable`'s own body is a
@@ -170,6 +187,7 @@ function removeRestoreData(op, target) {
       h: before.align.h === null ? null : H_REV[before.align.h],
       v: before.align.v === null ? null : V_REV[before.align.v],
       border,
+      diagonal: diagonalRestoreOf(before),
     }]);
   }
   return out;
@@ -181,6 +199,29 @@ function removeRestoreData(op, target) {
  * only working public path. */
 function removeLine(op, target) {
   if (!op.remove) return '';
+  const composite = compositeLine(op, target);
+  const areas = c5Areas(op, a => target.before[a]);
+  return areas.length ? c5Wrap(areas, composite) : composite;
+}
+
+/** C5 (L-16/3): UnMerge the area, run the composite, Merge it again -- in ONE body. A guard BEFORE the UnMerge reads every non-anchor member through the raw GetValue() and aborts
+ * (nothing touched) if one holds a value, because the re-Merge would discard it (a member the raw read cannot answer for does not abort: the guard is best-effort, and the LIVE
+ * measurement could not create a member value on this DS). The re-Merge sits in a `finally`: a throw after the UnMerge still puts the area back (the outer
+ * catch reports the original error, and the verification names a merge that did not come back). */
+function c5Wrap(areas, composite) {
+  const members = areas.flatMap(m => cellsOf(parseRange(m)).slice(1));
+  return `
+  const MERGES = ${JSON.stringify(areas)};
+  for (const m of ${JSON.stringify(members)}) { let v; try { v = ws.GetRange(m).GetValue(); } catch (e) { v = undefined; } if (v !== undefined && v !== null && String(v) !== '') return { ok: false, stage: 'merge-member-value', cell: m }; }
+  const unmerged = [];
+  try {
+    for (const m of MERGES) { ws.GetRange(m).UnMerge(); unmerged.push(m); }${composite}
+  } finally {
+    for (const m of unmerged) { try { ws.GetRange(m).Merge(false); } catch (e) { /* the verification names a merge that did not come back */ } }
+  }`;
+}
+
+function compositeLine(op, target) {
   const data = removeRestoreData(op, target);
   return `
   const rgb = n => Api.CreateColorFromRGB((n >> 16) & 255, (n >> 8) & 255, n & 255);
@@ -197,7 +238,7 @@ function removeLine(op, target) {
     c.SetFontColor(rgb(rs.color));
     if (rs.h !== null) c.SetAlignHorizontal(rs.h);
     if (rs.v !== null) c.SetAlignVertical(rs.v);
-    for (const [side, style, col] of rs.border) c.SetBorders(side, style, rgb(col));
+    for (const [side, style, col] of rs.border) c.SetBorders(side, style, rgb(col));${diagonalRestoreScript('rgb')}
   }`;
 }
 
@@ -208,6 +249,7 @@ function removeMeta(op, target) {
   const cellsMap = removeCells(op);
   return {
     removeCells: [...cellsMap.keys()],
+    ...(c5Areas(op, a => target.before[a]).length ? { mergeAreas: c5Areas(op, a => target.before[a]) } : {}),
     removeClear: Object.fromEntries([...cellsMap].map(([a, set]) => [a, [...set]])),
     restoreData: removeRestoreData(op, target),
   };

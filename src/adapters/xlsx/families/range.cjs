@@ -3,6 +3,7 @@
 const { parseRange, parseCell, cellsOf, rangeText, addr, MAX_COL, MAX_ROW } = require('../a1.cjs');
 const { cellAt, key, isBlank } = require('../inventory.cjs');
 const formula = require('../formula.cjs');
+const { refOnTarget } = require('../dependencies.cjs');
 const cells = require('./cells.cjs');
 const { translateFormula, referencesBlock, mapRefs, moveFormula } = require('../shift.cjs');
 const { EXPECT_VERSION, checkExpect, matches, cellOf } = require('../move-expect.cjs');
@@ -53,7 +54,7 @@ const INTENTS = Object.freeze(['copy_range', 'move_range']);
 const MAX_CELLS = 500;
 function plan(step, index) {
   const at = `step ${index}: ${step.intent}`;
-  const fields = ['intent', 'id', 'sheet', 'range', 'target', 'targetSheet', ...(step.intent === 'move_range' ? ['expect'] : [])];
+  const fields = ['intent', 'id', 'sheet', 'range', 'target', 'targetSheet'];
   const unknown = Object.keys(step).filter(k => !fields.includes(k));
   if (unknown.length) return { ok: false, detail: `${at} does not support field(s): ${unknown.join(', ')}` };
   if (typeof step.sheet !== 'string' || step.sheet === '') return { ok: false, detail: `${at} requires a sheet name` };
@@ -69,12 +70,11 @@ function plan(step, index) {
   const tg = { c1: t.c, r1: t.r, c2: t.c + w, r2: t.r + h, count: g.count };
   const tsheet = step.targetSheet || step.sheet;
   if (tsheet === step.sheet && tg.c1 <= g.c2 && g.c1 <= tg.c2 && tg.r1 <= g.r2 && g.r1 <= tg.r2) return { ok: false, detail: `${at}: the source and the target overlap on the same sheet` };
-  let expect = null;
-  if (step.intent === 'move_range') {
-    const e = checkExpect(step.expect, { sheet: step.sheet, range: rangeText(g) }, { sheet: tsheet, range: rangeText(tg) }, h + 1, w + 1);
-    if (e.error) return { ok: false, detail: `${at}: ${e.error}` };
-    expect = e.expect;
-  }
+  // L-06/b (owner decision, zero 2026-10-15): the caller no longer supplies `expect` -- classify()
+  // builds it from its OWN fresh read, directly before dispatch (moveExpectationFromOp below), the
+  // SAME session the write itself uses. `expect` stays null here, mutated by classify() -- the SAME
+  // technique copy_chart's classifyCopy already uses for op.grid (charts.cjs).
+  const expect = null;
   const src = cellsOf(g);
   const pairs = src.map(a => { const c = parseCell(a); return Object.freeze({ from: a, to: addr(c.c - g.c1 + tg.c1, c.r - g.r1 + tg.r1) }); });
   return {
@@ -155,12 +155,8 @@ function movedName(op, n) {
   return m.formula !== null && m.moved > 0 && !m.partial && !m.qualifiedAcross && !refParts(n.ref).some(x => x.sheet === null) ? m.formula.slice(1) : null;
 }
 
-/** M7 E R7, the retry: a name entirely inside the TARGET block -- what the move put there (only with a blank source). */
-function landedName(op, n) {
-  const t = parseRange(op.dest.range);
-  const m = moveFormula(`=${n.ref}`, n.scopeSheet || '', { from: { sheet: op.dest.sheet, r1: t.r1, c1: t.c1, r2: t.r2, c2: t.c2 }, to: { sheet: op.dest.sheet }, dr: 0, dc: 0 });
-  return m.formula !== null && m.moved > 0 && !m.partial && !refParts(n.ref).some(x => x.sheet === null);
-}
+// L-06/b: landedName (the retry's "already landed" check) removed -- classify() refuses a blank
+// source before dependentGuard runs, so that branch is unreachable now (see dependentGuard above).
 
 const holds = (now, e) => !!now && !e.broken && (e.f === '' ? now.f === '' && JSON.stringify(now.v) === JSON.stringify(e.v) : now.f !== '' && sameText(e.f, now.f));
 
@@ -195,16 +191,17 @@ function classifyCopy(p, op, g, where, tgtBlank) {
 const refuse = (reason, extra) => ({ state: 'FAIL_CLOSED', evidence: { reason, ...extra } });
 
 /**
- * owner decision 2026-09-30: the carried expectation, bound to the document, decides both the first write (the source
- * equals it, re-checked on this fresh read right before the write) and the retry (a blank source and the WHOLE target
- * block equal to it). Never a second Cut.
+ * L-06/b (owner decision, zero 2026-10-15): the carried expectation is now built FRESH by classify()
+ * itself (moveExpectationFromOp below), from the SAME observation this function already has -- so it
+ * is bound to THIS document and THIS read BY CONSTRUCTION, and the old explicit fileId-mismatch check
+ * (owner decision 2026-09-30, when the caller supplied `expect` and it could be stale) can never fire
+ * here and is gone. A blank source (a retry, or any other already-applied-looking state) is caught
+ * BEFORE this function is even called (classify()'s own early refusal, xlsx-move-already-applied-
+ * not-provable) -- a server-built expectation would be built from the ALREADY-MOVED state and has
+ * nothing to prove the move against, so v1 never attempts it. This function therefore only ever
+ * sees a NOT-blank source.
  */
 function classifyMove(p, op, g, where, tgtBlank) {
-  const fileId = p.runtime && typeof p.runtime.fileId === 'string' ? p.runtime.fileId : null;
-  if (fileId === null || fileId !== op.expect.fileId) return refuse('xlsx-move-expect-document-mismatch', { ...where, expected: op.expect.fileId, observed: fileId });
-  const srcBlank = op.pairs.every(({ from }) => isBlank(g.src[from]));
-  const tgtOff = op.pairs.filter(({ to }, i) => !matches(g.tgt[to], movedExpect(op, i))).map(x => x.to);
-  if (srcBlank) return tgtOff.length === 0 ? { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-source-blank-and-target-block-equals-the-carried-expectation' } } : refuse('xlsx-move-retry-target-differs', { ...where, cells: tgtOff.slice(0, 20) });
   const srcOff = op.pairs.filter(({ from }, i) => !matches(g.src[from], expectOf(op, i))).map(x => x.from);
   if (srcOff.length) return refuse('xlsx-move-source-differs-from-expectation', { ...where, cells: srcOff.slice(0, 20) });
   if (!tgtBlank) return refuse('xlsx-move-target-occupied', { cells: op.pairs.filter(({ to }) => !isBlank(g.tgt[to])).map(x => x.to).slice(0, 20) });
@@ -307,11 +304,17 @@ function readerGap(p) {
  * Reads: the dependency analysis (names, validations, conditional formats, charts, pivots -- the W3 readers), the
  * AutoFilter of both sheets (the W6 reader).
  */
-function dependentGuard(p, op, { retry = false } = {}) {
+function dependentGuard(p, op) {
   const gap = readerGap(p);
   if (gap) return gap;
+  // both blocks' sheets (source and destination) are changed by the write
+  const ref = refOnTarget(p.dependencies, [op.selector.sheet, op.dest.sheet]);
+  if (ref) return ref;
   const st = scanState(op);
-  const follows = n => (retry ? landedName(op, n) : movedName(op, n) !== null);
+  // L-06/b: the retry/"already landed" branch (landedName) is unreachable now -- classify() refuses
+  // a blank source BEFORE this guard ever runs (see classify() below), so a move_range reaching here
+  // is always a first write, still moving TO the target.
+  const follows = n => movedName(op, n) !== null;
   for (const n of p.definedNames) if (!follows(n)) st.check('name', n.scopeSheet, n.name, n.ref, { absolute: true });
   scanRules(st, p.rules.bySheet);
   scanObjects(st, p.objects);
@@ -320,14 +323,33 @@ function dependentGuard(p, op, { retry = false } = {}) {
   return st.hits.length ? { reason: 'xlsx-range-dependent-affected', dependents: st.hits.slice(0, 20), count: st.hits.length } : null;
 }
 
+/**
+ * L-06/b (owner decision, zero 2026-10-15): no `expect` on the move_range step -- the caller never
+ * supplies one. classify() builds it itself, from THIS SAME observation, directly before dispatch
+ * (the SAME session the write itself uses, no second open/read/close) -- mutating `op` the SAME way
+ * classifyCopy already mutates op.grid for copy_chart (charts.cjs). req is reconstructed from the
+ * already-resolved op (its own source/dest are the single source of truth), and moveExpectation
+ * re-plans/re-gates from it -- pure, idempotent, the SAME p.
+ */
 function classify(p, op) {
   const g = gate(p, op);
   if (!g.ok) return { state: 'FAIL_CLOSED', evidence: g };
-  // a move's retry (blank source): the names the move re-pointed now sit in the target block
-  const retry = op.intent === 'move_range' && op.pairs.every(({ from }) => isBlank(g.src[from]));
-  const dg = dependentGuard(p, op, { retry });
-  if (dg) return { state: 'FAIL_CLOSED', evidence: dg };
   const where = { from: `${op.selector.sheet}!${op.selector.range}`, to: `${op.dest.sheet}!${op.dest.range}` };
+  if (op.intent === 'move_range') {
+    const srcBlank = op.pairs.every(({ from }) => isBlank(g.src[from]));
+    // v1: a blank source (a retry, or any other already-applied-looking state) has nothing to build
+    // a fresh expectation FROM -- it would be built from the ALREADY-MOVED state. Refused named,
+    // 0/0, never a second Cut, rather than guessed SATISFIED. Checked BEFORE dependentGuard, so a
+    // retry costs nothing beyond the gate already run.
+    if (srcBlank) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-move-already-applied-not-provable', ...where } };
+    const dstG = parseRange(op.dest.range);
+    const req = { sheet: op.selector.sheet, range: op.selector.range, target: addr(dstG.c1, dstG.r1), targetSheet: op.dest.sheet };
+    const mx = moveExpectation(p, req);
+    if (!mx.ok) return { state: 'FAIL_CLOSED', evidence: { reason: mx.reason, ...where, detail: mx } };
+    op.expect = Object.freeze(mx.expect);
+  }
+  const dg = dependentGuard(p, op);
+  if (dg) return { state: 'FAIL_CLOSED', evidence: dg };
   const tgtBlank = op.pairs.every(({ to }) => isBlank(g.tgt[to]));
   return (op.intent === 'copy_range' ? classifyCopy : classifyMove)(p, op, g, where, tgtBlank);
 }
@@ -335,12 +357,65 @@ function classify(p, op) {
 function resolve(p, selector, ctx = {}) {
   const g = gate(p, ctx.operation);
   if (!g.ok) return { ok: false, target: null, selector, ambiguity: g.reason, detail: g };
-  return { ok: true, target: Object.freeze({ from: selector, to: ctx.operation.dest }) };
+  const op = ctx.operation;
+  if (op.intent !== 'copy_range') return { ok: true, target: Object.freeze({ from: selector, to: op.dest }) };
+  const formulas = copyFormulas(op, g.src);
+  if (op.dest.sheet === op.selector.sheet) return { ok: true, target: Object.freeze({ from: selector, to: op.dest, formulas }) };
+  // ANOTHER sheet (zero l065-l068): the editor's Copy leaves a delayed state that overwrites a formula written after it at the next save -- so no Copy is dispatched; the
+  // values and the planner-translated formulas are written (what the probe's P7 measured faithful); the format is NOT carried (named, never silent)
+  const w = copyValues(op, g.src);
+  if (!w.ok) return { ok: false, target: null, selector, ambiguity: w.reason, detail: w };
+  return { ok: true, target: Object.freeze({ from: selector, to: op.dest, formulas, values: w.values, crossSheet: true }) };
 }
 
+/** The non-formula, non-blank source cells of a CROSS-SHEET copy as typed values ({ 'B1': 'h1', 'B2': 1 }); a cell whose type the reader cannot tell, or a text that reads as a formula, is refused, named. */
+function copyValues(op, src) {
+  const values = {};
+  for (const { from, to } of op.pairs) {
+    const s = src[from];
+    if (!s || s.f !== '' || isBlank(s)) continue;
+    const e = cellOf(s);
+    if (e === null) return { ok: false, reason: 'xlsx-copy-cross-sheet-value-type-not-observable', cell: from };
+    if (e.t === 'number') { const n = Number(e.v); if (!Number.isFinite(n)) return { ok: false, reason: 'xlsx-copy-cross-sheet-value-type-not-observable', cell: from }; values[to] = n; continue; }
+    if (e.v.startsWith('=')) return { ok: false, reason: 'xlsx-copy-cross-sheet-text-reads-as-formula', cell: from };
+    values[to] = e.v;
+  }
+  return { ok: true, values: Object.freeze(values) };
+}
+
+/** The formula text each copied FORMULA cell must carry at its target ({ 'E3': '=E2+L1' }): the planner's own translation of the source text as read now. */
+function copyFormulas(op, src) {
+  const out = {};
+  for (const { from, to } of op.pairs) {
+    const s = src[from];
+    if (!s || s.f === '') continue;
+    const t = translateFormula(s.f, op.delta.dr, op.delta.dc);
+    if (!t.broken) out[to] = `=${t.formula.slice(1).trim()}`;
+  }
+  return Object.freeze(out);
+}
+
+/**
+ * L-06 r5/r6 (zero l064 / l065 / l066 probes, LIVE on the prod DS): ApiRange.Copy shows a formula in session but the SAVED file carries the source's LITERAL text
+ * ("= A2+H1") and its stale value -- the in-session L1 cannot see it, the next fresh read (the retry) can. An explicit formula write after the Copy persists
+ * correctly (same sheet: P2). Onto ANOTHER sheet the editor's own in-session text was not trustworthy either (l066: the explicit rewrite of the editor text left
+ * B4 literal) -- so the text written is the PLANNER's translation of the source formula as read before the write (resolve -> target.formulas, the same
+ * translateFormula the classify / L1 equality uses), never the editor's. Each written cell is read back in the body; a target that did not take a formula fails
+ * the command, named.
+ */
+const REWRITE_BODY = (formulas, values) => `${values ? `  const values = ${JSON.stringify(values)};\n  for (const to of Object.keys(values)) t.GetRange(to).SetValue(values[to]);\n` : ''}  const formulas = ${JSON.stringify(formulas)};
+  for (const to of Object.keys(formulas)) {
+    const cell = t.GetRange(to);
+    cell.SetValue(formulas[to]);
+    if (String(cell.GetFormula() || '').trim().charAt(0) !== '=') return { ok: false, stage: 'xlsx-copy-formula-not-written', cell: to };
+  }
+`;
+
 /** One callCommand: both sheets checked by exact name, then the public Copy / Cut onto the target's top-left. */
-function lower(op) {
+function lower(op, target) {
   const call = op.intent === 'copy_range' ? 'Copy' : 'Cut';
+  const copy = op.intent === 'copy_range';
+  const cross = copy && op.dest.sheet !== op.selector.sheet && !!target && target.crossSheet === true;
   return {
     kind: 'callCommand',
     body: `
@@ -348,11 +423,10 @@ try {
   const s = Api.GetSheet(${JSON.stringify(op.selector.sheet)});
   const t = Api.GetSheet(${JSON.stringify(op.dest.sheet)});
   if (!s || s.GetName() !== ${JSON.stringify(op.selector.sheet)} || !t || t.GetName() !== ${JSON.stringify(op.dest.sheet)}) return { ok: false, stage: 'sheet-identity' };
-  s.GetRange(${JSON.stringify(op.selector.range)}).${call}(t.GetRange(${JSON.stringify(op.pairs[0].to)}));
-  return { ok: true };
+${cross ? '' : `  s.GetRange(${JSON.stringify(op.selector.range)}).${call}(t.GetRange(${JSON.stringify(op.pairs[0].to)}));\n`}${copy ? REWRITE_BODY((target && target.formulas) || {}, cross ? (target.values || {}) : null) : ''}  return { ok: true };
 } catch (err) { return { ok: false, stage: 'threw', error: String(err) }; }
 `,
-    meta: Object.freeze({ family: 'range', action: op.intent, sheet: op.selector.sheet, range: op.selector.range, targetSheet: op.dest.sheet, pairs: op.pairs, delta: op.delta }),
+    meta: Object.freeze({ family: 'range', action: op.intent, sheet: op.selector.sheet, range: op.selector.range, targetSheet: op.dest.sheet, pairs: op.pairs, delta: op.delta, ...(copy ? { explicitFormulaWrite: true, formulaWrites: (target && target.formulas) || {}, ...(cross ? { crossSheetWrite: true, valueWrites: target.values || {} } : {}) } : {}) }),
   };
 }
 
@@ -415,13 +489,24 @@ function wholeTaskChecks(op, finalObservation) {
   const name = `${op.intent} ${op.selector.sheet}!${op.selector.range} -> ${op.dest.sheet}!${op.dest.range}`;
   if (op.intent === 'copy_range') {
     const ok = !!p && op.pairs.every(({ from, to }) => { const s = cellAt(p, op.selector.sheet, from); return s && (isBlank(s) ? isBlank(cellAt(p, op.dest.sheet, to)) : holds(cellAt(p, op.dest.sheet, to), expected(op, s))); });
-    return [{ name, ok, detail: null }];
+    // another sheet: no Copy, so the cells' FORMAT (bold, number format, fill ...) is not carried -- named, never silent
+    const cross = op.dest.sheet !== op.selector.sheet;
+    return [{ name, ok, detail: null, operationId: op.id, ...(cross ? { notProven: ['cross-sheet-copy-format-not-carried'] } : {}) }];
   }
-  // owner review 8527132: the WHOLE target block against the carried expectation, and the whole source blank
-  const off = !p ? ['no-final-observation'] : op.pairs.filter(({ to }, i) => !matches(cellAt(p, op.dest.sheet, to), movedExpect(op, i))).map(x => x.to);
+  // L-06/b: wholeTaskChecks receives a FRESHLY re-planned op (adapter.verifyWholeTask's own
+  // planOperations(task) call, src/adapters/xlsx/adapter.cjs -- a DIFFERENT instance than the one
+  // classify() mutated during the main dispatch), so op.expect is null here, and `finalObservation`
+  // is POST-write (the source is ALREADY blank by now) -- re-running classify() against it would hit
+  // the SAME "blank source -> refuse" branch this file's own classify() uses for a real retry, never
+  // repopulating expect. There is therefore no PRE-write snapshot left to compare the target against
+  // at this layer: that comparison already happened at L1 (verifyPrimitive), on the SAME op instance
+  // classify() mutated with a PRE-write expect, in the SAME dispatch. This check is deliberately
+  // WEAKER than the old owner-review-8527132 one (per-cell content equality) -- it only confirms the
+  // source is left fully blank, and NAMES the narrowed scope via notProven rather than silently
+  // dropping it.
   const kept = !p ? [] : op.pairs.filter(({ from }) => !isBlank(cellAt(p, op.selector.sheet, from))).map(x => x.from);
-  const ok = off.length === 0 && kept.length === 0;
-  return [{ name: `${name}: source blank, the whole target block equals the carried expectation`, ok, detail: ok ? null : { targetDiffers: off.slice(0, 20), sourceNotBlank: kept.slice(0, 20) } }];
+  const ok = !!p && kept.length === 0;
+  return [{ name: `${name}: source left blank (target content equality is L1's job, not re-provable here)`, ok, detail: ok ? null : (p ? { sourceNotBlank: kept.slice(0, 20) } : { reason: 'no-final-observation' }), notProven: ['move-target-content-equality-not-reprovable-at-l2'] }];
 }
 
 /** Source and target blocks are windows (the target may lie outside every used range). */

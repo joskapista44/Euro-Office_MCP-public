@@ -5,20 +5,27 @@ it is named consistently.
 
 ## 1. Document Server blocks
 
-The server only works against an Euro-Office Document Server **9.3.4.60** carrying this project's blocks. They are
-inserted into the editor bundles by `documentserver-patches/9.3.4.60/install_bridge.py`, driven by
-`fresh-install.json`, which pins the exact UNPATCHED input bundle hash, each block hash and the exact output hash.
-Any other input (a different build, an already modified bundle) is refused and nothing is written.
+The server only works against an Euro-Office Document Server **9.3.5.0** carrying this project's blocks. They are
+inserted into the editor bundles by `documentserver-patches/9.3.4.60/install_bridge.py` -- the same patcher script,
+pointed at the `documentserver-patches/9.3.5.0/fresh-install-v1.1.0.json` plan via `--plan` (the script is SHA256-based and
+plan-parameterized, so it did not need its own 9.3.5.0 copy) -- driven by that plan, which pins the exact UNPATCHED
+input bundle hash, each block hash and the exact output hash. Any other input (a different build, an already
+modified bundle) is refused and nothing is written.
+
+The plan installs the cell (XLSX) Bridge `euro-office-bridge-v1/9.3.5.0/17` and the word (DOCX) Bridge
+`euro-office-bridge-word-v1/9.3.5.0/5` -- the only Bridge revisions this release writes through.
+`documentserver-patches/9.3.5.0/fresh-install.json` is the earlier `/16` + `/3` plan, kept for the record only: against
+its output every XLSX write and every DOCX Bridge call of this release is refused.
 
 Locate the bundles the editor actually loads (historically
 `<documentserver>/sdkjs/cell/sdk-all.js` and `<documentserver>/sdkjs/word/sdk-all.js`), keep a copy of each, then:
 
 ```sh
 cd documentserver-patches/9.3.4.60
-python3 install_bridge.py --target cell --input <cell sdk-all.js> --check
-python3 install_bridge.py --target cell --input <cell sdk-all.js> --apply --output /tmp/cell-sdk-all.js
-python3 install_bridge.py --target word --input <word sdk-all.js> --check
-python3 install_bridge.py --target word --input <word sdk-all.js> --apply --output /tmp/word-sdk-all.js
+python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.1.0.json --target cell --input <cell sdk-all.js> --check
+python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.1.0.json --target cell --input <cell sdk-all.js> --apply --output /tmp/cell-sdk-all.js
+python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.1.0.json --target word --input <word sdk-all.js> --check
+python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.1.0.json --target word --input <word sdk-all.js> --apply --output /tmp/word-sdk-all.js
 ```
 
 `--check` prints `STATUS=PATCHABLE` (or `ALREADY_PATCHED`, exit 0, nothing to do); `--apply` verifies the output hash
@@ -108,7 +115,7 @@ The server speaks MCP over stdio: no daemon, no port. Register it as a stdio ser
 
 Smoke test:
 
-- `tools/list` returns exactly `product_status`, `xlsx_read`, `docx_read`, `xlsx_execute_task`;
+- `tools/list` returns exactly `product_status`, `xlsx_read`, `docx_read`, `xlsx_execute_task`, `docx_execute_task`;
 - `product_status` reports the released identity (`artifact.version`, `artifact.sha256`, `released: true`);
 - `xlsx_read` with `operation: "read_range"` and `format: true` on a small range of a workbook you can open returns
   `ok: true` and no `UNOBSERVABLE:` value -- that exercises the broker, the browser and the cell (XLSX) blocks. For

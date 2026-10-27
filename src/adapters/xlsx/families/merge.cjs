@@ -30,6 +30,12 @@ const cells = require('./cells.cjs');
  * silently empties a row's non-left-most non-blank cell exactly as it does for a plain merge (X-L07's
  * named safety boundary), so this family refuses rather than weakening. unmerge_range needs no `across`
  * of its own: UnMerge() on the whole range already dissolves every inner (per-row) merge (see above).
+ *
+ * X-L13/3 (owner EURO-MCP capability-backlog, matrix category (a) MIGRALHATO): migrated to the TIERED
+ * observation above 45000 used cells (adapter.cjs TIERED_INTENTS) -- 45000 ALATT unchanged (the full read). Above it,
+ * every check ABOVE (gate/classify/verifyPrimitive, all window-only) stays exactly as strict; only the OUTSIDE-the-
+ * target merge-area re-check in verifyPreservation() below changes -- see its own comment for why and what it relies
+ * on instead.
  */
 
 const INTENTS = Object.freeze(['merge_range', 'unmerge_range']);
@@ -182,12 +188,40 @@ function verifyPrimitive(op, before, after) {
   return { ok: wrong.length === 0 && contentChanged.length === 0, evidence: { sheet: op.selector.sheet, range: op.selector.range, cells: op.cells.length, wrong: wrong.slice(0, 20), contentChanged: contentChanged.slice(0, 20), proof: 'fresh-live-per-cell-merge-area' } };
 }
 
-/** L3: as write_range (every other cell keeps value / formula), AND every other read cell keeps its merge area. */
+/**
+ * L3: as write_range (every other cell keeps value / formula), AND every other read cell keeps its merge area.
+ *
+ * X-L13/3 (owner EURO-MCP capability-backlog): `merge_range`/`unmerge_range` migrated to the TIERED
+ * observation above 45000 used cells (adapter.cjs TIERED_INTENTS). The digest (T2, xlsx-driver.cjs digestQuery) carries
+ * no merge-area field at all -- only type/value/formula -- so a cell's merge area OUTSIDE the task's windows cannot be
+ * re-read from a tiered primary (`before.primary.cells` / `after.primary.cells` hold ONLY the window cells under tier
+ * 'tiered'; inventory.cjs's own comment: "a tiered read's cells are only the windows"). Letting the loop below run
+ * unchanged would not fail -- `Object.entries(b.cells)` would simply never see an outside cell, and an empty result
+ * looks identical to "compared, nothing changed".
+ *
+ * Naming this ONLY in a nested evidence string (an earlier version of this fix) is not enough -- the surrounding
+ * receipt (statuses APPLIED, l3 verdict PASS) would still read as an unqualified FULL proof, exactly the shape the
+ * X-N01b owner rule forbids for a reduced proof. The fix is the SAME machine-readable taxonomy format.cjs's own
+ * `scopeOf()` already uses for the numberFormat-only bounded case (`preservationScope` / `proven` / `notProven` --
+ * write-tools.cjs's `l3Scope()` reads these generically, by field name, not by family): a tiered merge/unmerge is
+ * BOUNDED, `notProven: ['merge-topology-outside-target']`. The `ok` verdict is NOT weakened by this -- it still rests on
+ * the shared digest comparison above (`cells.verifyPreservation`'s own `withDigest()`, proving value/formula
+ * preservation outside the windows) and on the architectural invariant `gate()` already enforces before ANY write --
+ * a target cell's merge area can never reach outside the target range, so no outside cell can share one with it
+ * either. Below 45000 (FULL tier) this function is UNCHANGED: no `preservationScope` field at all, exactly as before
+ * (write_range/clear_range's own FULL-tier receipts carry none either).
+ */
 function verifyPreservation(op, before, after) {
   const rest = cells.verifyPreservation(op, before, after);
   if (!rest.ok && rest.evidence && rest.evidence.reason) return rest;
   const b = before.primary;
   const a = after.primary;
+  if (b.tier === 'tiered') {
+    return { ok: rest.ok, evidence: { ...rest.evidence, mergeChanged: 'NOT_RECHECKED:tiered-digest-carries-no-merge-area-field', mergeChangedCount: null,
+      preservationScope: 'BOUNDED',
+      proven: ['target-merge-area', 'target-content', 'sheet-values-and-formulas-outside-windows-digest'],
+      notProven: ['merge-topology-outside-target'] } };
+  }
   const target = new Set(op.cells.map(c => key(op.selector.sheet, c.a)));
   const mergeChanged = Object.entries(b.cells).filter(([k, c]) => !target.has(k) && a.cells[k] && a.cells[k].merge !== c.merge).map(([k, c]) => ({ cell: k.replace('\u0000', '!'), before: c.merge, after: a.cells[k].merge }));
   return { ok: rest.ok && mergeChanged.length === 0, evidence: { ...rest.evidence, mergeChanged: mergeChanged.slice(0, 20), mergeChangedCount: mergeChanged.length } };

@@ -13,9 +13,15 @@ const { b03BridgeWritePrelude, b03DispatchResult } = require('../../src/drivers/
  * over a fake editor (Asc.editor) that records every call. One worksheet.copy/v1 write per command; the gate refuses a
  * runtime without the capability before any call; a refusal after the copy call is uncertain (the copy may exist).
  */
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): V7 (historical 9.3.4.60, no B03 capability)
+// stays as a NEGATIVE control -- it now mismatches at the RUNTIME level (9.3.4 is not accepted at all), not
+// just the patch level. V8 (historical 9.3.4.60, the first revision WITH the capability) is retired as the
+// POSITIVE example -- the 9.3.5.0 block carries the SAME byte-identical worksheet.copy/v1 handler (warrant:
+// test/static/b03-write-handler-identity.test.cjs) and self-reports the now-accepted identity.
 const DIR = path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.4.60', 'euro-office-bridge-v1');
 const block = rev => fs.readFileSync(path.join(DIR, rev, 'bridge-block.js'), 'utf8').replace(/,\s*$/, '');
-const V7 = block('rev7-candidate'); const V8 = block('rev8-candidate');
+const V7 = block('rev7-candidate');
+const V8 = fs.readFileSync(path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.5.0', 'euro-office-bridge-v1', 'bridge-block.js'), 'utf8').replace(/,\s*$/, '');
 
 function editor({ sheets: list = ['L', 'H'], error = false, copy = 'append' } = {}) {
   const calls = []; let onError = null;
@@ -53,7 +59,7 @@ test('/8: one worksheet.copy/v1 write -> the product call (asc_copyWorksheet(-1,
 test('/7 (no B03 capability): the gate refuses BEFORE any editor call; mutation NONE; not ok', () => {
   const ed = editor();
   const { result } = runCopy(V7, ed);
-  assert.deepEqual(result, { ok: false, stage: 'bridge-write-gate', reason: 'PATCH_VERSION_MISMATCH', mutation: 'NONE' });
+  assert.deepEqual(result, { ok: false, stage: 'bridge-write-gate', reason: 'RUNTIME_VERSION_MISMATCH', mutation: 'NONE' });
   assert.deepEqual(ed.calls, []);
   assert.equal(b03DispatchResult({ ok: true, result }).ok, false);
 });

@@ -205,7 +205,7 @@ test('faults at L1: no mutation / wrong level -> never APPLIED, no barrier', asy
     assert.equal(status(x), OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN, fault);
     assert.equal(x.primitiveVerification[0].verdict, 'FAIL', fault);
     assert.equal(x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.VERIFY_CANNOT_PROVE_TERMINAL_STATE, fault);
-    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED, fault);
+    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST, fault);
     assert.equal(driver.calls.forceSave, 0, fault);
   }
 });
@@ -275,6 +275,6 @@ test('B18 guard C: the removal command does nothing -> L1 FAIL, uncertain, no ba
   assert.equal(status(x), OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN);
   assert.equal(x.primitiveVerification[0].verdict, 'FAIL');
   assert.equal(x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.VERIFY_CANNOT_PROVE_TERMINAL_STATE);
-  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
   assert.equal(driver.calls.forceSave, 0);
 });

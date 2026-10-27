@@ -210,11 +210,11 @@ const FAILURES = {
   READY_TIMEOUT: { wrap: d => { d.open = async () => ({ ok: false, detail: 'live spreadsheet model not ready' }); return d; },
     want: { stage: 'OPEN', code: 'OPEN_FAILED', dispatch: 0, write: false, verify: 'NONE', persist: 0, save: null, close: 'NONE (no handle)', retry: 'rerun the full task' } },
   DISPATCH_THROW: { script: { fault: 'throw' },
-    want: { ops: ['DISPATCHED_OUTCOME_UNKNOWN'], uncertainty: 'DISPATCH_THREW', dispatch: 1, write: 'UNKNOWN (editor)', verify: 'NOT_PROVEN', persist: 0, save: 'UNCERTAIN_NOT_PERSISTED', close: 'SUCCESS', retry: 'rerun classifies from a fresh observation' } },
+    want: { ops: ['DISPATCHED_OUTCOME_UNKNOWN'], uncertainty: 'DISPATCH_THREW', dispatch: 1, write: 'UNKNOWN (editor)', verify: 'NOT_PROVEN', persist: 0, save: 'UNCERTAIN_MAY_PERSIST', close: 'SUCCESS', retry: 'rerun classifies from a fresh observation' } },
   L1_MISMATCH: { script: { fault: 'ignore' }, steps: W2,
-    want: { ops: ['DISPATCHED_OUTCOME_UNKNOWN', 'SKIPPED_DUE_TO_PRIOR_FAILURE'], uncertainty: 'VERIFY_CANNOT_PROVE_TERMINAL_STATE', dispatch: 1, write: 'UNKNOWN (editor)', verify: 'L1 not PASS', persist: 0, save: 'UNCERTAIN_NOT_PERSISTED', close: 'SUCCESS', retry: 'rerun: s0 re-classified, s1 runs' } },
+    want: { ops: ['DISPATCHED_OUTCOME_UNKNOWN', 'SKIPPED_DUE_TO_PRIOR_FAILURE'], uncertainty: 'VERIFY_CANNOT_PROVE_TERMINAL_STATE', dispatch: 1, write: 'UNKNOWN (editor)', verify: 'L1 not PASS', persist: 0, save: 'UNCERTAIN_MAY_PERSIST', close: 'SUCCESS', retry: 'rerun: s0 re-classified, s1 runs' } },
   L3_FAILURE: { script: { fault: 'side-effect' },
-    want: { ops: ['DISPATCHED_OUTCOME_UNKNOWN'], uncertainty: 'INTEGRAL_PRESERVATION_NOT_PROVEN', l3: 'FAIL', dispatch: 1, write: 'YES (editor), side effect', verify: 'L1 PASS, L3 FAIL', persist: 0, save: 'UNCERTAIN_NOT_PERSISTED', close: 'SUCCESS', retry: 'rerun after inspection' } },
+    want: { ops: ['DISPATCHED_OUTCOME_UNKNOWN'], uncertainty: 'INTEGRAL_PRESERVATION_NOT_PROVEN', l3: 'FAIL', dispatch: 1, write: 'YES (editor), side effect', verify: 'L1 PASS, L3 FAIL', persist: 0, save: 'UNCERTAIN_MAY_PERSIST', close: 'SUCCESS', retry: 'rerun after inspection' } },
   FORCESAVE_UNCONFIRMED: { script: { forceSaveUnconfirmed: 'no-save-ack-observed' },
     want: { ops: ['APPLIED'], outcome: 'task-save-not-confirmed', dispatch: 1, write: 'YES (editor)', verify: 'L1/L2 PASS', persist: 1, save: 'EDITOR_CLEAN', close: 'SUCCESS', retry: 'rerun -> SATISFIED if stored, else APPLY' } },
   STORAGE_WRITE_REJECTED: { script: { forceSaveUnconfirmed: 'completion-not-successful' },
@@ -222,7 +222,7 @@ const FAILURES = {
   CLOSE_FAILURE: { script: { closeFails: true },
     want: { ops: ['APPLIED'], outcome: 'task-cleanup-failed', dispatch: 1, write: 'YES (editor)', verify: 'L1/L2 PASS', persist: 1, save: 'EDITOR_CLEAN', close: 'FAILED', retry: 'rerun -> SATISFIED if stored' } },
   BROWSER_LOSS: { wrap: d => { for (const m of ['readLive', 'canSave', 'forceSave', 'close']) { const real = d[m].bind(d); d[m] = async (...a) => (d.calls.dispatch >= 1 ? lost() : real(...a)); } return d; },
-    want: { ops: ['DISPATCHED_OUTCOME_UNKNOWN'], dispatch: 1, write: 'UNKNOWN (editor)', verify: 'NOT_PROVEN', persist: 0, save: 'UNCERTAIN_NOT_PERSISTED', close: 'FAILED', retry: 'rerun classifies from a fresh observation' } },
+    want: { ops: ['DISPATCHED_OUTCOME_UNKNOWN'], dispatch: 1, write: 'UNKNOWN (editor)', verify: 'NOT_PROVEN', persist: 0, save: 'UNCERTAIN_MAY_PERSIST', close: 'FAILED', retry: 'rerun classifies from a fresh observation' } },
 };
 
 test('FAILURE_MATRIX: canonical outcomes per injection point -- never APPLIED-and-ok, no rollback claimed', async () => {
@@ -322,9 +322,10 @@ test('REFUSAL_REGRESSION on the wired path: every M11.4a.1 refusal stops before 
   EVIDENCE.refusals = { COUNT: REFUSALS.length, ALL_PRE_DISPATCH: true };
 });
 
-test('SERVED_SURFACE (M11.4b.1): the wired xlsx_execute_task is served, no DOCX WRITE tool exists', () => {
-  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task']);
+test('SERVED_SURFACE (M11.4b.1): the wired xlsx_execute_task is served; GH #219 3 built docx_execute_task and GH #228 (proposed state) serves it', () => {
+  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
   const { tools, registry } = buildServerTools({ config: { schemaVersion: 2, broker: { url: BROKER } }, configIdentity: 'fixture' });
-  assert.deepEqual(Object.keys(tools), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task']);
-  assert.equal(registry.docx_execute_task, undefined);
+  assert.deepEqual(Object.keys(tools), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.equal(typeof registry.docx_execute_task, 'object', 'GH #219 3 built registry.docx_execute_task; GH #228 (proposed state) also serves it in `tools` (the exposed subset)');
+  assert.equal(typeof registry.docx_execute_task.handler, 'function');
 });

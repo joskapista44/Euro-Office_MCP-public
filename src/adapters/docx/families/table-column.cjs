@@ -2,7 +2,7 @@
 
 const { norm, textUnits } = require('../inventory.cjs');
 const { UNRESOLVED } = require('./text.cjs');
-const { tableRead, cellSelector, scopeOf, CELL_KEYS } = require('./table.cjs');
+const { tableReadWithVerticalMerges, cellSelector, scopeOf, CELL_KEYS } = require('./table.cjs');
 
 /**
  * DOCX `table-column` family (M4 Wave 4c): insert_table_column_before, insert_table_column_after,
@@ -27,7 +27,8 @@ const { tableRead, cellSelector, scopeOf, CELL_KEYS } = require('./table.cjs');
  *     then covered other columns (semantic drift); a delete of a column the span covers LOST the
  *     merged content; a merged cell as the target of a delete removed all its columns;
  *   - the public Split does not make a ragged grid: the other rows' cells get colspan (the same rule);
- *   - a vertical merge: refused by `tableRead` for every table family (the W4b guard, unchanged).
+ *   - a vertical merge in the TARGET table: refused (unchanged reason string); a merge in ANOTHER
+ *     table no longer refuses this one (W06-3 point 2 -- per-table, not document-wide).
  *
  * Contract (owner brief W4c points 3-4, 6-9, 11-12, 19, 23-26):
  *   identity     TABLE identity + CELL identity (the W4a `cellSelector`); the target's LOGICAL column
@@ -97,18 +98,24 @@ const cellKey = c => JSON.stringify([c.text, c.paragraphs, c.simple, CELL_KEYS.f
  * `placeholder` that the driver read does not have (gridAfter probe, run ...fcd2df). Reconciled per
  * row from the fresh read: the placeholders are the row's trailing gap, each span 1 and empty, and the
  * projected cells before them match the driver row one to one. Anything else -> not reconciled
- * (refused). A table set without any placeholder takes the unchanged `tableRead` path.
+ * (refused). A table set without any placeholder takes the PER-TABLE reconciled path (W06-3)
+ * -- `tableReadWithVerticalMerges`, the same read table-row.cjs already uses; `locate()`
+ * below still refuses a vertical merge in the TARGET table specifically (unchanged outcome for
+ * that table, decision point 2), but no longer for every table merely because ANOTHER one
+ * in the document has a merge (LIVE-measured READ_DIVERGENCE: a merge-free table's two
+ * reads agree row-for-row regardless of what another table in the same document carries). The
+ * grid-gap branch below is UNCHANGED -- its own, narrower blanket is a separate condition,
+ * reviewed on its own (design doc point 2).
  */
 function columnRead(primary) {
   const html0 = ((primary && primary.blocks) || []).filter(b => b.kind === 'table');
   if (!html0.some(t => (t.rows || []).some(r => r.some(c => c.placeholder)))) {
-    const read = tableRead(primary);
-    return read.ok ? { ...read, gaps: read.html.map(t => (t.rows || []).map(() => 0)) } : read;
+    const read = tableReadWithVerticalMerges(primary);
+    return read.ok ? { ...read, gaps: read.html.map(t => (t.rows || []).map(() => 0)), leads: read.html.map(t => (t.rows || []).map(() => 0)) } : read;
   }
   const d = primary && primary.document;
   const tables = d ? d.tables : null;
   if (!Array.isArray(tables)) return { ok: false, reason: 'tables-unreadable' };
-  if (html0.some(t => (t.rows || []).some(r => r.some(c => c.rowspan > 1)))) return { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:vertical-merge' };
   if (tables.length !== html0.length) return { ok: false, reason: 'table-read-shape-mismatch' };
   // the refusal names the failed check and what it saw (the first LIVE run refused every case with no
   // way to tell which condition fired, run ...ab094e)
@@ -116,34 +123,95 @@ function columnRead(primary) {
     detail: { table, row, check, projected: (html0[table].rows[row] || []).map(c => ({ placeholder: c.placeholder === true, span: c.span, text: c.placeholder ? JSON.stringify(c.text).slice(0, 24) : undefined })), driverCells: ((tables[table].rows || [])[row] || []).length } });
   const html = [];
   const gaps = [];
+  const leads = [];
   for (let ti = 0; ti < html0.length; ti += 1) {
     const hrows = html0[ti].rows || [];
     if (hrows.length !== tables[ti].rows.length) return unreconciled(ti, 0, 'row-count');
     const real = [];
     const gap = [];
+    const lead = [];
+    // GH #291 V13 (LIVE, docs/evidence/gh291-v13-h5-probe-20261022.json): a vertical merge next to a grid gap -- the projection
+    // omits a continuation cell, the driver row keeps it (as tableReadWithVerticalMerges counts it)
+    const vspans = [];
+    hrows.forEach((row, r) => row.forEach(c => { if (!c.placeholder && c.rowspan > 1) vspans.push([r, r + c.rowspan - 1]); }));
+    if (vspans.some(([, bottom]) => bottom >= hrows.length)) return unreconciled(ti, 0, 'vertical-merge-past-the-table');
     for (let r = 0; r < hrows.length; r += 1) {
-      const first = hrows[r].findIndex(c => c.placeholder);
-      const cells = first < 0 ? hrows[r] : hrows[r].slice(0, first);
-      const pad = first < 0 ? [] : hrows[r].slice(first);
+      // GH #291 H4 (LIVE, docs/evidence/gh291-h4-grid-gap-probe-20261022.json): a gap of n columns is ONE placeholder of span n
+      // (gridAfter 2 -> span 2), and a gridBefore gap is a LEADING placeholder; the real cells sit between them
+      const row = hrows[r];
+      let a = 0;
+      while (a < row.length && row[a].placeholder) a += 1;
+      let z = row.length;
+      while (z > a && row[z - 1].placeholder) z -= 1;
+      const cells = row.slice(a, z);
+      const pad = [...row.slice(0, a), ...row.slice(z)];
       // a placeholder may carry whitespace only (the projection's &nbsp; paragraph) -- a gap holds no text
-      if (pad.some(c => !c.placeholder || c.span !== 1 || c.text.replace(/\s/g, '') !== '')) return unreconciled(ti, r, 'gap-shape');
-      if (cells.length !== tables[ti].rows[r].length) return unreconciled(ti, r, 'cell-count');
+      if (cells.some(c => c.placeholder) || pad.some(c => !(c.span >= 1) || c.text.replace(/\s/g, '') !== '')) return unreconciled(ti, r, 'gap-shape');
+      const covered = vspans.filter(([top, bottom]) => top < r && r <= bottom).length;
+      if (cells.length + covered !== tables[ti].rows[r].length) return unreconciled(ti, r, 'cell-count');
+      const width = cs => cs.reduce((n, c) => n + c.span, 0);
       real.push(cells);
-      gap.push(pad.length);
+      lead.push(width(row.slice(0, a)));
+      gap.push(width(row.slice(z)));
     }
     html.push({ ...html0[ti], rows: real });
     gaps.push(gap);
+    leads.push(lead);
   }
   const cells = [];
   tables.forEach((t, ti) => t.rows.forEach((row, ri) => row.forEach((cell, ci) => cells.push({ at: `${ti}:${ri}:${ci}`, cell }))));
-  return { ok: true, tables, html, cells, gaps };
+  return { ok: true, tables, html, cells, gaps, leads };
 }
 
-/** The logical grid of one table from its HTML projection: per row, each physical cell's start and colspan; a row's grid gap counts toward its width. */
-function gridOf(html, gaps = []) {
-  const rows = (html.rows || []).map(r => { let at = 0; return r.map(c => { const g = { start: at, span: c.span || 1 }; at += g.span; return g; }); });
-  const widths = new Set(rows.map((r, i) => r.reduce((n, g) => n + g.span, 0) + (gaps[i] || 0)));
-  return widths.size === 1 ? { ok: true, rows, width: [...widths][0] } : { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:uneven-logical-width' };
+/**
+ * The logical grid of one table from its HTML projection: per row, each physical cell's start and
+ * colspan; a row's grid gap counts toward its width.
+ *
+ * W-06/2: a vertical merge's continuation row OMITS the merged column's cell from the HTML
+ * projection entirely (the owner cell above carries `rowspan`, table.cjs's own read comment) --
+ * `active` tracks each open merge's column position (recorded when its owning cell, `rowspan > 1`,
+ * is walked) so a continuation row's REAL cells still land at their correct column. The driver's
+ * physical read (table.cjs) keeps the continuation as an actual, empty cell, so the two reads
+ * diverge in per-row LENGTH exactly there -- `driverIndex[r][k]` names which driver-row cell each
+ * `rows[r][k]` grid cell came from (identity when no merge is open, same as before this change).
+ * A merge whose owner also spans columns (GH #291 V11, measured): the driver contributes exactly ONE
+ * continuation cell regardless of the colspan width, so its gap advances the grid by the span and the
+ * driver index by one. A boundary inside such a block / a delete of one of its columns is refused by
+ * shapeGuard (measured: the grid misaligns / the whole block is lost).
+ */
+function gridOf(html, gaps = [], leads = []) {
+  const rows = html.rows || [];
+  const active = []; // open vertical merges still owed a continuation gap: { start, until }
+  const gridRows = [];
+  const driverIndex = [];
+  const rowWidths = [];
+  for (let r = 0; r < rows.length; r += 1) {
+    // GH #291 V11 (LIVE, docs/evidence/gh291-v11-vmerge-colspan-probe-20261022.json): a merged owner that also spans columns leaves ONE
+    // driver continuation cell that covers its whole span -- the gap advances the grid by that span and the driver index by one
+    const contGaps = active.filter(a => a.until >= r).sort((x, y) => x.start - y.start);
+    let pos = leads[r] || 0; // GH #291 H4: a gridBefore gap shifts the row's real cells right
+    let gi = 0;
+    let di = 0;
+    const rowGrid = [];
+    const rowDriverIndex = [];
+    for (const c of rows[r]) {
+      while (gi < contGaps.length && contGaps[gi].start === pos) { pos += contGaps[gi].span; di += 1; gi += 1; }
+      const span = c.span || 1;
+      const rowspan = c.rowspan || 1;
+      rowGrid.push({ start: pos, span });
+      rowDriverIndex.push(di);
+      pos += span;
+      di += 1;
+      if (rowspan > 1) active.push({ start: pos - span, span, until: r + rowspan - 1 });
+    }
+    while (gi < contGaps.length) { pos += contGaps[gi].span; di += 1; gi += 1; }
+    gridRows.push(rowGrid);
+    driverIndex.push(rowDriverIndex);
+    rowWidths.push(pos);
+  }
+  const widths = new Set(rowWidths.map((w, i) => w + (gaps[i] || 0)));
+  // `ends`: per row, where its real cells (and continuation gaps) end -- a short row's gap starts there
+  return widths.size === 1 ? { ok: true, rows: gridRows, width: [...widths][0], driverIndex, ends: rowWidths } : { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:uneven-logical-width', ends: rowWidths };
 }
 
 /** The target table, its grid and the target's logical column, from ONE fresh read. */
@@ -160,19 +228,54 @@ function locate(primary, op) {
   if (hits.length === 1) [ti, ri, ci] = hits[0].at.split(':').map(Number);
   if (ti === null) return { ok: false, reason: 'table-column-target-not-found' };
   ti = Number(ti);
+  // W06-3 (point 2): the TARGET table's own vertical-merge state decides, not the document's.
+  // W-06/2 (the vMerge delete follow-on to W-06/1's LIVE measurement): the REMOVE action no longer refuses it --
+  // its measured post-delete behaviour (gridOf above) is now read instead; ADD stays refused
+  // UNCHANGED (never measured -- column probe 1 only exercised the public delete on a vMerge
+  // table). A merge in ANOTHER table still never reaches here (columnRead's per-table read).
+  // GH #291 T-04 (LIVE, docs/evidence/gh291-vmerge-structure-probe-20261021.json): ADD no longer refuses either -- an insert before / after
+  // the merge column or any other column keeps the vMerge on its own column and gives the new column no vMerge; L1/L3 below map
+  // the continuation rows through gridOf's driverIndex. GH #291 V11: a merge whose owner also spans columns is gridded too (gridOf);
+  // its inside is refused by shapeGuard.
   const table = read.tables[ti];
-  const grid = gridOf(read.html[ti], read.gaps[ti]);
-  if (!grid.ok) return grid;
+  let gaps = read.gaps[ti];
+  let grid = gridOf(read.html[ti], gaps, read.leads[ti]);
+  // GH #291 H5 (LIVE, docs/evidence/gh291-v13-h5-probe-20261022.json): a row one or more columns short WITHOUT a gap marker -- the
+  // editor treats the missing columns as a trailing gap (and writes gridAfter on the next column write). Read as such when every
+  // short row carries no marker of its own; `implicit` names those rows.
+  let implicit = gaps.map(() => false);
+  if (!grid.ok && grid.ends) {
+    const full = Math.max(...grid.ends.map((e, r) => e + gaps[r]));
+    implicit = grid.ends.map((e, r) => e + gaps[r] < full);
+    if (implicit.some((x, r) => x && (gaps[r] > 0 || read.leads[ti][r] > 0))) return grid;
+    gaps = grid.ends.map((e, r) => (implicit[r] ? full - e : gaps[r]));
+    grid = gridOf(read.html[ti], gaps, read.leads[ti]);
+    if (!grid.ok) return grid;
+  }
   let col = null;
   if (ri !== null) {
-    const g = grid.rows[ri][ci];
-    if (g.span !== 1) return { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:target-spans-columns' };
-    col = g.start;
-    if (op.tableAnchor !== null && INTENTS[op.intent].action === 'remove' && table.rows.some((row, r) => row.some((c, k) => c.text === op.tableAnchor && grid.rows[r][k].start <= col && col < grid.rows[r][k].start + grid.rows[r][k].span))) {
+    // `ci` is table.cjs's driver-row index (read.cells was built off read.tables, the physical
+    // read); gridOf's driverIndex maps it back to the grid's own cell order -- identity when this
+    // row holds no continuation gap, the same lookup a plain `grid.rows[ri][ci]` used to be.
+    const k = grid.driverIndex[ri].indexOf(ci);
+    if (k < 0) return { ok: false, reason: 'table-column-target-column-unresolved' };
+    const g = grid.rows[ri][k];
+    // GH #291 H3 / H3v (LIVE, docs/evidence/gh291-h-colspan-probe-20261022.json, gh291-h3v-colspan-rowspan-probe-20261022.json): an
+    // INSERT next to a target that spans columns -- also when it spans rows too -- lands at the span's own edge in every row
+    // (after: right of the span, before: left of it) -- the target's column is that edge. A DELETE on it removes EVERY column the
+    // span covers (measured): refused.
+    const spanned = g.span !== 1;
+    if (spanned && INTENTS[op.intent].action !== 'add') return { ok: false, reason: 'FAIL_CLOSED_UNSUPPORTED_SHAPE:target-spans-columns' };
+    col = spanned && !INTENTS[op.intent].before ? g.start + g.span - 1 : g.start;
+    if (op.tableAnchor !== null && INTENTS[op.intent].action === 'remove' && table.rows.some((row, r) => row.some((c, dk) => {
+      if (c.text !== op.tableAnchor) return false;
+      const gk = grid.driverIndex[r].indexOf(dk);
+      return gk >= 0 && grid.rows[r][gk].start <= col && col < grid.rows[r][gk].start + grid.rows[r][gk].span;
+    }))) {
       return { ok: false, reason: 'table-anchor-in-target-column' };
     }
   }
-  return { ok: true, read, ti, ri, ci, col, table, html: read.html[ti], grid, width: grid.width, gaps: read.gaps[ti] };
+  return { ok: true, read, ti, ri, ci, col, table, html: read.html[ti], grid, width: grid.width, gaps, leads: read.leads[ti], implicit };
 }
 
 const boundaryOf = (op, col) => (INTENTS[op.intent].before ? col : col + 1);
@@ -180,21 +283,27 @@ const boundaryOf = (op, col) => (INTENTS[op.intent].before ? col : col + 1);
 /** The shape guard (column probe 1): measured unsafe colspan cases, refused before dispatch. */
 function shapeGuard(loc, op) {
   const cells = loc.grid.rows.flat();
-  // M5 row 14: a table with a grid gap -- only the measured primitives (gridAfter probe ...fcd2df):
-  // an insert at a boundary no further right than the gap rows' real cells (the new cell lands at the
-  // boundary in every row, the gap stays trailing); a delete of a column that is a REAL cell in every
-  // gap row (DEL_S_a1: the gap kept); a delete of a ONE-column gap's own column, right after the row's
-  // real cells (DEL_S_anchor: the gap is consumed; source differential ...ff8ea3 deletes the same way).
-  // A wider gap, a boundary inside the gap and a gap next to a colspan are refused.
-  if (loc.gaps.some(n => n > 0)) {
-    if (cells.some(g => g.span > 1)) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:grid-gap-with-colspan';
-    const realWidth = r => loc.grid.rows[r].reduce((n, g) => n + g.span, 0);
-    if (INTENTS[op.intent].action !== 'add') {
-      if (loc.grid.rows.some((row, r) => loc.gaps[r] > 0 && loc.col >= realWidth(r) && !(loc.col === realWidth(r) && loc.gaps[r] === 1))) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:grid-gap-column-delete';
-    } else {
-      const b = boundaryOf(op, loc.col);
-      if (loc.grid.rows.some((row, r) => loc.gaps[r] > 0 && b > realWidth(r))) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:insert-boundary-inside-a-grid-gap';
-    }
+  // M5 row 14 + GH #291 H4: a table with a grid gap -- only the measured primitives (gridAfter probe ...fcd2df; LIVE
+  // docs/evidence/gh291-h4-grid-gap-probe-20261022.json): an insert at a boundary no further right than a short row's real cells
+  // (the new cell lands at the boundary in every row, the gap stays trailing -- also a two-column gap and next to a colspan); a
+  // boundary PAST a short row's real cells is refused (measured H4a / H4c: the editor puts the new cell before the gap, the grid
+  // misaligns). A delete of any column: a real cell in a short row goes, a gap column shrinks that row's gap by one (H4d / H4e).
+  // A gridBefore (leading) gap: an insert at or past the gap's end and a delete of a real column (H4f / H4g) -- also next to a
+  // vertical merge (V13l), next to a colspan and in a row gapped on both sides (H4q; LIVE docs/evidence/gh291-gap-remaining-probe-
+  // 20261023.json: aligned in every row, the leading gap kept, a trailing gap column delete consumes that gap). Measured unsafe, so
+  // refused: a boundary inside or before the leading gap (the editor puts the new cell AFTER the gap, so in that row it lands in
+  // another column) and a delete of a leading gap column (the gap stays, the other rows shift: the grid misaligns, a vertical merge
+  // moves). GH #291 V13 / H5: a vertical merge next to a trailing gap is gridded (gridOf) -- the same rules; a row short WITHOUT a
+  // marker is a trailing gap too, and deleting one of ITS missing columns removes the column from the full rows only (H5d, measured).
+  const realEnd = r => loc.grid.ends[r];
+  if (loc.leads.some(n => n > 0)) {
+    if (INTENTS[op.intent].action === 'add') {
+      if (loc.leads.some(n => boundaryOf(op, loc.col) < n)) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:insert-boundary-inside-a-leading-grid-gap';
+    } else if (loc.leads.some(n => loc.col < n)) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:leading-grid-gap-column-delete';
+  }
+  if (loc.gaps.some(n => n > 0) && INTENTS[op.intent].action === 'add') {
+    const b = boundaryOf(op, loc.col);
+    if (loc.grid.rows.some((row, r) => loc.gaps[r] > 0 && b > realEnd(r))) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:insert-boundary-inside-a-grid-gap';
   }
   if (INTENTS[op.intent].action === 'add') {
     const b = boundaryOf(op, loc.col);
@@ -214,7 +323,8 @@ function localClaim(loc, op) {
   if (n < 0 || n >= loc.width) return false;
   return loc.grid.rows.every((row, r) => {
     const k = row.findIndex(g => g.start <= n && n < g.start + g.span);
-    return k >= 0 && row[k].span === 1 && loc.table.rows[r][k].text === '';
+    // GH #291: a continuation row's driver cells are offset from its grid cells -- map through driverIndex (identity without a merge)
+    return k >= 0 && row[k].span === 1 && loc.table.rows[r][loc.grid.driverIndex[r][k]].text === '';
   });
 }
 
@@ -242,7 +352,15 @@ function classify(primary, op) {
     }
     const unsafe = shapeGuard(loc, op);
     if (unsafe) return { state: 'FAIL_CLOSED', evidence: { reason: unsafe, ...evidence } };
-    return { state: 'APPLY', evidence: { ...evidence, targetColumnTexts: loc.table.rows.map((row, r) => { const k = loc.grid.rows[r].findIndex(g => g.start <= loc.col && loc.col < g.start + g.span); return k < 0 ? null : row[k].text; }) } };
+    // W-06/2 (requirement 3): the deleted column's own text, per row -- including a
+    // vMerge owner's -- is mechanically reported, not silently dropped. The EXECUTOR keeps
+    // verifyPrimitive's evidence (not this one) for an APPLIED op, so `deletedColumnTexts` lives
+    // there (same computation, same driverIndex reasoning); `targetColumnTexts` here is this
+    // function's own, pre-dispatch capture of the same thing, kept for a decisive-preflight reader.
+    return { state: 'APPLY', evidence: { ...evidence, targetColumnTexts: loc.table.rows.map((row, r) => {
+      const k = loc.grid.rows[r].findIndex(g => g.start <= loc.col && loc.col < g.start + g.span);
+      return k < 0 ? null : row[loc.grid.driverIndex[r][k]].text;
+    }) } };
   }
   if (terminalCount && claim) return satisfied();
   if (kind.action === 'add' && loc.ri === null) return { state: 'FAIL_CLOSED', evidence: { reason: 'table-column-target-not-found', ...evidence } };
@@ -312,13 +430,26 @@ function expectedRows(op, loc) {
   });
 }
 
-/** The gaps after the operation: unchanged, except a delete of a one-column gap's own column consumes that row's gap. */
+/**
+ * The gaps after the operation: unchanged, except a delete of a gap column shrinks that row's gap by one (a one-column gap is
+ * consumed; GH #291 H4: a two-column gap becomes one). A leading gap is kept (measured H4f / H4g; inside it is refused).
+ */
 function expectedGaps(op, loc) {
-  if (INTENTS[op.intent].action !== 'remove') return loc.gaps;
-  return loc.gaps.map((g, r) => (g > 0 && loc.col >= loc.grid.rows[r].reduce((n, x) => n + x.span, 0) ? g - 1 : g));
+  const leads = loc.leads;
+  if (INTENTS[op.intent].action !== 'remove') return { gaps: loc.gaps, leads };
+  const realEnd = r => loc.grid.ends[r];
+  return { gaps: loc.gaps.map((g, r) => (g > 0 && loc.col >= realEnd(r) ? g - 1 : g)), leads };
 }
 
-/** L1: rows unchanged; per row the original texts in order with one new EMPTY cell at the boundary (or the target's gone); width terminal. */
+/**
+ * L1: rows unchanged; per row the original texts in order with one new EMPTY cell at the boundary
+ * (or the target's gone); width terminal.
+ *
+ * W-06/2: `seq`/`want` index BEFORE's own grid (real cells only, no vMerge continuation gap); the
+ * driver's physical row can carry MORE cells than that when a continuation survives, so both sides
+ * of the text comparison are built from the GRID (via `driverIndex`), never the raw driver row --
+ * the same reasoning `gridOf`'s own comment gives for why a plain index is not safe past a merge.
+ */
 function verifyPrimitive(op, before, after) {
   const b = locate(before && before.primary, op);
   if (!b.ok || b.ri === null) return { ok: false, evidence: { reason: b.ok ? 'before-target-not-found' : `before-${b.reason}` } };
@@ -327,39 +458,55 @@ function verifyPrimitive(op, before, after) {
   const want = expectedRows(op, b);
   const rowsOk = a.table.rows.length === b.table.rows.length;
   const widthOk = a.width === op.terminalColumnCount;
-  const gapsOk = JSON.stringify(a.gaps) === JSON.stringify(expectedGaps(op, b));
+  const gapsOk = JSON.stringify({ gaps: a.gaps, leads: a.leads }) === JSON.stringify(expectedGaps(op, b));
+  const gridText = (loc, r, k) => loc.table.rows[r][loc.grid.driverIndex[r][k]].text;
   const mismatches = [];
   if (rowsOk) want.forEach((seq, r) => {
-    const got = a.table.rows[r].map(c => c.text);
-    const exp = seq.map(k => (k === null ? '' : b.table.rows[r][k].text));
+    const got = a.grid.rows[r].map((_, k) => gridText(a, r, k));
+    const exp = seq.map(k => (k === null ? '' : gridText(b, r, k)));
     if (JSON.stringify(got) !== JSON.stringify(exp)) mismatches.push({ row: r, expected: exp, actual: got });
   });
   const ok = rowsOk && widthOk && gapsOk && mismatches.length === 0;
-  return { ok, evidence: { rows: [b.table.rows.length, a.table.rows.length], gapsBefore: b.gaps, gapsAfter: a.gaps, columnsBefore: b.width, columnsAfter: a.width, terminalColumnCount: op.terminalColumnCount, targetColumnBefore: b.col, targetColumnAfter: a.col, mismatches: mismatches.slice(0, 10) } };
+  // requirement 3 (W-06/2): a delete loses whatever text sat in the target column -- for a
+  // vMerge's OWN column that includes the merged cell's content -- and the EXECUTOR keeps this
+  // function's evidence, not classify()'s, for an APPLIED op (executor.cjs's `semantic` unwrap),
+  // so the mechanical report of what was lost belongs here, not only in classify()'s APPLY state.
+  // A continuation row that never had a real cell there (the gap) reports null, not ''.
+  const deletedColumnTexts = INTENTS[op.intent].action === 'remove' ? b.table.rows.map((row, r) => {
+    const k = b.grid.rows[r].findIndex(g => g.start <= b.col && b.col < g.start + g.span);
+    return k < 0 ? null : row[b.grid.driverIndex[r][k]].text;
+  }) : null;
+  return { ok, evidence: { rows: [b.table.rows.length, a.table.rows.length], gapsBefore: b.gaps, gapsAfter: a.gaps, leadsBefore: b.leads, leadsAfter: a.leads, columnsBefore: b.width, columnsAfter: a.width, terminalColumnCount: op.terminalColumnCount, targetColumnBefore: b.col, targetColumnAfter: a.col, mismatches: mismatches.slice(0, 10), ...(deletedColumnTexts !== null ? { deletedColumnTexts } : {}) } };
 }
 
-/** L3, PRIMITIVE_INTEGRAL: every preserved cell and its colspan at the mapped place; other tables and outside text unchanged. */
+/**
+ * L3, PRIMITIVE_INTEGRAL: every preserved cell and its colspan at the mapped place; other tables
+ * and outside text unchanged. W-06/2: the shape check and the per-cell driver lookups use the
+ * GRID (real-cell) index via `driverIndex`, same reasoning as verifyPrimitive above -- `a.html`/
+ * `b.html` are already grid-indexed (the HTML projection IS the grid's own source), so `span()`
+ * needs no translation.
+ */
 function verifyPreservation(op, before, after) {
   const b = locate(before && before.primary, op);
   if (!b.ok || b.ri === null) return { ok: false, evidence: { reason: b.ok ? 'before-target-not-found' : `before-${b.reason}` } };
   const a = locate(after.primary, op);
   if (!a.ok) return { ok: false, evidence: { reason: `after-${a.reason}` } };
   const want = expectedRows(op, b);
-  if (a.table.rows.length !== want.length || want.some((seq, r) => a.table.rows[r].length !== seq.length)) return { ok: false, evidence: { reason: 'table-shape-not-as-expected' } };
+  if (a.table.rows.length !== want.length || want.some((seq, r) => a.grid.rows[r].length !== seq.length)) return { ok: false, evidence: { reason: 'table-shape-not-as-expected' } };
   const span = c => [c.span, c.rowspan];
   const changed = [];
   want.forEach((seq, r) => seq.forEach((k, i) => {
-    const got = a.table.rows[r][i];
+    const got = a.table.rows[r][a.grid.driverIndex[r][i]];
     if (k === null) return; // the new cell: empty (L1), span 1 (the L1 terminal width)
-    const cells = cellKey(got) === cellKey(b.table.rows[r][k]);
+    const cells = cellKey(got) === cellKey(b.table.rows[r][b.grid.driverIndex[r][k]]);
     const spans = JSON.stringify(span(a.html.rows[r][i])) === JSON.stringify(span(b.html.rows[r][k]));
     if (!cells || !spans) changed.push({ row: r, cell: i, from: k, cells, spans });
   }));
-  const others = (r, ti) => r.tables.map((t, i) => (i === ti ? null : JSON.stringify([t.rows.map(row => row.map(cellKey)), r.html[i].rows.map(row => row.map(span)), r.gaps[i]]))).filter(x => x !== null);
+  const others = (r, ti) => r.tables.map((t, i) => (i === ti ? null : JSON.stringify([t.rows.map(row => row.map(cellKey)), r.html[i].rows.map(row => row.map(span)), r.gaps[i], r.leads[i]]))).filter(x => x !== null);
   const otherTables = JSON.stringify(others(a.read, a.ti)) === JSON.stringify(others(b.read, b.ti));
   const units = p => textUnits(p).map(u => norm(u.text));
   const outside = JSON.stringify(units(after.primary)) === JSON.stringify(units(before.primary));
-  const gapsKept = JSON.stringify(a.gaps) === JSON.stringify(expectedGaps(op, b));
+  const gapsKept = JSON.stringify({ gaps: a.gaps, leads: a.leads }) === JSON.stringify(expectedGaps(op, b));
   const ok = changed.length === 0 && otherTables && outside && gapsKept;
   return { ok, evidence: { changedCells: changed.slice(0, 10), gridGapsKept: gapsKept, otherTablesUnchanged: otherTables, textUnitsOutsideTablesUnchanged: outside, expectationSource: 'derived-from-fresh-pre-mutation-observation' } };
 }

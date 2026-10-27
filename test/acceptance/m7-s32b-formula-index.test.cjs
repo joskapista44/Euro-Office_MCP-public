@@ -53,6 +53,14 @@ function readers(b, request) {
   };
 }
 
+// GH #326/#327: this stand-in's Api has no GetEuroOfficeBridge at all (it predates the DS Bridge entirely) --
+// every sheet here is UNPROTECTED, supplied directly rather than through a bridge round trip this fixture was
+// never built to simulate (the SAME shortcut `readers()` above already takes for the dependency axes).
+const protectionOf = request => ({
+  ...((request.protectionSheets || []).length ? { protectionReads: Object.fromEntries(request.protectionSheets.map(n => [n, { protected: false, forbids: null }])) } : {}),
+  ...((request.protectionRanges || []).length ? { protectionRangeReads: Object.fromEntries(request.protectionRanges.map(w => [`${w.sheet}!${w.range}`, { protected: false, forbids: null, cells: null }])) } : {}),
+});
+
 /** What readLive returns: the probe, the tier decision, the matching read; T3 asked exactly when the readers are. */
 function observe(b, request) {
   const probe = run(usedProbeQuery(), b);
@@ -61,10 +69,10 @@ function observe(b, request) {
   if (tier.tier === 'tiered') {
     const p = run(readQuery(request.windows, { usedRanges: false }), b);
     const payload = tieredPayload(p, run(digestQuery(request.windows, { formulaIndex: !!request.dependents }), b), tier, { build: 'test', fileId: null });
-    return { tier, payload: { ...payload, ...deps, objects: deps.objects || payload.objects } };
+    return { tier, payload: { ...payload, ...deps, ...protectionOf(request), objects: deps.objects || payload.objects } };
   }
   const p = run(readQuery(request.windows, {}), b);
-  const payload = { ...p, ...deps, objects: deps.objects || p.objects };
+  const payload = { ...p, ...deps, ...protectionOf(request), objects: deps.objects || p.objects };
   if (tier.tier === 'refused' && p.truncated) payload.unsupported = withLimitNote(p.unsupported, tier);
   return { tier, payload };
 }
@@ -108,10 +116,12 @@ async function session(b, task, opts) {
   return { result, driver };
 }
 
-/** 1000 rows x 10 columns = 10 000 cells; column E holds 1000 formulas (=B+C). */
+/** 1000 rows x 10 columns = 10 000 cells; column E holds 1000 formulas (=B+C). ONE far seed cell (P2900) makes the used range
+ * A1:P2900 = 46 400 cells: above MAX_READ_CELLS (45 000), within MAX_TIERED_CELLS (50 000) -- the tiered band. */
 function bigBook({ extra = {}, names = [] } = {}) {
   const spec = {};
   for (let r = 1; r <= 1000; r += 1) Object.assign(spec, { [`A${r}`]: `T${r}`, [`B${r}`]: r, [`C${r}`]: r + 0.5, [`D${r}`]: `D${r}`, [`E${r}`]: `=B${r}+C${r}`, [`F${r}`]: `F${r}`, [`G${r}`]: 7 * r, [`H${r}`]: `H${r}`, [`I${r}`]: 3 * r, [`J${r}`]: `J${r}` });
+  spec.P2900 = 'seed';
   return book({ S: { ...spec, ...extra } }, names);
 }
 
@@ -133,6 +143,7 @@ test('T3: every formula cell OUTSIDE the windows, with its text; window formulas
 test('T3 ceiling: over 5000 formulas -> the index is cut AND marked over; the observation is incomplete (IMPLEMENTATION_LIMIT)', () => {
   const spec = {};
   for (let r = 1; r <= 1000; r += 1) for (const c of ['A', 'B', 'C', 'D', 'E', 'F']) spec[`${c}${r}`] = `=${r}`;
+  spec.Z1850 = 'seed'; // 26 columns x 1850 rows = 48 100: the tiered band
   const b = book({ S: spec });
   const o = observe(b, { windows: [{ sheet: 'S', range: 'Z1' }], tiered: true, dependents: true });
   assert.equal(o.tier.tier, 'tiered');
@@ -193,7 +204,7 @@ test('copy 10k: a formula count over the T3 ceiling -> refused before the write,
   const extra = {};
   for (let r = 1; r <= 1000; r += 1) for (const c of ['K', 'M', 'N', 'O', 'P']) extra[`${c}${r}`] = `=B${r}`;
   const b = bigBook({ extra });
-  const { result, driver } = await session(b, copyTask('A1:B5', 'Z1'));
+  const { result, driver } = await session(b, copyTask('A1:B5', 'N1'));
   assert.equal(driver.calls.dispatch, 0);
   assert.match(reasonOf(result), /IMPLEMENTATION_LIMIT:formula-index-over-5000-formulas/);
 });

@@ -21,9 +21,14 @@ const { runViaBridge } = require('../fakes/print-bridge-runtime.cjs');
  * driver, which returns what the real driver returns for each body outcome (xlsx-driver b10DispatchResult, pinned in A).
  */
 
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): V6 (the historical 9.3.4.60 base block,
+// pre-/7, before the print-write capability existed) stays as a NEGATIVE control -- it now mismatches at the
+// RUNTIME level (9.3.4 is not accepted at all), not just the patch level, since ACCEPTED_RUNTIMES.xlsx is the
+// single 9.3.5.0/16 entry. RT7 (historical 9.3.4.60/7) is retired -- Part B's default runtime is now the
+// accepted 9.3.5.0/16 identity.
 const DIR = path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.4.60', 'euro-office-bridge-v1');
 const V6 = fs.readFileSync(path.join(DIR, 'rev6-candidate', 'bridge-block.js'), 'utf8').replace(/,\s*$/, '');
-const RT7 = '9.3.4|euro-office-bridge-v1/9.3.4.60/7';
+const RT935 = '9.3.5|euro-office-bridge-v1/9.3.5.0/16';
 const one = step => ({ id: 'b10c', steps: [{ sheet: 'P', ...step }] });
 const opOf = step => planOperations(one(step)).operations[0];
 const SCALE = { intent: 'set_print_scale', scale: 75 };
@@ -67,7 +72,7 @@ test('A wrong runtime in the editor (the REAL /6 block): the gate refuses BEFORE
   const m = model(); const api = { GetSheet: n => (n === 'P' ? m.ws : null) };
   new Function('Api', `${V6};`)(api);
   const r = new Function('Api', drv.b10BridgeWritePrelude() + print.lower(opOf(SCALE)).body)(api);
-  assert.deepEqual(r, { ok: false, stage: 'bridge-write-gate', reason: 'PATCH_VERSION_MISMATCH', mutation: 'NONE' });
+  assert.deepEqual(r, { ok: false, stage: 'bridge-write-gate', reason: 'RUNTIME_VERSION_MISMATCH', mutation: 'NONE' });
   assert.deepEqual(m.log, []);
 });
 
@@ -108,7 +113,7 @@ test('A driver second line: a print command is refused WITHOUT an editor on any 
 const book = () => [{ name: 'P', cells: { A1: { v: 1 } } }, { name: 'O', cells: { A1: { v: 'keep' } } }];
 async function run(store, t, script = {}) {
   let n = 0;
-  const driver = createFakeXlsxDriver(store, { runtime: RT7, ...script });
+  const driver = createFakeXlsxDriver(store, { runtime: RT935, ...script });
   const options = { driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } };
   const result = await withSession(options, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));
   return { result, driver, m: result.metrics };

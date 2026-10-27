@@ -7,8 +7,8 @@
  * The authority is the served bundle's OWN DS Bridge manifest (`Api.GetEuroOfficeBridge().manifest()`), read once
  * per session through a single canonical handshake:
  *   bridgeVersion          major must be BRIDGE_MAJOR
- *   documentServerVersion  the DS runtime version ('9.3.4')
- *   patchVersion           '<bridge family>/<DS patch runtime>/<revision>', e.g. 'euro-office-bridge-v1/9.3.4.60/5'
+ *   documentServerVersion  the DS runtime version ('9.3.5')
+ *   patchVersion           '<bridge family>/<DS patch runtime>/<revision>', e.g. 'euro-office-bridge-v1/9.3.5.0/16'
  *   capabilities           the advertised capability list (checked per read by the bridge client)
  * The accepted identity is the pair (documentServerVersion, patchVersion); its key is RUNTIME_ID.
  *
@@ -20,88 +20,81 @@
  *
  * Fail-closed: a missing bridge or manifest, a malformed manifest, an unknown bridge major, a runtime version or a
  * patch version that is not the accepted one -> no identity (null), and every gate keyed on it refuses.
+ *
+ * DS9346 (owner D5=B, VALTAS; owner confirmation that the production rollback point to 9.3.4.60 is deleted,
+ * internal tracker): the entire 9.3.4.60 runtime family (13 xlsx + 3 docx entries, every narrower Bridge-gate
+ * list built on them) is RETIRED from every accepted/gate list below -- 9.3.5 is now the ONLY accepted runtime,
+ * not a candidate alongside it. A 9.3.4.60 handshake today answers RUNTIME_VERSION_MISMATCH from
+ * classifyHandshake's own generic accepted-list check (unchanged code, now simply with nothing 9.3.4-shaped left
+ * in the list it compares against) -- no new refusal branch needed. Full inventory, decision and the retired
+ * entries' own historical rationale: docs/DS9346-RUNTIME-RETIREMENT.md.
  */
 const BRIDGE_MAJOR = 1;
 
 const RUNTIMES = Object.freeze({
-  xlsx: Object.freeze({ documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-v1/9.3.4.60/5' }),
-  docx: Object.freeze({ documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-word-v1/9.3.4.60/1' }),
+  xlsx: Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/16' }),
+  // GH #292 S4 D-state (owner GO 2026-10-24, the word /3 and /4 rollback points retired): word /5 is the ONLY accepted Word runtime.
+  // /5 = /4 + the GH #293 L7 list members read / list detach write; /4 = /3 + the GH #292 S4 next / linked style write -- every older
+  // handler byte-identical (test/static/docx-gh292-style-next-link-bridge-handler.test.cjs, docx-gh293-list-scope-bridge-handler.test.cjs).
+  // A /3 or /4 handshake answers PATCH_VERSION_MISMATCH from classifyHandshake's own accepted-list check.
+  docx: Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-word-v1/9.3.5.0/5' }),
 });
 
 const runtimeIdOf = r => `${r.documentServerVersion}|${r.patchVersion}`;
+
 /**
- * M11.5a.2 (owner owner channel): the ACCEPTED runtimes -- an EXPLICIT list, never a range or a wildcard.
- * The cell bridge accepts exactly /5 and /6 (/6 = /5 + the unused B05 Bridge WRITE capability; every other byte of the
- * bundle identical), so a DS /5 -> /6 apply needs no product outage. /4, /7 and anything unknown -> fail-closed.
- * RUNTIMES keeps the primary (/5) entry per format.
+ * GH #326 / #327 (owner decision, path A): /17 = /16 + ONE (not yet used) Bridge
+ * READ capability sheet.protection.read/v1; every other /16 capability byte-identical (test/acceptance/
+ * ds935-bridge17-protection-read.test.cjs "nothing else moved"). The explicit list widens to /16 + /17 so a DS
+ * /16 -> /17 apply needs no product outage (compatibility-first, the SAME convention X-O08's /14 widening used
+ * before DS9346 collapsed the family to one entry) -- a /16-only runtime correctly refuses the new read with
+ * CAPABILITY_MISSING (the shared `bridgeAxis` convention), never a guessed value.
  */
-const XLSX_V6 = Object.freeze({ documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-v1/9.3.4.60/6' });
+const XLSX_RUNTIME_17 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/17' });
+
 /**
- * M11.5b.1 (owner: M11.5 continuous mandate, owner channel, internal tracker): /7 = /6 + the (not yet used) B10
- * Bridge WRITE capability sheet.printSettings.write/v1; every other byte of the bundle identical. The explicit list grows
- * to /5 /6 /7 so a DS /6 -> /7 apply needs no product outage (compatibility-first). /4, /8 and anything unknown ->
- * fail-closed.
+ * M11.5a.2 .. GH #326/#327 (owner owner channel, DS9346 RETIRED, docs/DS9346-RUNTIME-RETIREMENT.md; widened again
+ * for GH #326/#327): the ACCEPTED runtimes -- an EXPLICIT list, never a range or a wildcard. xlsx now carries TWO
+ * entries (/16 + /17, compatibility-first); docx is unaffected, still the SOLE accepted runtime.
  */
-const XLSX_V7 = Object.freeze({ documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-v1/9.3.4.60/7' });
-/**
- * M11.5c.1 (owner: M11.5 continuous mandate, internal tracker): /8 = /7 + the (not yet used) B03 Bridge WRITE
- * capability worksheet.copy/v1; every other byte of the bundle identical. The explicit list grows to /5 /6 /7 /8 so a DS
- * /7 -> /8 apply needs no product outage (compatibility-first). /4, /9 and anything unknown -> fail-closed.
- */
-const XLSX_V8 = Object.freeze({ documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-v1/9.3.4.60/8' });
-/**
- * M11.5d.1 (owner: M11.5 continuous mandate, internal tracker): word /2 = /1 + a write() entry and the (not yet used)
- * B18 Bridge WRITE capability docx.paragraph.numbering.remove/v1; every /1 capability byte-identical. The DOCX list grows
- * to /1 /2 so a DS word /1 -> /2 apply needs no product outage (compatibility-first). /0, /3 and anything unknown ->
- * fail-closed. RUNTIMES keeps the primary (/1) entry.
- */
-const DOCX_V2 = Object.freeze({ documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-word-v1/9.3.4.60/2' });
-/**
- * M11.5e.2 (owner: M11.5 continuous mandate, internal tracker): word /3 = /2 + the (not yet used)
- * B21 Bridge READ capability docx.section.variantState.read/v1; every /2 capability byte-identical (including the
- * B18-WRITE one). The DOCX list grows to /1 /2 /3 so a DS word /2 -> /3 apply needs no product outage
- * (compatibility-first). /0, /4 and anything unknown -> fail-closed.
- */
-const DOCX_V3 = Object.freeze({ documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-word-v1/9.3.4.60/3' });
-const ACCEPTED_RUNTIMES = Object.freeze({ xlsx: Object.freeze([RUNTIMES.xlsx, XLSX_V6, XLSX_V7, XLSX_V8]), docx: Object.freeze([RUNTIMES.docx, DOCX_V2, DOCX_V3]) });
+const ACCEPTED_RUNTIMES = Object.freeze({ xlsx: Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]), docx: Object.freeze([RUNTIMES.docx]) });
 const XLSX_RUNTIME_ID = runtimeIdOf(RUNTIMES.xlsx);
 const DOCX_RUNTIME_ID = runtimeIdOf(RUNTIMES.docx);
 const DOCX_RUNTIME_IDS = Object.freeze(ACCEPTED_RUNTIMES.docx.map(runtimeIdOf));
 const XLSX_RUNTIME_IDS = Object.freeze(ACCEPTED_RUNTIMES.xlsx.map(runtimeIdOf));
-/**
- * M11.5a.4 (owner owner channel, DS5_POLICY=B05_ONLY_FAIL_CLOSED): the B05-WRITE Bridge capability exists only on /6,
- * so ONLY that write path is narrowed to /6 -- every other XLSX path keeps the dual list above.
- */
-const XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([XLSX_V6, XLSX_V7, XLSX_V8]); // /7 and /8 keep the B05 write capability byte-identical
-const XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
-/**
- * M11.5b.4 (owner: M11.5 continuous mandate, internal tracker): the B10-WRITE Bridge capability exists only on /7, so
- * ONLY the print WRITE path is narrowed to /7 -- every other XLSX path keeps the accepted list above.
- */
-const XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([XLSX_V7, XLSX_V8]); // /8 keeps the B10 write capability byte-identical
-const XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
-/**
- * M11.5c.4 (owner: M11.5 continuous mandate, internal tracker): the B03-WRITE Bridge capability (worksheet.copy/v1)
- * exists only on /8, so ONLY the copy_sheet path is narrowed to /8 -- every other XLSX path keeps the accepted list above.
- */
-const XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([XLSX_V8]);
-const XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
 
 /**
- * M11.5d.4 (owner: M11.5 continuous mandate, internal tracker): the B18-WRITE Bridge capability
- * (docx.paragraph.numbering.remove/v1) exists only on word /2 and /3, so ONLY the numbering-removal path (remove_list,
- * outdent at level 0) is narrowed to /2 /3 -- every other DOCX path keeps the accepted list above.
+ * DS9346 RETIRED, widened again for GH #326/#327: every one of the six XLSX Bridge-WRITE-gate lists below grows
+ * from its single 9.3.5 entry to /16 + /17 -- the /17 candidate adds ONLY the protection READ capability above,
+ * so every WRITE handler stays byte-identical on it (test/static/b03..b24-write-handler-identity.test.cjs still
+ * enforce byte-identity, now over the two-entry list). The three DOCX lists are untouched (word has no /17).
  */
-const DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([DOCX_V2, DOCX_V3]); // /3 keeps the B18 write capability byte-identical
+const XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+const XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+const XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+const XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+const XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+const XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+
+const DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.docx]);
 const DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
 
-/**
- * M11.5e.4 (owner: M11.5 continuous mandate, internal tracker): the B21-READ Bridge capability
- * (docx.section.variantState.read/v1) exists only on word /3, so ONLY the section-variant-state read is narrowed to
- * /3 -- every other DOCX path keeps the accepted list above.
- */
-const DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES = Object.freeze([DOCX_V3]);
+const DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.docx]);
 const DOCX_B21_BRIDGE_READ_RUNTIME_IDS = Object.freeze(DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES.map(runtimeIdOf));
+
+// GH #292 S4: the next / linked style WRITE (word /4 and, byte-identical, /5; /5 is the only accepted runtime since the D-state)
+const DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.docx]);
+const DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+
+// GH #293 L7: the list members READ and the list detach WRITE exist on word /5 only
+const DOCX_GH293L7_BRIDGE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.docx]);
+const DOCX_GH293L7_BRIDGE_RUNTIME_IDS = Object.freeze(DOCX_GH293L7_BRIDGE_RUNTIME_ENTRIES.map(runtimeIdOf));
 
 /** The editor URL's DS cache key -- DIAGNOSTIC ONLY, never compared by a gate. */
 const cacheKeyOf = frameUrl => { const m = /\/(\d+\.\d+\.\d+-[0-9a-f]{8,})\/web-apps\//.exec(String(frameUrl || '')); return m ? m[1] : null; };
@@ -142,4 +135,4 @@ function classifyHandshake(r, expected) {
   return { ok: true, runtimeId: runtimeIdOf(m), manifest: m };
 }
 
-module.exports = { BRIDGE_MAJOR, RUNTIMES, ACCEPTED_RUNTIMES, XLSX_RUNTIME_ID, XLSX_RUNTIME_IDS, XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS, DOCX_RUNTIME_ID, DOCX_RUNTIME_IDS, DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES, DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS, DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES, DOCX_B21_BRIDGE_READ_RUNTIME_IDS, runtimeIdOf, cacheKeyOf, HANDSHAKE_BODY, classifyHandshake };
+module.exports = { BRIDGE_MAJOR, RUNTIMES, XLSX_RUNTIME_17, ACCEPTED_RUNTIMES, XLSX_RUNTIME_ID, XLSX_RUNTIME_IDS, XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS, DOCX_RUNTIME_ID, DOCX_RUNTIME_IDS, DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES, DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS, DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES, DOCX_B21_BRIDGE_READ_RUNTIME_IDS, DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_ENTRIES, DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_IDS, DOCX_GH293L7_BRIDGE_RUNTIME_ENTRIES, DOCX_GH293L7_BRIDGE_RUNTIME_IDS, runtimeIdOf, cacheKeyOf, HANDSHAKE_BODY, classifyHandshake };

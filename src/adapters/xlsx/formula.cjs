@@ -93,14 +93,23 @@ const sameFormula = (submitted, readBack) => {
 };
 
 /**
+ * GH #298 C: a [book] reference outside literals -- '[...]' directly followed by an (optional) sheet / name and '!'
+ * ([Book2.xlsx]Data!A1, [1]Sheet1!A1, [book]!Name). Any OTHER '[' is a structured (table) reference: Table1[Qty],
+ * Table1[[#This Row],[Qty]], [@Qty] -- the #298 matrix ST-09 measured the old "every '[' is a book" rule refusing them.
+ */
+const BOOK_REF = /\[[^[\]]*\][\w.\u00C0-\uFFFF]*!/;
+
+/**
  * Sheet names a formula refers to: a quoted name ('My Sheet'!A1, '' unescaped) or a bare name
- * directly before '!' outside literals. `external` is true for a [book] reference.
+ * directly before '!' outside literals. `external` is true for a [book] reference; `structured` for a structured
+ * (table) reference -- it names no sheet, and which sheet its table lives on is not read (no table reader, #298 A).
  */
 function sheetRefs(formula) {
   const toks = tokenize(String(formula).replace(/^=/, ''));
-  if (!toks) return { ok: false, names: [], external: false };
+  if (!toks) return { ok: false, names: [], external: false, structured: false };
   const names = [];
   let external = false;
+  let structured = false;
   toks.forEach((t, i) => {
     const next = toks[i + 1];
     if (t.kind === 'qname' && next && next.kind === 'other' && next.text.startsWith('!')) {
@@ -109,11 +118,13 @@ function sheetRefs(formula) {
       names.push(inner.replace(/^\[[^\]]*\]/, ''));
     }
     if (t.kind === 'other') {
-      if (/\[/.test(t.text)) external = true;
-      for (const m of t.text.matchAll(/([A-Za-z_À-￿][\w.À-￿]*)!/g)) names.push(m[1]);
+      if (BOOK_REF.test(t.text)) external = true;
+      else if (/\[/.test(t.text)) structured = true;
+      // '#REF!' is an error value, never a sheet named REF (a broken reference: dependencies.cjs drops the whole token)
+      for (const m of t.text.matchAll(/([A-Za-z_À-￿][\w.À-￿]*)!/g)) if (t.text[m.index - 1] !== '#') names.push(m[1]);
     }
   });
-  return { ok: true, names: [...new Set(names)], external };
+  return { ok: true, names: [...new Set(names)], external, structured };
 }
 
 module.exports = { tokenize, canonical, canonicalRenamed, sameFormula, sheetRefs, bareSheetName };

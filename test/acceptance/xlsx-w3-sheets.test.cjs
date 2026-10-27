@@ -27,8 +27,10 @@ const task = step => ({ id: 'm6-w3', steps: [step] });
 
 async function run(store, t, script = {}) {
   let n = 0;
-  // M11.5c.4: copy_sheet writes only through the /8 Bridge WRITE -- a copy task runs on /8 unless the test names a runtime
-  const driver = createFakeXlsxDriver(store, t.steps.some(x => x.intent === 'copy_sheet') && script.runtime === undefined ? { ...script, runtime: '9.3.4|euro-office-bridge-v1/9.3.4.60/8' } : script);
+  // M11.5c.4 / DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): copy_sheet writes only
+  // through an ACCEPTED Bridge WRITE runtime -- a copy task runs on the accepted 9.3.5.0/16
+  // identity unless the test names a runtime.
+  const driver = createFakeXlsxDriver(store, t.steps.some(x => x.intent === 'copy_sheet') && script.runtime === undefined ? { ...script, runtime: '9.3.5|euro-office-bridge-v1/9.3.5.0/16' } : script);
   const options = { driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } };
   const result = await withSession(options, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));
   return { result, driver, m: result.metrics };
@@ -71,13 +73,14 @@ test('create_sheet: FIRST applied (exact name, empty, other sheets untouched) ->
 });
 
 test('create_sheet: names outside the measured class are refused at planning (the probe: bad/ accepted, 32 chars -> Sheet2)', () => {
-  for (const name of ['bad/x', 'L'.padEnd(32, 'x'), 'A1', 'XFD7', 'R1C1', 'rc', 'History', 'TRUE', '1abc', '', 'Ünnep', ' lead', 'two  spaces', "it's"]) {
+  for (const name of ['bad/x', 'L'.padEnd(32, 'x'), 'A1', 'XFD7', 'R1C1', 'rc', 'History', 'TRUE', '1abc', '', ' lead', 'two  spaces', "it's"]) {
     const p = planOperations(task({ intent: 'create_sheet', name }));
     assert.equal(p.ok, false, name);
   }
   assert.equal(planOperations(task({ intent: 'create_sheet', name: 'L'.padEnd(31, 'x') })).ok, true, '31 characters is allowed');
   // M7 R26c: words joined by single spaces (accents too) are the measured quoted class
-  for (const name of ['My Sheet', 'Bevétel 2026', 'Q 1']) assert.equal(planOperations(task({ intent: 'create_sheet', name })).ok, true, name);
+  // L-21/2: and a single accented word (LIVE r2: "Kimutatás" kept, followed, reopened)
+  for (const name of ['My Sheet', 'Bevétel 2026', 'Q 1', 'Ünnep', 'Kimutatás']) assert.equal(planOperations(task({ intent: 'create_sheet', name })).ok, true, name);
 });
 
 test('create_sheet: a non-empty sheet of that name, or a case-only collision, is refused before dispatch', async () => {
@@ -257,7 +260,7 @@ test('delete_sheet: a dependent hosted ON the deleted sheet goes with it (not a 
   await refused(createStore(b), task({ intent: 'delete_sheet', sheet: 'Notes' }), 'xlsx-delete-sheet-referenced-by-dependents');
 });
 
-test('delete_sheet UNOBSERVABLE -> refused before any write (0 command): a reader gap, an unproven build, broken / ambiguous / unknown references', async () => {
+test('delete_sheet UNOBSERVABLE -> refused before any write (0 command): a reader gap, an unproven build, ambiguous / unknown references', async () => {
   const gap = 'xlsx-delete-dependency-observation-incomplete';
   const t = task({ intent: 'delete_sheet', sheet: 'Notes' });
   for (const script of [{ dependencyBuild: false }, { namesFault: 'UNOBSERVABLE:asc_getDefinedNames-threw' }, { validationsFault: 'UNOBSERVABLE:dataValidations-threw' },
@@ -265,12 +268,10 @@ test('delete_sheet UNOBSERVABLE -> refused before any write (0 command): a reade
     await refused(createStore(book()), t, gap, script);
   }
   const variants = [
-    ['broken validation', b => { b[1].rules = [{ kind: 'validation', range: 'E1', formula: '=#REF!' }]; }, /broken-reference/],
     ['name on a missing sheet', b => { b[1].objects = { charts: [], pivots: [], names: [{ name: 'Gone', refersTo: '=Nowhere!$A$1' }] }; }, /missing-sheet:Nowhere/],
     ['unknown name in a formula', b => { b[1].cells.D1 = { v: 1, f: '=NoSuchName*2' }; }, /unknown-name:NoSuchName/],
     ['unmeasured conditional type', b => { b[1].rules = [{ kind: 'conditional', type: 'xlColorScale', range: 'F1', formula: '' }]; }, /conditional-type-not-measured/],
     ['a structured reference', b => { b[1].cells.D1 = { v: 1, f: '=SUM(Table1[Col])' }; }, /external-or-structured-reference/],
-    ['a broken formula', b => { b[1].cells.D1 = { v: '#REF!', f: '= #REF!*2' }; }, /broken-reference/],
     ['a literal chart series name (unmeasured shape)', b => { b[0].objects = { charts: [{ type: 'bar', series: [{ name: 'Revenue', values: '=Data!$B$2', cat: '', x: '' }] }], pivots: [], names: [] }; }, /series-shape-not-measured/],
   ];
   for (const [label, edit, why] of variants) {
@@ -291,6 +292,26 @@ test('delete_sheet UNOBSERVABLE -> refused before any write (0 command): a reade
   const r2 = await run(createStore(book()), t, { workbookNames: [{ name: 'Eq', ref: '=Data!$B$2' }] });
   assert.match(JSON.stringify(r2.result), /name-text-starts-with-equals/);
   assert.equal(r2.driver.calls.dispatch, 0);
+});
+
+// A #REF! is no dependency: on ANOTHER sheet it no longer blocks the delete (the pair); hosted ON the deleted sheet it is
+// refused by the one named guard (xlsx-ref-on-target-unmeasured), apart from the reader-gap refusal
+const brokenOn = (b, i) => { b[i].rules = [{ kind: 'validation', range: 'E1', formula: '=#REF!' }]; b[i].cells.D1 = { v: '#REF!', f: '= #REF!*2' }; };
+test('delete_sheet: a broken validation / formula on ANOTHER sheet does not block -> APPLIED', async () => {
+  const b = book();
+  brokenOn(b, 1);
+  await applied(createStore(b), task({ intent: 'delete_sheet', sheet: 'Notes' }));
+});
+test('delete_sheet: a broken validation / formula ON the deleted sheet -> refused before any write, xlsx-ref-on-target-unmeasured', async () => {
+  for (const [label, edit] of [['validation', b => { b[2].rules = [{ kind: 'validation', range: 'E1', formula: '=#REF!' }]; }], ['formula', b => { b[2].cells.D1 = { v: '#REF!', f: '= #REF!*2' }; }]]) {
+    const b = book();
+    edit(b);
+    const { result, driver } = await run(createStore(b), task({ intent: 'delete_sheet', sheet: 'Notes' }));
+    assert.equal(result.ok, false, label);
+    assert.equal(driver.calls.dispatch, 0, label);
+    assert.match(JSON.stringify(result), /xlsx-ref-on-target-unmeasured/, label);
+    assert.doesNotMatch(JSON.stringify(result), /xlsx-delete-dependency-observation-incomplete/, label);
+  }
 });
 
 test('INDIRECT anywhere still refuses a delete (a text reference no parser resolves)', async () => {
@@ -399,9 +420,14 @@ test('copy_sheet refused before any write: an unobservable rule / name reader, a
   const b = copyBook();
   b[0].objects.names.push({ name: 'Broken', refersTo: '=Gone!$A$1' });
   await refused(createStore(b), copyTask(), 'xlsx-copy-source-dependency-unobservable', RULES);
+  // a #REF! on the COPIED sheet: the one named guard (xlsx-ref-on-target-unmeasured), not the reader-gap refusal
   const c = copyBook();
   c[0].rules.push({ kind: 'validation', range: 'E3', formula: '=#REF!' });
-  await refused(createStore(c), copyTask(), 'xlsx-copy-source-dependency-unobservable', RULES);
+  await refused(createStore(c), copyTask(), 'xlsx-ref-on-target-unmeasured', RULES);
+  // the pair: the same broken validation on ANOTHER sheet is no dependency and does not stop the copy
+  const d = copyBook();
+  d[1].rules = [...(d[1].rules || []), { kind: 'validation', range: 'E3', formula: '=#REF!' }];
+  await applied(createStore(d), copyTask(), RULES);
 });
 
 test('copy_sheet refused before any write when an L3 axis of ANOTHER sheet is unobservable (a pivot there: unreadable after a reopen, W3g); a resolution gap elsewhere is not a copy gap', async () => {
@@ -488,8 +514,12 @@ test('RED: a copy whose self references still point at the source, or that drops
   }
 });
 
-// M11.5c.4 cutover: B03 copy_sheet through the /8 Bridge WRITE ONLY -- /4 /5 /6 /7 /9 refused before the write (no fallback)
-test('M11.5c.4 copy_sheet: APPLIED on /8 (one Bridge WRITE); refused on /4, /5, /6, /7 and /9 before the write', async () => {
-  for (const rt of ['9.3.4|euro-office-bridge-v1/9.3.4.60/8']) await applied(createStore(copyBook()), copyTask(), { ...RULES, runtime: rt });
-  for (const rt of ['4', '5', '6', '7', '9'].map(n => `9.3.4|euro-office-bridge-v1/9.3.4.60/${n}`)) await refused(createStore(copyBook()), copyTask(), 'xlsx-copy-bridge-write-runtime-not-proven', { ...RULES, runtime: rt });
+// M11.5c.4 / L-05 cutover: B03 copy_sheet through an ACCEPTED Bridge WRITE runtime ONLY.
+// DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the historical 9.3.4.60 chain (/4..17,
+// progressively widened by M11.5c.4 / X-O07/3 / X-O08 / X-O05/5-B / GH139 B) is retired -- the
+// ACCEPTED runtime is now the single 9.3.5.0/16 identity, and EVERY 9.3.4.60 revision (including
+// the ones the old accepted-runtime list used to carry) is refused.
+test('L-05 copy_sheet: APPLIED on the accepted 9.3.5.0/16 runtime (one Bridge WRITE); refused on EVERY historical 9.3.4.60 revision before the write', async () => {
+  await applied(createStore(copyBook()), copyTask(), { ...RULES, runtime: '9.3.5|euro-office-bridge-v1/9.3.5.0/16' });
+  for (const rt of ['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17'].map(n => `9.3.4|euro-office-bridge-v1/9.3.4.60/${n}`)) await refused(createStore(copyBook()), copyTask(), 'xlsx-copy-bridge-write-runtime-not-proven', { ...RULES, runtime: rt });
 });

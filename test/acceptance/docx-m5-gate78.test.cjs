@@ -149,8 +149,14 @@ test('gate 8 guard: grid unreadable / grid disagrees / an unmeasured column coun
     assert.equal(reason(x, 1), want);
     assert.equal(driver.calls.dispatch, 1, want);
   }
-  // the model is measured for 1 and 2 columns only -- never generalized (owner decision 8A)
-  const o = { r: 0, c: 0, rs: 1, cs: 3 };
-  assert.equal(ms.splitGridGuard({ width: 3, gridCalc: [10, 10, 10] }, o, 3).reason, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-boundary-model-not-measured-for-3-columns');
+  // W05: the model is measured for 1, 2 and 3 columns (widened from 1-2 -- W05-1a
+  // measured a 1x3 restore landing cleanly); GH #291 S2 measured 4, S2x 5 and 6; 7+ columns is still never generalized.
+  const o = { r: 0, c: 0, rs: 1, cs: 7 };
+  assert.equal(ms.splitGridGuard({ width: 7, gridCalc: [10, 10, 10, 10, 10, 10, 10] }, o, 7).reason, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-boundary-model-not-measured-for-7-columns');
+  assert.equal(ms.splitGridGuard({ width: 6, gridCalc: [10, 10, 10, 10, 10, 10] }, { r: 0, c: 0, rs: 1, cs: 6 }, 6).ok, true, 'GH #291 S2x: 6 columns on an equal grid');
+  // GH #291 S3x / release 27: a PARTIAL column cut (a 1x4 cell -> 1x2) lands on the existing line only on equal columns
+  assert.equal(ms.splitGridGuard({ width: 4, gridCalc: [10, 10, 10, 10] }, { r: 0, c: 0, rs: 1, cs: 4 }, 2).ok, true, 'equal: the half cut is the existing line');
+  assert.equal(ms.splitGridGuard({ width: 4, gridCalc: [30, 10, 10, 10] }, { r: 0, c: 0, rs: 1, cs: 4 }, 2).reason, 'FAIL_CLOSED_UNSUPPORTED_SHAPE:split-would-cut-a-new-grid-line', 'unequal: a new line');
+  assert.equal(ms.splitGridGuard({ width: 4, gridCalc: [10, 10, 10, 10] }, { r: 0, c: 0, rs: 1, cs: 4 }, 4).ok, true, 'GH #291 S2: 4 columns on an equal grid');
   assert.deepEqual(ms.splitGridGuard({ width: 3, gridCalc: null }, { r: 0, c: 0, rs: 2, cs: 1 }, 1), { ok: true, model: 'no-column-cut' });
 });

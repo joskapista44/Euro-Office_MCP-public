@@ -28,7 +28,7 @@ const { BROKER } = require('../fakes/read-editors.cjs');
 const EVIDENCE = {};
 test.after(() => { if (process.env.M11_4B1_EVIDENCE) fs.writeFileSync(process.env.M11_4B1_EVIDENCE, `${JSON.stringify(EVIDENCE, null, 1)}\n`); });
 
-const EXACT = ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task'];
+const EXACT = ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task'];  // GH #228 (PROPOSED): + docx_execute_task
 const STEP = Object.freeze({
   write_range: { intent: 'write_range', sheet: 'Budget', range: 'F1:G2', values: [['x', 1], ['y', 2]] },
   insert_rows: { intent: 'insert_rows', sheet: 'Budget', at: 3, count: 2, anchor: { column: 'A', value: 'pear' } },
@@ -90,7 +90,7 @@ function mcp(tools) {
 }
 const sc = m => { assert.equal(m.error, undefined, JSON.stringify(m.error)); return m.result.structuredContent; };
 
-test('initialize + tools/list: EXACTLY product_status, xlsx_read, docx_read, xlsx_execute_task; docx_execute_task is Unknown tool', async () => {
+test('initialize + tools/list: EXACTLY product_status, xlsx_read, docx_read, xlsx_execute_task, docx_execute_task (GH #228 proposed state)', async () => {
   const p = served(await fresh());
   const s = mcp(p.tools);
   const init = await s.send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } });
@@ -104,10 +104,12 @@ test('initialize + tools/list: EXACTLY product_status, xlsx_read, docx_read, xls
   assert.doesNotMatch(w.description, /WITHHELD|RELEASED|M11/i);
   for (const i of Object.keys(STEP)) assert.match(w.description, new RegExp(`\\b${i}\\b`), i);
   const docx = await s.call('docx_execute_task', req([STEP.write_range]));
-  assert.match(docx.error.message, /Unknown tool: docx_execute_task/);
+  assert.equal(docx.error, undefined);
+  assert.equal(docx.result.structuredContent.code, 'REFUSED_CROSS_FORMAT');
+  assert.equal(docx.result.structuredContent.dispatched, false);
   await s.end();
   assert.deepEqual(p.calls(), { runtime: 0, drivers: 0, open: 0, dispatch: 0, forceSave: 0, close: 0 });
-  EVIDENCE.surface = { INITIALIZE: 'PASS', TOOLS_LIST: list.result.tools.map(t => t.name), DOCX_EXECUTE_TASK: 'Unknown tool' };
+  EVIDENCE.surface = { INITIALIZE: 'PASS', TOOLS_LIST: list.result.tools.map(t => t.name), DOCX_EXECUTE_TASK: 'served; xlsx step refused REFUSED_CROSS_FORMAT pre-dispatch' };
 });
 
 test('WRITE_6_OF_6 + RETRY_6_OF_6 via tools/call: APPLIED / FORCESAVE_CONFIRMED, then a new call SATISFIED with dispatch and forceSave 0', async () => {

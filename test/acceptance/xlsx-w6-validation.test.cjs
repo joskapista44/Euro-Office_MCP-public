@@ -78,12 +78,47 @@ test('RED: ignored / wrong bounds -> L1 FAIL; a second rule elsewhere / a cell -
   assert.equal(side.result.execution.preservationVerification[0].verdict, 'FAIL');
 });
 
+// X-L13/7 (zero LIVE r1, cap-live/xl137-r1.out, internal tracker; MEASURED_CELL_VALUE_OPERATORS widened
+// in dependencies.cjs): the e314d2b6 LIVE finding, reproduced and closed on THIS family. Before the
+// widening, an xlLess CF rule on ANY sheet fail-closed set_validation/clear_validation workbook-wide,
+// even when the rule never touched the target sheet.
+const withCfOnOther = (operator, extra = {}) => {
+  const b = book();
+  b[1].rules = [{ kind: 'conditional', type: 'xlCellValue', operator, range: 'A1:A4', formula: '5', ...extra }];
+  return createStore(b);
+};
+
+test('X-L13/7: a newly-measured CF operator (xlLess) on ANOTHER sheet no longer fail-closes set / clear_validation', async () => {
+  const store = withCfOnOther('xlLess');
+  const a = await run(store, set());
+  assert.equal(a.result.ok, true, JSON.stringify(a.result.execution.appliedOperations[0].evidence));
+  assert.equal(a.m.commands, 1);
+  const a2 = await run(store, set());
+  assert.equal(a2.m.commands, 0);
+  assert.equal(a2.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
+  const c = await run(store, clear());
+  assert.equal(c.result.ok, true, JSON.stringify(c.result.execution.appliedOperations[0].evidence));
+  const c2 = await run(store, clear());
+  assert.equal(c2.m.commands, 0);
+});
+
+// NEG. CONTROL: a genuinely still-unmeasured operator (synthetic -- all eight real Excel
+// xlFormatConditionOperator values are now measured) on another sheet keeps the fail-closed behaviour.
+test('X-L13/7 NEG. CONTROL: a still-unmeasured CF operator on ANOTHER sheet still fail-closes set_validation', async () => {
+  const store = withCfOnOther('xlOperatorNotYetMeasured');
+  const { result } = await run(store, set());
+  assert.equal(result.ok, false);
+  assert.equal(reason(result), 'xlsx-validation-rules-unobservable');
+});
+
 test('planner: only the measured shape', () => {
   const refuse = (t, re) => { const p = planOperations(t); assert.equal(p.ok, false, JSON.stringify(t)); assert.match(p.detail, re); };
   // M7 R17 widened the measured set (xlsx-m7-d-rules.test.cjs); these shapes stay refused
   refuse(set('B2:B5', { type: 'list' }), /type list does not take operator/);
   refuse(set('B2:B5', { operator: 'greater' }), /takes value, not min/);
-  refuse(set('B2:B5', { type: 'date' }), /type must be one of/);
+  // L-22d: date is a type now; numeric bounds (the default min/max here) are refused as bounds, not as a type
+  refuse(set('B2:B5', { type: 'date' }), /YYYY-MM-DD/);
+  refuse(set('B2:B5', { type: 'bogus' }), /type must be one of/);
   refuse(set('B2:B5', { alertStyle: 'loud' }), /alertStyle must be one of/);
   refuse(set('B2:B5', { min: 5, max: 1 }), /min <= max/);
   refuse(set('B2:B5', { min: 1.5 }), /integers/);

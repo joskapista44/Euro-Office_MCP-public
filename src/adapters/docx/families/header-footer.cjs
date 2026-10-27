@@ -1,6 +1,6 @@
 'use strict';
 
-const { norm, textUnits } = require('../inventory.cjs');
+const { norm, textUnits, tablesContent } = require('../inventory.cjs');
 const { UNRESOLVED } = require('./text.cjs');
 
 /**
@@ -57,7 +57,8 @@ const { UNRESOLVED } = require('./text.cjs');
  *   sections    more than one section is SUPPORTED when it is safe (the source refused it):
  *               a part is inherited by the following sections that have none of their own, so a
  *               write where a LATER section has no own part of the same kind+variant ->
- *               FAIL_CLOSED_UNSUPPORTED_SHAPE:later-section-inherits-this-part; a missing part on a
+ *               FAIL_CLOSED_UNSUPPORTED_SHAPE:later-section-inherits-this-part:<sections> (GH #289 H-07a: written when
+ *               the caller names exactly those sections in `inheritedBy`); a missing part on a
  *               section that has a previous one would break the link ->
  *               FAIL_CLOSED_UNSUPPORTED_SHAPE:linked-to-previous. A one-section document keeps the
  *               source's create-if-missing.
@@ -69,6 +70,21 @@ const { UNRESOLVED } = require('./text.cjs');
  *               The source audit placed these intents P0; the target is P1 by the owner brief.
  *   retry       SATISFIED from the fresh part (one paragraph, the text), never from the old text.
  *   text        non-empty, no tab or line break (one paragraph).
+ *
+ * GH #289 H-04b: `pageNumber: true` (full mode only) puts a PAGE field after the text in the one paragraph (public
+ * AddPageNumber, LIVE probe 1 W4); L1/retry: the paragraph holds the text AND exactly one PAGE field.
+ *
+ * GH #289 paragraph mode (docs/GH289-HF-DOCUMENTED-LIMITS-DECISION.md, H-01): `paragraph: { index, of }` changes the
+ * text of ONE paragraph of an EXISTING part instead of replacing the part. `of` is the part's paragraph count the
+ * caller saw (a different count -> FAIL_CLOSED, never "the nearest"). Measured LIVE (probe 1 W1/W2/W3/W6, kept after a
+ * fresh reopen): the text of the paragraph's ONE text run is changed in place (ClearContent + AddText on that run), so
+ * the paragraph style (e.g. the built-in Header), the alignment, the run's bold / font / size, and every run with no
+ * text -- a PAGE field, an image -- are kept. The part must hold only paragraphs of runs (a table in the part: refused);
+ * the paragraph must have exactly ONE run with text (two differently formatted runs: refused -- which format the new
+ * text takes would be a guess). No part is created and no variant is activated in this mode. L1: that paragraph holds
+ * the text, the count unchanged. L3: that paragraph's style, alignment, run properties and inline content unchanged,
+ * every other paragraph of the part unchanged, plus everything the full mode compares (every other part, the body,
+ * the flags). Retry: SATISFIED from the fresh paragraph text.
  */
 
 const KIND = Object.freeze({ edit_header: 'header', edit_footer: 'footer' });
@@ -77,6 +93,41 @@ const VARIANTS = Object.freeze(['default', 'even', 'title']);
 // flags (title page: per section; even/odd: document-wide) are read internally, READ ONLY
 // (EO_INTERNAL_DEPENDENCY READ -- the driver's section read); an unread flag refuses the write.
 const SUPPORTED_VARIANTS = Object.freeze(['default', 'title', 'even']);
+
+/** GH #289 H-07a: the optional `inheritedBy` acknowledgement -> null (absent) | a frozen ascending list | false (malformed). */
+function inheritedByDescriptor(v, section) {
+  if (v === undefined) return null;
+  if (!Array.isArray(v) || !v.every(Number.isInteger)) return false;
+  const ok = v.every((x, i) => x > section.index && x < section.of && (i === 0 || x > v[i - 1]));
+  return ok ? Object.freeze([...v]) : false;
+}
+
+/**
+ * GH #289 H-07a: the sections that SHOW this part without having one of their own -- the later sections, in order, up
+ * to the first one with its own part of the same kind + variant (ECMA-376: a section without a header/footer reference
+ * inherits the previous section's). A write to the part changes what these sections show.
+ */
+function inheritingSections(sections, op) {
+  const out = [];
+  for (let j = op.sectionIndex + 1; j < sections.length && !partAt(sections, j, op.part, op.variant); j += 1) out.push(j);
+  return out;
+}
+
+/** GH #289 H-07a: an inheriting set is written only when the caller named it exactly (never implicit). */
+function inheritanceGuard(s, op) {
+  const aff = inheritingSections(s.sections, op);
+  const named = op.inheritedBy || null;
+  // the reason NAMES the set (the receipt carries the reason, not the evidence): the caller acknowledges it by inheritedBy
+  if (named === null) return aff.length ? `FAIL_CLOSED_UNSUPPORTED_SHAPE:later-section-inherits-this-part:${aff.join(',')}` : null;
+  return JSON.stringify(aff) === JSON.stringify(named) ? null : `FAIL_CLOSED:inherited-by-mismatch:${aff.join(',') || 'none'}`;
+}
+
+/** GH #289: the optional `paragraph` descriptor -> null (absent) | { index, of } | false (malformed). */
+function paragraphDescriptor(q) {
+  if (q === undefined) return null;
+  const valid = q && typeof q === 'object' && Object.keys(q).sort().join(',') === 'index,of' && Number.isInteger(q.index) && Number.isInteger(q.of);
+  return valid && q.of >= 1 && q.index >= 0 && q.index < q.of ? Object.freeze({ index: q.index, of: q.of }) : false;
+}
 
 function plan(step, index) {
   const kind = KIND[step.intent];
@@ -90,14 +141,30 @@ function plan(step, index) {
   if (step.selector !== undefined) return { ok: false, detail: `step ${index}: ${step.intent} takes no text selector (the target is section + kind + variant)` };
   if (typeof step.text !== 'string' || !norm(step.text)) return { ok: false, detail: `step ${index}: ${step.intent} requires a non-empty text` };
   if (/[\t\r\n]/.test(step.text)) return { ok: false, detail: `step ${index}: ${step.intent} text must not contain a tab or line break (one paragraph)` };
-  const selector = Object.freeze({ section: Object.freeze({ index: s.index, of: s.of }), part: kind, variant });
-  return { ok: true, operation: { id: step.id || `s${index}`, intent: step.intent, selector, part: kind, variant, sectionIndex: s.index, sectionCount: s.of, text: step.text, preservationMode: 'PRIMITIVE_INTEGRAL', ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) } };
+  const para = paragraphDescriptor(step.paragraph);
+  const inheritedBy = inheritedByDescriptor(step.inheritedBy, s);
+  if (step.pageNumber !== undefined && typeof step.pageNumber !== 'boolean') return { ok: false, detail: `step ${index}: ${step.intent} pageNumber must be a boolean` };
+  if (step.pageNumber === true && para) return { ok: false, detail: `step ${index}: ${step.intent} pageNumber is a full-part write (it cannot be combined with paragraph)` };
+  if (inheritedBy === false) return { ok: false, detail: `step ${index}: ${step.intent} inheritedBy must be an ascending list of the later section indexes (> section.index, < section.of)` };
+  if (para === false) return { ok: false, detail: `step ${index}: ${step.intent} paragraph must be { index, of } (integers, 0 <= index < of = the part's paragraph count)` };
+  const selector = Object.freeze({ section: Object.freeze({ index: s.index, of: s.of }), part: kind, variant, ...(para ? { paragraph: para } : {}) });
+  return { ok: true, operation: { id: step.id || `s${index}`, intent: step.intent, selector, part: kind, variant, sectionIndex: s.index, sectionCount: s.of, text: step.text,
+    ...(para ? { paragraphIndex: para.index, paragraphCount: para.of } : {}), ...(inheritedBy ? { inheritedBy } : {}), ...(step.pageNumber === true ? { pageNumber: true } : {}), preservationMode: 'PRIMITIVE_INTEGRAL', ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) } };
 }
 
 // ---- the observation ----------------------------------------------------------------------------
 
 const partAt = (sections, i, kind, variant) => (sections[i] && sections[i][kind] ? sections[i][kind][variant] : null);
 const terminal = (part, text) => !!part && part.paragraphs === 1 && part.paras.length === 1 && part.paras[0].text === norm(text);
+// GH #289 H-04b: with pageNumber the one paragraph also holds exactly one PAGE field (the public ToJSON names it pgNum) and
+// nothing else; without it the paragraph holds no field (a stale field from an earlier write is not the requested state)
+const pageNumberOk = (part, op) => { const inl = part && part.paras[0] && part.paras[0].inline; return Array.isArray(inl) && JSON.stringify(inl) === JSON.stringify(op.pageNumber ? ['pgNum'] : []); };
+const paragraphMode = op => Number.isInteger(op.paragraphIndex);
+// GH #289 H-05 (LIVE, docs/evidence/gh289-290-remaining-probe-20261023.json): in a part that also holds tables the paragraph mode
+// counts the part's OWN paragraphs (a table and the paragraphs inside its cells are not counted) and leaves every table as it is
+const paragraphCountOf = part => (part.withTables ? part.paras.length : part.paragraphs);
+// GH #289 paragraph mode: the part still holds the caller's paragraph count, and the named paragraph holds the text
+const paragraphTerminal = (part, op) => !!part && paragraphCountOf(part) === op.paragraphCount && part.paras.length === op.paragraphCount && part.paras[op.paragraphIndex].text === norm(op.text);
 const OTHER_KIND = Object.freeze({ header: 'footer', footer: 'header' });
 
 /** The even/odd flag is document-wide: every section must report the same readable value, else null (unknown). */
@@ -121,7 +188,7 @@ function partState(primary, op) {
   if (sections.length !== op.sectionCount) return { ok: false, reason: 'FAIL_CLOSED:section-descriptor-mismatch', sectionCount: sections.length };
   const part = partAt(sections, op.sectionIndex, op.part, op.variant);
   const flag = flagOn(sections, op);
-  return { ok: true, sections, part, flag, defaultText: d.defaultText || null, done: terminal(part, op.text) && flag === true };
+  return { ok: true, sections, part, flag, defaultText: d.defaultText || null, done: (paragraphMode(op) ? paragraphTerminal(part, op) : terminal(part, op.text) && (!op.pageNumber || pageNumberOk(part, op))) && flag === true };
 }
 
 /**
@@ -131,7 +198,7 @@ function partState(primary, op) {
  */
 function slotState(sections, i, kind, variant) {
   const own = partAt(sections, i, kind, variant);
-  if (own) return { state: 'OWN', key: JSON.stringify([own.paragraphs, own.simple, own.paras.map(x => [x.text, x.format])]) };
+  if (own) return { state: 'OWN', key: JSON.stringify([own.paragraphs, own.simple, own.paras.map(x => [x.text, x.format]), own.tables]) };
   for (let j = 0; j < i; j += 1) if (partAt(sections, j, kind, variant)) return { state: 'INHERITED' };
   return { state: 'NONE' };
 }
@@ -178,14 +245,40 @@ const variantGuard = op => (SUPPORTED_VARIANTS.includes(op.variant) ? null : `FA
 function shapeGuard(s, op) {
   const early = variantGuard(op) || flagGuard(s, op) || variantStateGuard(s);
   if (early) return early;
-  if (s.sections.length > 1) {
-    const inherits = s.sections.slice(op.sectionIndex + 1).some((_, j) => !partAt(s.sections, op.sectionIndex + 1 + j, op.part, op.variant));
-    if (inherits) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:later-section-inherits-this-part';
-    if (!s.part && op.sectionIndex > 0) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:linked-to-previous';
-  }
+  if (paragraphMode(op)) return paragraphGuard(s, op);
+  const inherited = inheritanceGuard(s, op);
+  if (inherited) return inherited;
+  if (!s.part && op.sectionIndex > 0) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:linked-to-previous';
   if (s.part && !s.part.simple) return 'header-footer-not-plain-paragraphs-of-runs';
   if (s.flag === false) { const a = activationGuard(s, op); if (a) return a; }
   return s.part ? replacementLoss(s.part, s.defaultText) : null;
+}
+
+/**
+ * GH #289 paragraph mode: an existing, shown part of paragraphs of runs (no later section inheriting it), the caller's
+ * paragraph count, and a target paragraph with exactly ONE run that holds text. Returns the refusal or null.
+ */
+function paragraphGuard(s, op) {
+  const P = 'FAIL_CLOSED_UNSUPPORTED_SHAPE:header-footer-paragraph-';
+  const inherited = inheritanceGuard(s, op);
+  const part = s.part;
+  const p = part && part.paras.length === op.paragraphCount ? part.paras[op.paragraphIndex] : null;
+  const textRuns = p && Array.isArray(p.runs) ? p.runs.filter(r => r.text !== '') : [];
+  // in order: the first one that holds is the refusal
+  const checks = [
+    [!!inherited, inherited],
+    [!part, `${P}mode-needs-an-existing-part`],
+    [() => s.flag !== true, `${P}mode-variant-not-shown`],
+    [() => !part.simple && !part.withTables, 'header-footer-not-plain-paragraphs-of-runs'],
+    [() => paragraphCountOf(part) !== op.paragraphCount || !p, 'FAIL_CLOSED:paragraph-descriptor-mismatch'],
+    [() => !Array.isArray(p.runs), 'header-footer-run-format-unreadable'],
+    [() => !Array.isArray(p.inline), 'header-footer-inline-content-unreadable'],
+    [() => textRuns.length !== 1, () => `${P}text-runs:${textRuns.length}`],
+    [() => norm(textRuns[0].text) !== p.text, `${P}text-not-in-one-run`],
+  ];
+  const hit = checks.find(([c]) => (typeof c === 'function' ? c() : c));
+  if (!hit) return null;
+  return typeof hit[1] === 'function' ? hit[1]() : hit[1];
 }
 
 /**
@@ -204,6 +297,9 @@ const LOSS = 'FAIL_CLOSED_UNSUPPORTED_SHAPE:header-footer-replacement-would-drop
 function replacementLoss(part, defaults) {
   if (part.paragraphs !== 1 || part.paras.length !== 1) return `${LOSS}paragraphs`;
   const p = part.paras[0];
+  // GH #289: a field (PAGE ...) or an image reads as runs with no text -- the replacement would drop it silently
+  if (!Array.isArray(p.inline)) return 'header-footer-inline-content-unreadable';
+  if (p.inline.length) return `${LOSS}inline:${p.inline.join(',')}`;
   const f = p.format || {};
   if (f.style) return `${LOSS}style:${f.style}`;
   if (f.alignment !== undefined && f.alignment !== 'left') return `${LOSS}alignment:${f.alignment}`;
@@ -224,11 +320,14 @@ function classify(primary, op) {
   if (!s.ok) return { state: 'FAIL_CLOSED', evidence: { reason: s.reason, sectionCount: s.sectionCount } };
   if (s.done) {
     if (op.recovery === UNRESOLVED) return { state: 'FAIL_CLOSED', evidence: { reason: 'preservation-baseline-unavailable' } };
-    return { state: 'SATISFIED', evidence: { section: op.sectionIndex, part: op.part, variant: op.variant, text: norm(op.text), proof: 'fresh-live-part-holds-exactly-one-paragraph-with-the-text' } };
+    return { state: 'SATISFIED', evidence: { section: op.sectionIndex, part: op.part, variant: op.variant, text: norm(op.text), proof: paragraphMode(op) ? 'fresh-live-paragraph-holds-the-text' : 'fresh-live-part-holds-exactly-one-paragraph-with-the-text' } };
   }
   const guard = shapeGuard(s, op);
-  if (guard) return { state: 'FAIL_CLOSED', evidence: { reason: guard } };
-  return { state: 'APPLY', evidence: { section: op.sectionIndex, part: op.part, variant: op.variant, create: !s.part, activate: s.flag === false } };
+  const aff = inheritingSections(s.sections, op);
+  // H-07a: the preflight NAMES the sections a write would change, refused or not -- the caller acknowledges them by inheritedBy
+  if (guard) return { state: 'FAIL_CLOSED', evidence: { reason: guard, ...(aff.length || op.inheritedBy ? { inheritingSections: aff } : {}) } };
+  const how = paragraphMode(op) ? { paragraph: op.paragraphIndex, from: s.part.paras[op.paragraphIndex].text } : { create: !s.part, activate: s.flag === false };
+  return { state: 'APPLY', evidence: { section: op.sectionIndex, part: op.part, variant: op.variant, ...how, ...(aff.length ? { inheritingSections: aff } : {}) } };
 }
 
 function resolve(primary, selector, ctx = {}) {
@@ -239,12 +338,20 @@ function resolve(primary, selector, ctx = {}) {
   if (!s.ok) return { ok: false, target: null, selector, ambiguity: up(s.reason) };
   const guard = s.done ? null : shapeGuard(s, op);
   if (guard) return { ok: false, target: null, selector, ambiguity: up(guard) };
-  return { ok: true, target: { kind: 'section_part', sectionIndex: op.sectionIndex, sectionCount: op.sectionCount, part: op.part, variant: op.variant, create: !s.part, activate: s.flag === false }, selector, ambiguity: null };
+  const para = paragraphMode(op) && s.part ? { paragraphIndex: op.paragraphIndex, paragraphCount: op.paragraphCount, oldText: s.part.paras[op.paragraphIndex].text } : {};
+  return { ok: true, target: { kind: 'section_part', sectionIndex: op.sectionIndex, sectionCount: op.sectionCount, part: op.part, variant: op.variant, create: !s.part, activate: s.flag === false, inheritedBy: inheritingSections(s.sections, op), ...para }, selector, ambiguity: null };
+}
+
+/** GH #289: a paragraph-mode target names the same paragraph, its old text, and neither creates nor activates; a full-mode target names no paragraph. */
+function sameParagraphTarget(op, target) {
+  if (!paragraphMode(op)) return target.paragraphIndex === undefined;
+  return target.paragraphIndex === op.paragraphIndex && target.paragraphCount === op.paragraphCount && typeof target.oldText === 'string' && target.create === false && target.activate === false;
 }
 
 function preDispatchCheck(op, target) {
   const same = target && target.kind === 'section_part' && target.sectionIndex === op.sectionIndex && target.sectionCount === op.sectionCount
-    && target.part === op.part && target.variant === op.variant && SUPPORTED_VARIANTS.includes(op.variant);
+    && target.part === op.part && target.variant === op.variant && SUPPORTED_VARIANTS.includes(op.variant) && sameParagraphTarget(op, target)
+    && Array.isArray(target.inheritedBy) && JSON.stringify(target.inheritedBy) === JSON.stringify(op.inheritedBy || []);
   return same ? { ok: true } : { ok: false, dispatched: false, detail: 'header-footer-target-unresolved' };
 }
 
@@ -252,6 +359,9 @@ function preDispatchCheck(op, target) {
 
 function lower(op, target) {
   const meta = Object.freeze({ family: 'headerFooter', action: 'headerFooter', part: target.part, variant: target.variant, sectionIndex: target.sectionIndex, sectionCount: target.sectionCount, create: target.create, activate: target.activate === true, text: op.text,
+    ...(paragraphMode(op) ? { mode: 'paragraph', paragraphIndex: target.paragraphIndex, paragraphCount: target.paragraphCount, oldText: target.oldText } : {}),
+    inheritedBy: target.inheritedBy,
+    ...(op.pageNumber ? { pageNumber: true } : {}),
     // M11.5e.4: a title/even command re-reads the variant state through the word /3 Bridge READ -- the driver prepends
     // its prelude and the second line refuses it off /3, before anything is sent
     ...(target.variant !== 'default' ? { bridgeSectionVariantRead: true } : {}) });
@@ -287,8 +397,35 @@ try {
   const existing = get(sec, false);
   if (!!existing === m.create) return;
   if (secs.length > 1) {
-    for (let j = m.sectionIndex + 1; j < secs.length; j += 1) if (!get(secs[j], false)) return;
+    // H-07a: the sections inheriting this part, re-read -- they must be exactly the ones the plan named
+    const aff = [];
+    for (let j = m.sectionIndex + 1; j < secs.length && !get(secs[j], false); j += 1) aff.push(j);
+    if (JSON.stringify(aff) !== JSON.stringify(m.inheritedBy)) return;
     if (m.create && m.sectionIndex > 0) return;
+  }
+  // GH #289 paragraph mode: the text of the named paragraph's ONE text run, changed in place -- the paragraph, its
+  // style and alignment, the run's properties and every run without text (a field, an image) stay as they are
+  if (m.mode === 'paragraph') {
+    if (!existing) return;
+    const norm = t => String(t || '').replace(/\\s+/g, ' ').trim();
+    const paras = [];
+    for (let i = 0; i < existing.GetElementsCount(); i += 1) {
+      const e = existing.GetElement(i);
+      // GH #289 H-05: a table is left as it is (not counted, not entered)
+      if (e && e.GetClassType() === 'table') continue;
+      if (!e || e.GetClassType() !== 'paragraph') return;
+      for (let j = 0; j < e.GetElementsCount(); j += 1) { const ch = e.GetElement(j); if (!ch || ch.GetClassType() !== 'run') return; }
+      paras.push(e);
+    }
+    if (paras.length !== m.paragraphCount) return;
+    const p = paras[m.paragraphIndex];
+    if (norm(p.GetText({ Numbering: false })) !== m.oldText) return;
+    const textRuns = [];
+    for (let j = 0; j < p.GetElementsCount(); j += 1) { const ch = p.GetElement(j); if (String(ch.GetText({ Numbering: false }) || '') !== '') textRuns.push(ch); }
+    if (textRuns.length !== 1) return;
+    textRuns[0].ClearContent();
+    textRuns[0].AddText(m.text);
+    return;
   }
   if (existing) {
     for (let i = 0; i < existing.GetElementsCount(); i += 1) {
@@ -303,6 +440,8 @@ try {
   const p = hf.GetElement(0);
   if (!p || p.GetClassType() !== 'paragraph') return;
   p.AddText(m.text);
+  // GH #289 H-04b: a PAGE field after the text (public ApiParagraph.AddPageNumber, LIVE probe 1 W4)
+  if (m.pageNumber) p.AddPageNumber();
   // activation AFTER the part holds its text (public API): title page per section, even/odd document-wide
   if (m.activate && m.variant === 'title') sec.SetTitlePage(true);
   if (m.activate && m.variant === 'even') doc.SetEvenAndOddHdrFtr(true);
@@ -318,7 +457,7 @@ function otherParts(sections, op) {
   sections.forEach((s, i) => ['header', 'footer'].forEach(k => VARIANTS.forEach(v => {
     if (i === op.sectionIndex && k === op.part && v === op.variant) return;
     const p = s[k][v];
-    out[`${i}:${k}:${v}`] = p ? JSON.stringify([p.paragraphs, p.simple, p.paras.map(x => [x.text, x.format])]) : null;
+    out[`${i}:${k}:${v}`] = p ? JSON.stringify([p.paragraphs, p.simple, p.paras.map(x => [x.text, x.format]), p.tables]) : null;
   })));
   return out;
 }
@@ -346,7 +485,7 @@ function flagChanges(before, after, op) {
 /** The main body as the reads see it: text units in order, tables, notes, bookmarks, images, and whether the cursor is in it. */
 function bodyKey(primary) {
   const d = (primary && primary.document) || {};
-  return JSON.stringify({ units: textUnits(primary).map(u => [u.kind, norm(u.text)]), tables: d.tables || null, footnotes: d.footnotes || null, endnotes: d.endnotes || null, bookmarks: d.bookmarks || null, images: ((primary && primary.images) || []).length, inMainBody: d.inMainBody === undefined ? null : d.inMainBody });
+  return JSON.stringify({ units: textUnits(primary).map(u => [u.kind, norm(u.text)]), tables: tablesContent(d.tables), footnotes: d.footnotes || null, endnotes: d.endnotes || null, bookmarks: d.bookmarks || null, images: ((primary && primary.images) || []).length, inMainBody: d.inMainBody === undefined ? null : d.inMainBody });
 }
 
 /** L1: the target part holds exactly one paragraph with the text; the section count unchanged. */
@@ -374,14 +513,38 @@ function verifyPreservation(op, before, after) {
   const changedParts = Object.keys(pb).filter(k => pb[k] !== pa[k]);
   const sameBody = bodyKey(before.primary) === bodyKey(after.primary);
   const flags = flagChanges(b.sections, a.sections, op);
-  const ok = changedParts.length === 0 && sameBody && flags.length === 0;
-  return { ok, evidence: { changedParts, bodyUnchanged: sameBody, unrequestedFlagChanges: flags, sectionCount: a.sections.length, expectationSource: 'derived-from-fresh-pre-mutation-observation' } };
+  const inPart = paragraphMode(op) ? targetPartChanges(b.part, a.part, op) : [];
+  const ok = changedParts.length === 0 && sameBody && flags.length === 0 && inPart.length === 0;
+  return { ok, evidence: { changedParts, bodyUnchanged: sameBody, unrequestedFlagChanges: flags, ...(paragraphMode(op) ? { targetPartChanges: inPart } : {}), sectionCount: a.sections.length, expectationSource: 'derived-from-fresh-pre-mutation-observation' } };
+}
+
+/**
+ * GH #289 paragraph mode, L3 inside the target part: the paragraph count; every OTHER paragraph (text, format, runs,
+ * inline content); the target paragraph's format, its run properties (every run, in order, text aside) and its inline
+ * content. Only the target paragraph's text may change.
+ */
+function targetPartChanges(b, a, op) {
+  if (!b || !a) return ['target-part-missing'];
+  if (b.paragraphs !== a.paragraphs || b.paras.length !== a.paras.length) return ['paragraph-count'];
+  // GH #289 H-05: every table of the part (where it sits, every cell's text) unchanged
+  if (JSON.stringify(b.tables) !== JSON.stringify(a.tables)) return ['tables'];
+  const runProps = runs => (Array.isArray(runs) ? runs.map(r => Object.fromEntries(Object.entries(r).filter(([k]) => k !== 'text'))) : null);
+  const out = [];
+  b.paras.forEach((x, i) => {
+    const y = a.paras[i];
+    if (i !== op.paragraphIndex) { if (JSON.stringify([x.text, x.format, x.runs, x.inline]) !== JSON.stringify([y.text, y.format, y.runs, y.inline])) out.push(`paragraph-${i}`); return; }
+    if (JSON.stringify(x.format) !== JSON.stringify(y.format)) out.push(`paragraph-${i}-format`);
+    if (runProps(x.runs) === null || JSON.stringify(runProps(x.runs)) !== JSON.stringify(runProps(y.runs))) out.push(`paragraph-${i}-run-properties`);
+    if (!Array.isArray(x.inline) || JSON.stringify(x.inline) !== JSON.stringify(y.inline)) out.push(`paragraph-${i}-inline-content`);
+  });
+  return out;
 }
 
 /** L2: the final part (section + kind + variant) holds exactly one paragraph with the text; the section count as declared. */
 function wholeTaskChecks(op, finalObservation) {
   const s = partState(finalObservation.primary, op);
-  return [{ name: `${op.id}: section ${op.sectionIndex}/${op.sectionCount} ${op.part} (${op.variant}) = exactly one paragraph "${norm(op.text)}"`, ok: s.ok && s.done }];
+  if (paragraphMode(op)) return [{ name: `${op.id}: section ${op.sectionIndex}/${op.sectionCount} ${op.part} (${op.variant}) paragraph ${op.paragraphIndex}/${op.paragraphCount} = "${norm(op.text)}"`, ok: s.ok && s.done }];
+  return [{ name: `${op.id}: section ${op.sectionIndex}/${op.sectionCount} ${op.part} (${op.variant}) = exactly one paragraph "${norm(op.text)}"${op.pageNumber ? ' + a PAGE field' : ''}`, ok: s.ok && s.done }];
 }
 
 // refs: none -- the header/footer text is not a body text unit a later step can name
@@ -389,4 +552,4 @@ function producedText() {
   return null;
 }
 
-module.exports = { replacementLoss, plan, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation, wholeTaskChecks, producedText, partState, shapeGuard, otherParts, bodyKey, slotState, activationGuard, flagChanges, SUPPORTED_VARIANTS };
+module.exports = { replacementLoss, paragraphGuard, targetPartChanges, plan, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation, wholeTaskChecks, producedText, partState, shapeGuard, otherParts, bodyKey, slotState, activationGuard, flagChanges, SUPPORTED_VARIANTS };

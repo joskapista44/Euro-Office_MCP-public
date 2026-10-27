@@ -149,7 +149,7 @@ const Dc = store => store.durable.find(s => s.name === 'D').cells;
 
 test('R21 APPLIED: desc with a blank key -> the blank row last (E travels with it); retry SATISFIED 0/0', async () => {
   const store = createStore(sortBook());
-  const t = sortTask({ range: 'D1:E6', key: 'D', order: 'desc' });
+  const t = sortTask({ range: 'D1:E6', keyColumn: 'D', order: 'desc' });
   const { result, m } = await run(store, t);
   assert.equal(result.ok, true, JSON.stringify([result.execution.primitiveVerification, op(result).evidence]));
   assert.equal(m.commands, 1);
@@ -163,7 +163,7 @@ test('R21 APPLIED: desc with a blank key -> the blank row last (E travels with i
 
 test('R21 APPLIED: same-row formulas move with their row and point at the new row; the outside formula is not re-pointed', async () => {
   const store = createStore(sortBook());
-  const t = sortTask({ range: 'G1:H5', key: 'G', order: 'asc' });
+  const t = sortTask({ range: 'G1:H5', keyColumn: 'G', order: 'asc' });
   const { result } = await run(store, t);
   assert.equal(result.ok, true, JSON.stringify([result.execution.primitiveVerification, result.execution.preservationVerification]));
   assert.deepEqual([2, 3, 4, 5].map(r => Dc(store)[`G${r}`].v), [1, 2, 3, 4]);
@@ -174,14 +174,14 @@ test('R21 APPLIED: same-row formulas move with their row and point at the new ro
 });
 
 for (const [name, extra, mutate, why] of [
-  ['an ASCENDING sort with a blank key (placement not measured)', { range: 'D1:E6', key: 'D', order: 'asc' }, null, 'xlsx-sort-blank-key-unmeasured'],
-  ['a formula in the key column', { range: 'G1:H5', key: 'G', order: 'asc' }, b => { b[0].cells.G3 = { v: 2, f: '=1+1' }; }, 'xlsx-sort-formula-key-unmeasured'],
-  ['a formula pointing at another row', { range: 'G1:H5', key: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=G2*10'; }, 'xlsx-sort-formula-in-block-unmeasured'],
-  ['a formula pointing outside the block', { range: 'G1:H5', key: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=J3*10'; }, 'xlsx-sort-formula-in-block-unmeasured'],
-  ['an absolute reference', { range: 'G1:H5', key: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=$G3*10'; }, 'xlsx-sort-formula-in-block-unmeasured'],
-  ['a same-row range', { range: 'G1:H5', key: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=SUM(G3:G3)'; }, 'xlsx-sort-formula-in-block-unmeasured'],
-  ['another sheet', { range: 'G1:H5', key: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=O!G3*10'; }, 'xlsx-sort-formula-in-block-unmeasured'],
-  ['a defined name', { range: 'G1:H5', key: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=G3*Rate'; }, 'xlsx-sort-formula-in-block-unmeasured'],
+  ['an ASCENDING sort with a blank key (placement not measured)', { range: 'D1:E6', keyColumn: 'D', order: 'asc' }, null, 'xlsx-sort-blank-key-unmeasured'],
+  ['a formula in the key column', { range: 'G1:H5', keyColumn: 'G', order: 'asc' }, b => { b[0].cells.G3 = { v: 2, f: '=1+1' }; }, 'xlsx-sort-formula-key-unmeasured'],
+  ['a formula pointing at another row', { range: 'G1:H5', keyColumn: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=G2*10'; }, 'xlsx-sort-formula-in-block-unmeasured'],
+  ['a formula pointing outside the block', { range: 'G1:H5', keyColumn: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=J3*10'; }, 'xlsx-sort-formula-in-block-unmeasured'],
+  ['an absolute reference', { range: 'G1:H5', keyColumn: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=$G3*10'; }, 'xlsx-sort-formula-in-block-unmeasured'],
+  ['a same-row range', { range: 'G1:H5', keyColumn: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=SUM(G3:G3)'; }, 'xlsx-sort-formula-in-block-unmeasured'],
+  ['another sheet', { range: 'G1:H5', keyColumn: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=O!G3*10'; }, 'xlsx-sort-formula-in-block-unmeasured'],
+  ['a defined name', { range: 'G1:H5', keyColumn: 'G', order: 'asc' }, b => { b[0].cells.H3.f = '=G3*Rate'; }, 'xlsx-sort-formula-in-block-unmeasured'],
 ]) {
   test(`R21 refused BEFORE dispatch: ${name}`, async () => {
     const b = sortBook();
@@ -196,18 +196,18 @@ for (const [name, extra, mutate, why] of [
 test('R21 allowed: a function call and a string literal around same-row references', async () => {
   const b = sortBook();
   b[0].cells.H3 = { v: 'x', f: '=IF(G3>1,"G9",TRUE)' };
-  const { result } = await run(createStore(b), sortTask({ range: 'G1:H5', key: 'G', order: 'asc' }));
+  const { result } = await run(createStore(b), sortTask({ range: 'G1:H5', keyColumn: 'G', order: 'asc' }));
   assert.equal(result.ok, true, JSON.stringify(op(result).evidence));
 });
 
 test('R21 RED: a formula that moves but keeps its old row -> L1 FAIL; blanks first in desc -> L1 FAIL', async () => {
-  const stays = await run(createStore(sortBook()), sortTask({ range: 'G1:H5', key: 'G', order: 'asc' }), { fault: 'sort-formula-stays' });
+  const stays = await run(createStore(sortBook()), sortTask({ range: 'G1:H5', keyColumn: 'G', order: 'asc' }), { fault: 'sort-formula-stays' });
   assert.equal(stays.result.ok, false);
   assert.equal(stays.result.execution.primitiveVerification[0].verdict, 'FAIL');
-  const rev = await run(createStore(sortBook()), sortTask({ range: 'D1:E6', key: 'D', order: 'desc' }), { fault: 'sort-reverse' });
+  const rev = await run(createStore(sortBook()), sortTask({ range: 'D1:E6', keyColumn: 'D', order: 'desc' }), { fault: 'sort-reverse' });
   assert.equal(rev.result.ok, false);
   assert.equal(rev.result.execution.primitiveVerification[0].verdict, 'FAIL');
-  const first = await run(createStore(sortBook()), sortTask({ range: 'D1:E6', key: 'D', order: 'desc' }), { fault: 'sort-blanks-first' });
+  const first = await run(createStore(sortBook()), sortTask({ range: 'D1:E6', keyColumn: 'D', order: 'desc' }), { fault: 'sort-blanks-first' });
   assert.equal(first.result.ok, false);
   assert.equal(first.result.execution.primitiveVerification[0].verdict, 'FAIL');
 });

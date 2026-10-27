@@ -11,14 +11,15 @@ const { aggregate, bodyMismatch } = require('../pivot-aggregate.cjs');
  * AddFields + AddDataField + RefreshTable path the P-A / P-A2 / P-A3 probes used; the source after a reopen is the
  * content-proven one (pivot-source.cjs, P9).
  *
- * Contract (docs/evidence/M7-H3-PROBE.md, measured): create_pivot { name, sheet, range, rows, columns, sum, host, at } --
+ * Contract (docs/evidence/M7-H3-PROBE.md, measured): create_pivot { name, sheet, range, rows, columns, sum, pivotSheet, at } --
  * one row field, one column field, one `Sum of` data field (the only measured layout); the source range a text header
- * row (unique), text keys, a numeric sum field, no formula, at most MAX_DATA_ROWS data rows; sheet / host names that need
+ * row (unique), text keys, a numeric sum field, no formula, at most MAX_DATA_ROWS data rows; sheet / pivotSheet names that need
  * no quoting; `at` one cell. The table is (2 + row keys + 1) x (1 + column keys + 1) from `at` (P-A3, three shapes).
  * Refused before the write: an unmeasured shape, a pivot of the name anywhere with another identity, an unobservable
  * pivots axis on any sheet, a destination extent that is NOT entirely empty (P-A3: the insert silently overwrites it)
- * or that overlaps the source. SATISFIED: exactly one pivot of the name, on the host, with the source, the layout and the
+ * or that overlaps the source. SATISFIED: exactly one pivot of the name, on pivotSheet, with the source, the layout and the
  * extent -- in a reopened session its source is the content-proven one, so a retry is 0 / 0.
+ * (owner decision: renamed from `host` -- the write-tool's ROUTE_OVERRIDE filter refuses that name by itself, write-tools.cjs.)
  * L1: the pivot read back with that identity and its table reproducing the source's sums cell by cell. L3: every cell
  * outside the extent, every sheet's charts / names / OTHER pivots unchanged.
  */
@@ -27,14 +28,14 @@ const INTENTS = Object.freeze(['create_pivot']);
 const SHEET = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const NAME = /^[A-Za-z_][A-Za-z0-9_.]{0,99}$/;
 const MAX_DATA_ROWS = 50;
-const FIELDS = ['intent', 'id', 'name', 'sheet', 'range', 'rows', 'columns', 'sum', 'host', 'at'];
+const FIELDS = ['intent', 'id', 'name', 'sheet', 'range', 'rows', 'columns', 'sum', 'pivotSheet', 'at'];
 
 const oneLine = x => typeof x === 'string' && x !== '' && !/[\r\n]/.test(x);
 
 /** The plan's measured-shape checks, in order: [refused?, why]. */
 const PLAN_CHECKS = Object.freeze([
   [step => Object.keys(step).some(k => !FIELDS.includes(k)), step => `does not support field(s): ${Object.keys(step).filter(k => !FIELDS.includes(k)).join(', ')}`],
-  [step => ![step.sheet, step.host].every(s => typeof s === 'string' && SHEET.test(s)), () => 'sheet / host must be names that need no quoting in a reference (a quoted one is not measured)'],
+  [step => ![step.sheet, step.pivotSheet].every(s => typeof s === 'string' && SHEET.test(s)), () => 'sheet / pivotSheet must be names that need no quoting in a reference (a quoted one is not measured)'],
   [step => typeof step.name !== 'string' || !NAME.test(step.name), () => 'name must be a pivot name (letters, digits, _ . ; starting with a letter or _)'],
   [step => ![step.rows, step.columns, step.sum].every(oneLine) || new Set([step.rows, step.columns, step.sum]).size !== 3, () => 'rows / columns / sum must be three different header names'],
   [step => { const g = parseRange(step.range); return !g || g.r2 - g.r1 < 1 || g.r2 - g.r1 > MAX_DATA_ROWS || g.c2 - g.c1 < 2; }, () => `range must be a plain A1 range: a header row, 1..${MAX_DATA_ROWS} data rows, at least three columns`],
@@ -61,7 +62,7 @@ function plan(step, index) {
       // the pivot claims its NAME workbook-wide; it reads its source range (a write into it clashes)
       selector: Object.freeze({ sheet: step.sheet, range: rangeText(g), pivot: step.name, claims: Object.freeze([`pivot:*:${step.name}`]) }),
       name: step.name,
-      host: step.host,
+      pivotSheet: step.pivotSheet,
       at: Object.freeze({ c: a.c1, r: a.r1 }),
       fields: Object.freeze({ rows: step.rows, cols: step.columns, sum: step.sum }),
       grid: Object.freeze({ ...g }),
@@ -120,7 +121,9 @@ const cellsOf = e => { const out = []; for (let r = e.r1; r <= e.r2; r += 1) for
 const blank = cell => !cell || (cell.f === '' && (cell.v === null || cell.v === ''));
 const overlaps = (a, b) => a.c1 <= b.c2 && b.c1 <= a.c2 && a.r1 <= b.r2 && b.r1 <= a.r2;
 
-/** The table cells of the extent reproduce the source's sums (labels, body, totals) -- the L1 / SATISFIED content proof. */
+/** The table cells of the extent reproduce the source's sums (labels, body, totals) -- the L1 / SATISFIED content proof.
+ * Shared with pivot-refresh.cjs (exported); `op.host` is a generic "which sheet to read the table from" shape, not the
+ * create_pivot step's own field -- callers pass whichever sheet name is relevant to THEM under that key. */
 function tableMismatch(p, op, m) {
   const e = m.extent;
   const v = (c, r) => { const cell = cellAt(p, op.host, addr(c, r)); return cell && cell.v !== null && cell.v !== undefined ? String(cell.v) : ''; };
@@ -133,7 +136,7 @@ function tableMismatch(p, op, m) {
 
 function gate(p, op) {
   if (!p || p.format !== 'xlsx') return { ok: false, reason: 'xlsx-observation-missing' };
-  const missing = [op.selector.sheet, op.host].filter(n => p.sheets.filter(x => x.name === n).length !== 1);
+  const missing = [op.selector.sheet, op.pivotSheet].filter(n => p.sheets.filter(x => x.name === n).length !== 1);
   if (!p.complete || missing.length) return !p.complete ? { ok: false, reason: p.truncated ? 'xlsx-observation-truncated' : 'xlsx-observation-unreadable-getters', unsupported: p.unsupported } : { ok: false, reason: 'xlsx-sheet-not-found', sheets: missing };
   const m = sourceModel(p, op);
   if (m.why) return { ok: false, reason: m.why, ...m };
@@ -142,22 +145,22 @@ function gate(p, op) {
   return { ok: true, model: m, hits: all.pivots.filter(x => x.name === op.name) };
 }
 
-const identityOk = (op, m, pv) => pv.host === op.host && pv.source === sourceText(op) && same(pv.layout, layoutOf(op)) && pv.table === m.extentText;
+const identityOk = (op, m, pv) => pv.host === op.pivotSheet && pv.source === sourceText(op) && same(pv.layout, layoutOf(op)) && pv.table === m.extentText;
 
 /** APPLY's own preconditions: the destination extent empty, off the source. */
 function destinationProblem(p, op, m) {
-  if (op.host === op.selector.sheet && overlaps(m.extent, op.grid)) return { reason: 'xlsx-pivot-destination-overlaps-source', extent: m.extentText };
-  const taken = cellsOf(m.extent).filter(a => !blank(cellAt(p, op.host, a)));
+  if (op.pivotSheet === op.selector.sheet && overlaps(m.extent, op.grid)) return { reason: 'xlsx-pivot-destination-overlaps-source', extent: m.extentText };
+  const taken = cellsOf(m.extent).filter(a => !blank(cellAt(p, op.pivotSheet, a)));
   return taken.length ? { reason: 'xlsx-pivot-destination-not-empty', extent: m.extentText, cells: taken.slice(0, 20), count: taken.length } : null;
 }
 
 function classify(p, op) {
   const g = gate(p, op);
   if (!g.ok) return { state: 'FAIL_CLOSED', evidence: g };
-  const where = { pivot: op.name, source: sourceText(op), host: op.host, extent: g.model.extentText };
+  const where = { pivot: op.name, source: sourceText(op), pivotSheet: op.pivotSheet, extent: g.model.extentText };
   if (g.hits.length > 1) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-pivot-name-ambiguous', ...where, count: g.hits.length } };
   if (g.hits.length === 1) {
-    const ok = identityOk(op, g.model, g.hits[0]) && !tableMismatch(p, op, g.model);
+    const ok = identityOk(op, g.model, g.hits[0]) && !tableMismatch(p, { host: op.pivotSheet }, g.model);
     return ok ? { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-pivot-with-the-identity-and-content' } }
       : { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-pivot-exists-with-another-identity', ...where, now: g.hits[0] } };
   }
@@ -179,8 +182,8 @@ function lower(op, target) {
     body: `
 try {
   const src = Api.GetSheet(${J(op.selector.sheet)});
-  const host = Api.GetSheet(${J(op.host)});
-  if (!src || src.GetName() !== ${J(op.selector.sheet)} || !host || host.GetName() !== ${J(op.host)}) return { ok: false, stage: 'sheet-identity' };
+  const host = Api.GetSheet(${J(op.pivotSheet)});
+  if (!src || src.GetName() !== ${J(op.selector.sheet)} || !host || host.GetName() !== ${J(op.pivotSheet)}) return { ok: false, stage: 'sheet-identity' };
   const nm = x => { try { return x.GetName(); } catch (e) { return null; } };
   if (Api.GetSheets().some(w => (w.GetAllPivotTables() || []).some(x => nm(x) === ${J(op.name)}))) return { ok: false, stage: 'name-taken' };
   // re-checked at dispatch: the insert silently overwrites a non-empty destination (P-A3)
@@ -195,7 +198,7 @@ try {
   return { ok: true };
 } catch (err) { return { ok: false, stage: 'threw', error: String(err) }; }
 `,
-    meta: Object.freeze({ family: 'pivots', action: op.intent, name: op.name, sheet: op.selector.sheet, range: op.selector.range, host: op.host, at: addr(op.at.c, op.at.r), extent: target.extent, fields: op.fields }),
+    meta: Object.freeze({ family: 'pivots', action: op.intent, name: op.name, sheet: op.selector.sheet, range: op.selector.range, pivotSheet: op.pivotSheet, at: addr(op.at.c, op.at.r), extent: target.extent, fields: op.fields }),
   };
 }
 
@@ -203,16 +206,16 @@ function verifyPrimitive(op, _before, after) {
   const g = gate(after && after.primary, op);
   if (!g.ok) return { ok: false, evidence: g };
   const pv = g.hits.length === 1 ? g.hits[0] : null;
-  const content = pv ? tableMismatch(after.primary, op, g.model) : 'no-single-pivot';
+  const content = pv ? tableMismatch(after.primary, { host: op.pivotSheet }, g.model) : 'no-single-pivot';
   const ok = !!pv && identityOk(op, g.model, pv) && !content;
-  return { ok, evidence: { pivot: op.name, now: g.hits, want: { host: op.host, source: sourceText(op), layout: layoutOf(op), table: g.model.extentText }, content: content || 'reproduces-the-source', proof: 'fresh-live-pivot-getters-and-cells' } };
+  return { ok, evidence: { pivot: op.name, now: g.hits, want: { host: op.pivotSheet, source: sourceText(op), layout: layoutOf(op), table: g.model.extentText }, content: content || 'reproduces-the-source', proof: 'fresh-live-pivot-getters-and-cells' } };
 }
 
 /** L3: every cell outside the extent; every sheet's charts / names and every OTHER pivot. */
 function verifyPreservation(op, before, after) {
   const m = sourceModel(before.primary, op);
   if (m.why) return { ok: false, evidence: { reason: m.why } };
-  const rest = cells.verifyPreservation({ ...op, selector: { ...op.selector, sheet: op.host }, cells: cellsOf(m.extent).map(a => ({ a })) }, before, after);
+  const rest = cells.verifyPreservation({ ...op, selector: { ...op.selector, sheet: op.pivotSheet }, cells: cellsOf(m.extent).map(a => ({ a })) }, before, after);
   if (!rest.ok && rest.evidence && rest.evidence.reason) return rest;
   const others = p => JSON.stringify(Object.fromEntries(Object.entries(p.objects || {}).map(([s, o]) => [s, o && Array.isArray(o.pivots) ? { ...o, pivots: o.pivots.filter(x => x.name !== op.name) } : o])));
   const kept = others(before.primary) === others(after.primary);
@@ -221,14 +224,29 @@ function verifyPreservation(op, before, after) {
 
 function wholeTaskChecks(op, finalObservation) {
   const v = verifyPrimitive(op, null, finalObservation);
-  return [{ name: `pivot ${op.name} over ${sourceText(op)} at ${op.host}!${addr(op.at.c, op.at.r)}`, ok: v.ok, detail: v.ok ? null : v.evidence }];
+  return [{ name: `pivot ${op.name} over ${sourceText(op)} at ${op.pivotSheet}!${addr(op.at.c, op.at.r)}`, ok: v.ok, detail: v.ok ? null : v.evidence }];
 }
 
 /** The source and the largest extent the source can give (one key per data row on both axes). */
 function windowsOf(op) {
   const n = op.grid.r2 - op.grid.r1;
-  return [{ sheet: op.selector.sheet, range: op.selector.range }, { sheet: op.host, range: rangeText({ c1: op.at.c, r1: op.at.r, c2: op.at.c + n + 1, r2: op.at.r + n + 2 }) }];
+  return [{ sheet: op.selector.sheet, range: op.selector.range }, { sheet: op.pivotSheet, range: rangeText({ c1: op.at.c, r1: op.at.r, c2: op.at.c + n + 1, r2: op.at.r + n + 2 }) }];
 }
 const liveExtras = () => ({ objectSheets: ['*'] });
 
-module.exports = { INTENTS, MAX_DATA_ROWS, SHEET, NAME, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras, sourceGrid, tableMismatch, cellsOf, overlaps };
+// GH #302 G3: a v2 step (field lists, pages, several data fields, layout, style) goes to pivots-v2.cjs; the 1 + 1 + Sum shape
+// above stays exactly as it was. The planned operation carries `v2: true`, and every later call routes on it.
+const v2 = require('./pivots-v2.cjs');
+const routed = {
+  plan: (step, index) => (v2.isV2(step) ? v2.plan(step, index) : plan(step, index)),
+  classify: (p, op) => (op && op.v2 ? v2.classify(p, op) : classify(p, op)),
+  resolve: (p, selector, ctx = {}) => (ctx.operation && ctx.operation.v2 ? v2.resolve(p, selector, ctx) : resolve(p, selector, ctx)),
+  lower: (op, target) => (op.v2 ? v2.lower(op, target) : lower(op, target)),
+  verifyPrimitive: (op, before, after) => (op.v2 ? v2.verifyPrimitive(op, before, after) : verifyPrimitive(op, before, after)),
+  verifyPreservation: (op, before, after) => (op.v2 ? v2.verifyPreservation(op, before, after) : verifyPreservation(op, before, after)),
+  wholeTaskChecks: (op, finalObservation) => (op.v2 ? v2.wholeTaskChecks(op, finalObservation) : wholeTaskChecks(op, finalObservation)),
+  windowsOf: op => (op.v2 ? v2.windowsOf(op) : windowsOf(op)),
+  liveExtras: op => (op && op.v2 ? v2.liveExtras(op) : liveExtras(op)),
+};
+
+module.exports = { INTENTS, MAX_DATA_ROWS, SHEET, NAME, ...routed, sourceGrid, tableMismatch, cellsOf, overlaps };

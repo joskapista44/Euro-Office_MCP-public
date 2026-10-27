@@ -26,12 +26,14 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
 const book = () => [{ name: 'Data', cells: { A1: { v: 'Name' }, C3: { v: 1 } }, merges: [] }];
 const task = (range, spec, sheet = 'Data') => ({ id: 'm7-f07bc', steps: [{ intent: 'format_range', sheet, range, format: spec }] });
 
-// M11.5a.4: indent / shrink are a Bridge WRITE served only on /6 -- this family's runs default to that runtime
+// M11.5a.4: indent / shrink are a Bridge WRITE -- this family's runs default to an ACCEPTED runtime
 // (the runtime gate itself: xlsx-b05w-runtime-gate.test.cjs).
-const RT6 = '9.3.4|euro-office-bridge-v1/9.3.4.60/6';
+// DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the historical /6 (9.3.4.60) is retired --
+// the accepted runtime is now the single 9.3.5.0/16 identity.
+const RT935 = '9.3.5|euro-office-bridge-v1/9.3.5.0/16';
 async function run(store, t, script = {}) {
   let n = 0;
-  const driver = createFakeXlsxDriver(store, { runtime: RT6, ...script });
+  const driver = createFakeXlsxDriver(store, { runtime: RT935, ...script });
   const options = { driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } };
   const result = await withSession(options, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));
   return { result, driver, m: result.metrics };

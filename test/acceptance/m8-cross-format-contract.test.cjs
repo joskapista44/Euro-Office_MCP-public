@@ -82,12 +82,12 @@ for (const [name, f] of Object.entries(FORMATS)) {
     assert.deepEqual(result.lifecycleTrace, FULL_WRITE_TRACE);
   });
 
-  test(`${name}: the dispatch throws -> UNCERTAIN_NOT_PERSISTED, no barrier, no forceSave, the durable store untouched`, async () => {
+  test(`${name}: the dispatch throws -> UNCERTAIN_MAY_PERSIST, no barrier, no forceSave, the durable store untouched`, async () => {
     const store = f.store();
     const before = JSON.stringify(store.durable);
     const { result, driver, m } = await run(f, store, { fault: 'throw' });
     assert.equal(result.ok, false);
-    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
     assert.deepEqual([m.writes, driver.calls.forceSave, driver.calls.close], [0, 0, 1]);
     assert.deepEqual(result.lifecycleTrace, NO_BARRIER_TRACE);
     assert.equal(JSON.stringify(store.durable), before);
@@ -121,12 +121,12 @@ async function runTask(f, task, script) {
 }
 
 for (const [name, f] of Object.entries(FORMATS)) {
-  test(`${name}: a post-dispatch L3 (preservation) FAIL -> UNCERTAIN_NOT_PERSISTED, no forceSave, the durable store untouched`, async () => {
+  test(`${name}: a post-dispatch L3 (preservation) FAIL -> UNCERTAIN_MAY_PERSIST, no forceSave, the durable store untouched`, async () => {
     const b = BRANCH[name].l3;
     const { result, driver, untouched } = await runTask(f, b.task(), b.script);
     assert.equal(result.ok, false);
     assert.match(result.outcome, /integral_preservation_not_proven/);
-    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
     assert.equal(driver.calls.forceSave, 0);
     assert.equal(untouched, true);
   });

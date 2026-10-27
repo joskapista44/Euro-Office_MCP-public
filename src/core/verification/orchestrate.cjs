@@ -70,7 +70,7 @@ async function verifyWholeTask({ handle, adapter, task, finalObservation }) {
  * L3. OPTIONAL. An adapter that does not declare preservation yields NOT_REQUIRED — which is
  * NOT a pass (owner requirement 12).
  */
-async function verifyPreservation({ handle, adapter, operation, before = null, after, required = false }) {
+async function verifyPreservation({ handle, adapter, operation, before = null, after, required = false, siblings = [] }) {
   if (typeof adapter.verifyPreservation !== 'function') {
     if (required) {
       return Object.freeze({
@@ -96,7 +96,10 @@ async function verifyPreservation({ handle, adapter, operation, before = null, a
   const result = await runHook({
     layer: LAYER.PRESERVATION,
     handle,
-    fn: () => adapter.verifyPreservation(handle, operation, before, after),
+    // GH #99: `siblings` = the OTHER operations dispatched in the same batch round -- their own L1 proves their
+    // windows, so this operation's L3 must not read their writes as a foreign change. Empty outside a batch round
+    // (sequential groups are singletons), and the adapter then sees exactly the call it always saw.
+    fn: () => adapter.verifyPreservation(handle, operation, before, after, { siblings }),
     context: { operationId: operation && operation.id, required },
   });
 

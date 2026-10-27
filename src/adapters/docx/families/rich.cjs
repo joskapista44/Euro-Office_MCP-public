@@ -43,6 +43,10 @@ const { norm, resolveTextUnit, textUnits } = require('../inventory.cjs');
  *   retry       an existing bookmark / link on the target is SATISFIED only when it is exactly the
  *               requested one; anything else on the target fails closed (never a second write).
  *   selector    text or ref only.
+ *
+ * GH #266 -- an optional `matchText` (the format_text pattern): the selector names the PARENT unit by its exact text, the bookmark / link covers `matchText`, which must occur EXACTLY ONCE in
+ * that unit. Without it everything above is unchanged (the whole unit). The lowering resolves the parent by the same exact document Search, then `paragraph.Search(matchText)` exactly once,
+ * and calls the SAME ApiRange.AddBookmark / AddHyperlink the whole-unit path calls (measured, rich probes 1-5) -- only the range is smaller; a sub-range inside a larger text is not yet LIVE-measured.
  */
 
 const BOOKMARK_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/;
@@ -61,7 +65,8 @@ function selectorCheck(step, index) {
 function plan(step, index) {
   const s = selectorCheck(step, index);
   if (!s.ok) return s;
-  const op = { id: step.id || `s${index}`, intent: step.intent, selector: step.selector, ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) };
+  if (step.matchText !== undefined && (typeof step.matchText !== 'string' || !step.matchText.trim())) return { ok: false, detail: `step ${index}: ${step.intent} matchText must be a non-empty string` };
+  const op = { id: step.id || `s${index}`, intent: step.intent, selector: step.selector, ...(step.matchText !== undefined ? { matchText: step.matchText } : {}), ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) };
   if (step.intent === 'add_bookmark') {
     const name = typeof step.name === 'string' ? step.name.trim() : '';
     if (!BOOKMARK_NAME.test(name)) return { ok: false, detail: `step ${index}: add_bookmark requires a name matching ${BOOKMARK_NAME}` };
@@ -97,6 +102,18 @@ function inlineTarget(primary, text) {
   return { ok: true, text: r.unit.text, kind: r.unit.kind, node: r.unit.node };
 }
 
+const occurrencesOf = (hay, needle) => { let n = 0; for (let i = hay.indexOf(needle); i >= 0; i = hay.indexOf(needle, i + 1)) n += 1; return n; };
+
+/** The parent unit (inlineTarget) and, with a matchText, the text the bookmark / link covers: it must occur exactly once in the parent. `covered` = the covered text. */
+function rangeTarget(primary, op) {
+  const t = inlineTarget(primary, keyText(op));
+  if (!t.ok) return t;
+  if (op.matchText === undefined) return { ...t, covered: t.text };
+  const n = occurrencesOf(t.text, op.matchText);
+  if (n !== 1) return { ok: false, reason: n === 0 ? 'match-not-found' : 'match-ambiguous', count: n };
+  return { ...t, covered: op.matchText };
+}
+
 const docOf = primary => (primary && primary.document) || null;
 
 function bookmarksNamed(primary, name) {
@@ -114,6 +131,42 @@ function bookmarksNamed(primary, name) {
 const tipOf = op => op.tooltip || op.url;
 const linkMatches = (l, op, text) => l.url === op.url && l.tip === tipOf(op) && norm(l.text) === norm(text);
 
+/**
+ * GH #266 gate geometry (g266v2 ROUND9: a bookmark INSIDE a link -> DISPATCHED_OUTCOME_UNKNOWN, reads unproven). The bookmark range is [start, end) in the unit text (the whole unit without
+ * matchText; matchText occurs exactly once, rangeTarget). Every occurrence of every link text in the unit is tested against it, and ANY intersection refuses, named by the geometry:
+ *   bookmark-target-holds-a-hyperlink     the range ENCLOSES a link (link inside the range, incl. an equal range)
+ *   bookmark-target-inside-a-hyperlink    the range lies INSIDE a link (link strictly larger on at least one side)
+ *   bookmark-target-overlaps-a-hyperlink  partial overlap
+ * A link text not found verbatim in the unit text (whitespace normalisation) falls back to the normalised containment test in both directions (enclose / inside); a PARTIAL overlap of such a
+ * link is not detectable from the texts and stays measured by the g266 probe. A link with an empty text is ignored (as before); an unreadable link list is not a reason here.
+ */
+function hyperlinkOverlap(t, matchText) {
+  const links = Array.isArray(t.node.hyperlinks) ? t.node.hyperlinks.filter(l => norm(l.text) !== '') : [];
+  const start = matchText === undefined ? 0 : t.text.indexOf(matchText);
+  const end = start + (matchText === undefined ? t.text.length : matchText.length);
+  const found = { holds: [], inside: [], overlaps: [] };
+  for (const l of links) {
+    const text = String(l.text);
+    let placed = false;
+    for (let at = t.text.indexOf(text); at >= 0; at = t.text.indexOf(text, at + 1)) {
+      placed = true;
+      const le = at + text.length;
+      if (!(at < end && start < le)) continue;
+      if (start <= at && le <= end) found.holds.push(l);
+      else if (at <= start && end <= le) found.inside.push(l);
+      else found.overlaps.push(l);
+    }
+    if (!placed) {
+      if (norm(t.covered).includes(norm(l.text))) found.holds.push(l);
+      else if (norm(l.text).includes(norm(t.covered))) found.inside.push(l);
+    }
+  }
+  if (found.holds.length) return { reason: 'bookmark-target-holds-a-hyperlink', links: found.holds };
+  if (found.inside.length) return { reason: 'bookmark-target-inside-a-hyperlink', links: found.inside };
+  if (found.overlaps.length) return { reason: 'bookmark-target-overlaps-a-hyperlink', links: found.overlaps };
+  return null;
+}
+
 // ---- classify / resolve -------------------------------------------------------------------------
 
 /**
@@ -125,19 +178,29 @@ const linkMatches = (l, op, text) => l.url === op.url && l.tip === tipOf(op) && 
  *   otherwise                                                              -> APPLY
  */
 function classify(primary, op) {
-  const t = inlineTarget(primary, keyText(op));
+  const t = rangeTarget(primary, op);
   if (!t.ok) return { state: 'FAIL_CLOSED', evidence: { reason: `${op.intent}-${t.reason}`, count: t.count } };
   const d = docOf(primary);
   if (op.intent === 'add_bookmark') {
     const same = bookmarksNamed(primary, op.name);
     if (!same) return { state: 'FAIL_CLOSED', evidence: { reason: 'bookmarks-unreadable', text: t.text } };
-    if (same.length === 1 && norm(same[0].text) === norm(t.text)) return { state: 'SATISFIED', evidence: { text: t.text, name: op.name, proof: 'fresh-live-bookmark-range-is-target' } };
+    if (same.length === 1 && norm(same[0].text) === norm(t.covered)) return { state: 'SATISFIED', evidence: { text: t.text, name: op.name, proof: 'fresh-live-bookmark-range-is-target' } };
     if (same.length) return { state: 'FAIL_CLOSED', evidence: { reason: 'bookmark-name-exists', name: op.name, ranges: same.map(b => b.text) } };
+    // GH #266 (g266v1 ROUND4B, LIVE): a bookmark range that ENCLOSES a hyperlink LANDS in the file and then every rich read of the document (bookmarks, hyperlinks) is unreadable, even in a fresh
+    // process -- stopped here, before any dispatch. Only the bookmark side is gated: a bookmark first and a link over the same unit afterwards is LIVE-green (M4-W3 w3_mixed). A hyperlink read that is
+    // unreadable is not a reason here (the unreadable case keeps its old behaviour); a bookmark range INSIDE a link, or half over one, is not detectable from the texts alone and is measured by the g266 probe.
+    const hit = hyperlinkOverlap(t, op.matchText);
+    if (hit) return { state: 'FAIL_CLOSED', evidence: { reason: hit.reason, text: t.text, ...(op.matchText !== undefined ? { matchText: op.matchText } : {}), links: hit.links.map(l => l.url) } };
   } else {
     const links = t.node.hyperlinks;
     if (!Array.isArray(links)) return { state: 'FAIL_CLOSED', evidence: { reason: 'hyperlinks-unreadable', text: t.text } };
-    if (links.length === 1 && linkMatches(links[0], op, t.text)) return { state: 'SATISFIED', evidence: { text: t.text, url: op.url, proof: 'fresh-live-hyperlink-is-requested' } };
-    if (links.length) return { state: 'FAIL_CLOSED', evidence: { reason: 'target-already-linked', text: t.text, links: links.map(l => l.url) } };
+    if (op.matchText !== undefined) {
+      const sameRange = links.filter(l => norm(l.text) === norm(t.covered));
+      if (sameRange.length === 1 && linkMatches(sameRange[0], op, t.covered)) return { state: 'SATISFIED', evidence: { text: t.text, matchText: op.matchText, url: op.url, proof: 'fresh-live-hyperlink-is-requested' } };
+      const overlap = links.filter(l => norm(l.text).includes(norm(t.covered)) || norm(t.covered).includes(norm(l.text)));
+      if (overlap.length) return { state: 'FAIL_CLOSED', evidence: { reason: 'target-already-linked', text: t.text, matchText: op.matchText, links: overlap.map(l => l.url) } };
+    } else if (links.length === 1 && linkMatches(links[0], op, t.text)) return { state: 'SATISFIED', evidence: { text: t.text, url: op.url, proof: 'fresh-live-hyperlink-is-requested' } };
+    else if (links.length) return { state: 'FAIL_CLOSED', evidence: { reason: 'target-already-linked', text: t.text, links: links.map(l => l.url) } };
     if (!t.node.props) return { state: 'FAIL_CLOSED', evidence: { reason: 'run-properties-unreadable', text: t.text } };
   }
   if (!d || d.inMainBody !== true) return { state: 'FAIL_CLOSED', evidence: { reason: 'editor-not-in-main-body', text: t.text, inMainBody: d ? d.inMainBody : null } };
@@ -166,8 +229,8 @@ function preDispatchCheck(op, target) {
 
 function lower(op, target) {
   const meta = Object.freeze(op.intent === 'add_bookmark'
-    ? { family: 'rich-inline', action: 'bookmark', targetText: target.text, name: op.name }
-    : { family: 'rich-inline', action: 'link', targetText: target.text, url: op.url, tooltip: tipOf(op) });
+    ? { family: 'rich-inline', action: 'bookmark', targetText: target.text, name: op.name, ...(op.matchText !== undefined ? { matchText: op.matchText } : {}) }
+    : { family: 'rich-inline', action: 'link', targetText: target.text, url: op.url, tooltip: tipOf(op), ...(op.matchText !== undefined ? { matchText: op.matchText } : {}) });
   return { kind: 'callCommand', body: commandBody(meta), meta };
 }
 
@@ -178,13 +241,23 @@ function lower(op, target) {
  * effective text properties: read before, restored after (source parity, probe 3).
  */
 function commandBody(meta) {
+  // the whole-unit lowering is the one measured in rich probes 1-5, byte for byte; only a matchText step gets the in-paragraph range search (GH #266)
+  const EXACT = meta.matchText === undefined
+    ? "const exact = () => (doc.Search(m.targetText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.targetText);"
+    : `const exact = () => {
+    const parents = (doc.Search(m.targetText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.targetText);
+    if (parents.length !== 1) return [];
+    const paragraph = parents[0].GetParagraph(0);
+    if (!paragraph || typeof paragraph.Search !== 'function') return [];
+    return (paragraph.Search(m.matchText, true) || []).filter(r => String(r.GetText(textOpts) || '') === m.matchText);
+  };`;
   return `
 try {
   const m = ${JSON.stringify(meta)};
   const textOpts = { Numbering: false };
   const doc = Api.GetDocument();
   if (!doc || doc.GetCurrentFootEndnote() !== null) return;
-  const exact = () => (doc.Search(m.targetText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.targetText);
+  ${EXACT}
   const hits = exact();
   if (hits.length !== 1) return;
   if (m.action === 'bookmark') {
@@ -205,17 +278,18 @@ try {
 
 /** L1 in the FRESH after-state. */
 function verifyPrimitive(op, before, after) {
-  const b = inlineTarget(before && before.primary, keyText(op));
+  const b = rangeTarget(before && before.primary, op);
   if (!b.ok) return { ok: false, evidence: { reason: `before-${b.reason}` } };
   if (op.intent === 'add_bookmark') {
     const same = bookmarksNamed(after.primary, op.name);
-    const ok = !!same && same.length === 1 && norm(same[0].text) === norm(b.text);
-    return { ok, evidence: { text: b.text, name: op.name, observed: same ? same.map(x => x.text) : 'unread' } };
+    const ok = !!same && same.length === 1 && norm(same[0].text) === norm(b.covered);
+    return { ok, evidence: { text: b.text, ...(op.matchText !== undefined ? { matchText: op.matchText } : {}), name: op.name, observed: same ? same.map(x => x.text) : 'unread' } };
   }
   const a = inlineTarget(after.primary, b.text);
   const links = a.ok ? a.node.hyperlinks : null;
-  const ok = Array.isArray(links) && links.length === 1 && linkMatches(links[0], op, b.text);
-  return { ok, evidence: { text: b.text, expected: { url: op.url, tooltip: tipOf(op) }, observed: links || (a.ok ? 'unread' : a.reason) } };
+  const ranged = Array.isArray(links) && op.matchText !== undefined ? links.filter(l => norm(l.text) === norm(b.covered)) : links;
+  const ok = Array.isArray(ranged) && ranged.length === 1 && linkMatches(ranged[0], op, b.covered);
+  return { ok, evidence: { text: b.text, ...(op.matchText !== undefined ? { matchText: op.matchText } : {}), expected: { url: op.url, tooltip: tipOf(op) }, observed: links || (a.ok ? 'unread' : a.reason) } };
 }
 
 // ---- L3 round trip: everything the link must not touch, as far as the live read observes it ----
@@ -227,7 +301,9 @@ function sameMultiset(a, b) {
   for (const k of new Set([...x.keys(), ...y.keys()])) if ((x.get(k) || 0) !== (y.get(k) || 0)) diff.push({ key: k, before: x.get(k) || 0, after: y.get(k) || 0 });
   return { ok: diff.length === 0, diff };
 }
-const unitKey = u => JSON.stringify([u.kind, norm(u.text), u.node.hyperlinks || 'unread', u.node.noteRefs || 'unread']);
+// a NAMED unreadable field (a string, 'UNOBSERVABLE:<call>') is the same 'unread' state as an absent one: the message text must not decide whether two units are equal
+const knownField = v => (v && typeof v === 'object' ? v : 'unread');
+const unitKey = u => JSON.stringify([u.kind, norm(u.text), knownField(u.node.hyperlinks), knownField(u.node.noteRefs)]);
 const tableKey = b => JSON.stringify((b.rows || []).map(r => r.map(c => norm(c.text))));
 const imageKey = i => JSON.stringify([i.src || null, i.alt || null, i.title || null]);
 
@@ -267,7 +343,7 @@ function roundTrip(before, after, targetText) {
  */
 function verifyPreservation(op, before, after) {
   if (op.intent !== 'add_link') return null;
-  const b = inlineTarget(before && before.primary, keyText(op));
+  const b = rangeTarget(before && before.primary, op);
   if (!b.ok) return { ok: false, evidence: { reason: `before-${b.reason}` } };
   const a = inlineTarget(after.primary, b.text);
   if (!a.ok) return { ok: false, evidence: { targetText: b.text, reason: `after-${a.reason}` } };
@@ -276,20 +352,30 @@ function verifyPreservation(op, before, after) {
   const bp = pick(b.node.props);
   const ap = pick(a.node.props);
   const changed = TEXT_KEYS.filter(k => JSON.stringify(bp[k]) !== JSON.stringify(ap[k]));
-  const refsKept = !!b.node.noteRefs && !!a.node.noteRefs && JSON.stringify(b.node.noteRefs) === JSON.stringify(a.node.noteRefs);
+  const refsKept = knownField(b.node.noteRefs) !== 'unread' && knownField(a.node.noteRefs) !== 'unread' && JSON.stringify(b.node.noteRefs) === JSON.stringify(a.node.noteRefs);   // two NAMED-unreadable counts are not 'kept'
   const rt = roundTrip(before.primary, after.primary, b.text);
-  return { ok: changed.length === 0 && refsKept && rt.ok, evidence: { targetText: b.text, before: bp, after: ap, changed, noteRefs: { before: b.node.noteRefs, after: a.node.noteRefs, kept: refsKept }, roundTrip: rt.parts, expectationSource: 'derived-from-fresh-pre-mutation-observation' } };
+  // GH #266: the parent's OTHER links (a range link shares its unit with them) are exactly the ones it had
+  let othersKept = true;
+  if (op.matchText !== undefined) {
+    const linkKey = l => `${l.url}|${l.tip}|${norm(l.text)}`;
+    const bl = Array.isArray(b.node.hyperlinks) ? b.node.hyperlinks.map(linkKey) : null;
+    const al = Array.isArray(a.node.hyperlinks) ? a.node.hyperlinks.filter(l => norm(l.text) !== norm(b.covered)).map(linkKey) : null;
+    othersKept = !!bl && !!al && sameMultiset(bl, al).ok;
+  }
+  return { ok: changed.length === 0 && refsKept && rt.ok && othersKept, evidence: { targetText: b.text, ...(op.matchText !== undefined ? { matchText: op.matchText, otherLinksKept: othersKept } : {}), before: bp, after: ap, changed, noteRefs: { before: b.node.noteRefs, after: a.node.noteRefs, kept: refsKept }, roundTrip: rt.parts, expectationSource: 'derived-from-fresh-pre-mutation-observation' } };
 }
 
 /** L2: the final state still carries the requested bookmark / link on the target. */
 function wholeTaskChecks(op, finalObservation) {
-  const t = inlineTarget(finalObservation.primary, keyText(op));
+  const t = rangeTarget(finalObservation.primary, op);
+  const on = op.matchText !== undefined ? `"${op.matchText}" in "${keyText(op)}"` : `"${keyText(op)}"`;
   if (op.intent === 'add_bookmark') {
     const same = bookmarksNamed(finalObservation.primary, op.name);
-    return [{ name: `${op.id}: bookmark "${op.name}" exactly once, on "${keyText(op)}"`, ok: t.ok && !!same && same.length === 1 && norm(same[0].text) === norm(t.text) }];
+    return [{ name: `${op.id}: bookmark "${op.name}" exactly once, on ${on}`, ok: t.ok && !!same && same.length === 1 && norm(same[0].text) === norm(t.covered) }];
   }
   const links = t.ok ? t.node.hyperlinks : null;
-  return [{ name: `${op.id}: "${keyText(op)}" carries exactly the link ${op.url}`, ok: Array.isArray(links) && links.length === 1 && linkMatches(links[0], op, t.text) }];
+  const ranged = Array.isArray(links) && op.matchText !== undefined ? links.filter(l => norm(l.text) === norm(t.covered)) : links;
+  return [{ name: `${op.id}: ${on} carries exactly the link ${op.url}`, ok: Array.isArray(ranged) && ranged.length === 1 && linkMatches(ranged[0], op, t.covered) }];
 }
 
 // the target text is unchanged by both intents, so a later step may name it by ref

@@ -315,4 +315,4 @@ function wholeTaskChecks(op, finalObservation) {
 const windowsOf = () => [];
 const liveExtras = () => ({ printSheets: ['*'] });
 
-module.exports = { INTENTS, B10_BRIDGE_WRITE_RUNTIMES, bridgeArgs, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };
+module.exports = { INTENTS, PAPER, B10_BRIDGE_WRITE_RUNTIMES, bridgeArgs, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };

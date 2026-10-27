@@ -14,9 +14,15 @@ const path = require('node:path');
 
 const list = require('../../src/adapters/docx/families/list.cjs');
 const driver = require('../../src/drivers/eurooffice/docx-driver.cjs');
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): V1 (historical 9.3.4.60 base, no B18
+// capability) stays as the NEGATIVE control -- it now mismatches at the RUNTIME level (9.3.4 is not accepted
+// at all), not just the patch level. V2's role (the POSITIVE, capability-carrying block) is now played by
+// the 9.3.5.0 block -- byte-identical B18 handler, proven by docx-b18-write-handler-identity.test.cjs -- since
+// the historical 9.3.4.60/2 identity is retired. GH #292 S4 D-state: the 9.3.5.0 word /5 block (the only accepted runtime;
+// its B18 handler byte-identical to /3 and /4).
 const DIR = path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.4.60', 'euro-office-bridge-word-v1');
 const V1 = fs.readFileSync(path.join(DIR, 'bridge-block.js'), 'utf8');
-const V2 = fs.readFileSync(path.join(DIR, 'rev2-candidate', 'bridge-block.js'), 'utf8');
+const V2 = fs.readFileSync(path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.5.0', 'euro-office-bridge-word-v1', 'rev5-candidate', 'bridge-block.js'), 'utf8');
 
 /** fake Word document + the REAL bridge block installed on the same Api; every RemoveNumPr and bridge write() recorded. */
 function editor(block, paras) {
@@ -58,7 +64,7 @@ test('word /2: outdent_list_item at level 0 is the same removal (one bridge writ
 test('word /1 (no Bridge WRITE): the gate refuses BEFORE any write -- zero removals, mutation NONE, dispatch failed', () => {
   const env = editor(V1, PARAS);
   const r = runIn(env, command('remove_list', 'Elso elem', 0));
-  assert.deepEqual([r.ok, r.stage, r.reason, r.mutation], [false, 'bridge-write-gate', 'PATCH_VERSION_MISMATCH', 'NONE']);
+  assert.deepEqual([r.ok, r.stage, r.reason, r.mutation], [false, 'bridge-write-gate', 'RUNTIME_VERSION_MISMATCH', 'NONE']);
   assert.deepEqual([env.calls.write, env.calls.remove], [0, []]);
   const d = driver.b18DispatchResult({ ok: true, outcome: 'command-completed', result: r });
   assert.deepEqual([d.ok, d.dispatched, d.outcome], [false, true, 'b18-bridge-write-failed']);

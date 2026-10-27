@@ -5,7 +5,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { BRIDGE_CLIENT_SRC, BRIDGE_HYDRATIONS, BRIDGE_HYDRATE_CLIENT_SRC } = require('../../src/drivers/eurooffice/ds-bridge.cjs');
-const { RUNTIMES } = require('../../src/core/runtime-identity.cjs');
 const { OTHER_PATCH } = require('../fakes/ds-bridge-runtime.cjs');
 
 /**
@@ -20,6 +19,12 @@ const BLOCK_PATH = path.join(__dirname, '..', '..', 'documentserver-patches', '9
 const SOURCE = fs.readFileSync(BLOCK_PATH, 'utf8').replace(/,\s*$/, '');
 const bridgeOf = api => new Function('Api', `${SOURCE}; return Api.GetEuroOfficeBridge();`)(api);
 const CAP = BRIDGE_HYDRATIONS.SHEET_MODEL_READY;
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): this file tests the ACTUAL shipped /5 block's
+// hydration mechanics in isolation, via an EXPLICIT expected-runtime param -- not the currently-accepted list
+// (RUNTIMES.xlsx is now the retired-/5-block's historical identity no longer matches). SERVED_RUNTIME names the
+// identity THIS SOURCE block actually reports, so the "MCP client" tests below stay meaningful regardless of
+// what is currently accepted.
+const SERVED_RUNTIME = { documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-v1/9.3.4.60/5' };
 
 /** A fake workbook: sheet `name` at `index`; the view creator returns a view only for `viewIndex`; every call logged. */
 function hydrationApi({ name = 'N', index = 1, viewIndex = 1, creator, model } = {}) {
@@ -29,7 +34,10 @@ function hydrationApi({ name = 'N', index = 1, viewIndex = 1, creator, model } =
   return { api: { GetSheet: n => (n === name ? ws : null) }, calls };
 }
 
-const hydrate = (api, cap = CAP, runtime = RUNTIMES.xlsx, args = { sheet: 'N' }) => new Function('Api',
+// DS9346: the default `runtime` matches the identity THIS SOURCE block (the historical /5) actually reports --
+// not RUNTIMES.xlsx (now the accepted 9.3.5 identity), so the fixtures below (built from THIS block's own
+// manifest()) keep exercising CAPABILITY_*/UNEXPECTED_SHAPE/etc. rather than failing earlier at the runtime gate.
+const hydrate = (api, cap = CAP, runtime = SERVED_RUNTIME, args = { sheet: 'N' }) => new Function('Api',
   `${BRIDGE_HYDRATE_CLIENT_SRC}; return __eoBridgeHydrate(${JSON.stringify(cap.id)}, ${cap.version}, ${JSON.stringify(runtime)}, ${JSON.stringify(args)});`)(api);
 
 test('manifest /5: exactly one sheet.model.ensureReady/v1, kind RUNTIME_HYDRATION, mutation EPHEMERAL_VIEW_ONLY -- never READ', () => {
@@ -71,10 +79,12 @@ test('FAIL CLOSED: bad-args, sheet-not-found, model-threw, view-creator-missing,
 test('MCP client: PASS on the accepted runtime; the previous revision (/4) refuses before the bridge is asked', () => {
   const { api, calls } = hydrationApi();
   bridgeOf(api); // installs the shipped block's Api.GetEuroOfficeBridge on this fake
-  assert.deepEqual(hydrate(api), { ok: true }, 'POSITIVE CONTROL on /5');
-  assert.equal(OTHER_PATCH, 'euro-office-bridge-v1/9.3.4.60/4');
-  assert.deepEqual(hydrate(api, CAP, { ...RUNTIMES.xlsx, patchVersion: OTHER_PATCH }), { ok: false, reason: 'PATCH_VERSION_MISMATCH' });
-  assert.deepEqual(hydrate(api, CAP, { ...RUNTIMES.xlsx, documentServerVersion: '9.3.5' }), { ok: false, reason: 'RUNTIME_VERSION_MISMATCH' });
+  assert.deepEqual(hydrate(api, CAP, SERVED_RUNTIME), { ok: true }, 'POSITIVE CONTROL on /5');
+  // DS9346: OTHER_PATCH (test/fakes/ds-bridge-runtime.cjs) now names a 9.3.5.0 revision -- still simply a
+  // DIFFERENT patch than SERVED_RUNTIME's, which is all this test needs (PATCH_VERSION_MISMATCH below).
+  assert.equal(OTHER_PATCH, 'euro-office-bridge-v1/9.3.5.0/4');
+  assert.deepEqual(hydrate(api, CAP, { ...SERVED_RUNTIME, patchVersion: OTHER_PATCH }), { ok: false, reason: 'PATCH_VERSION_MISMATCH' });
+  assert.deepEqual(hydrate(api, CAP, { ...SERVED_RUNTIME, documentServerVersion: '9.3.5' }), { ok: false, reason: 'RUNTIME_VERSION_MISMATCH' });
   assert.equal(calls.length, 1, 'only the positive control reached the view creator');
 });
 

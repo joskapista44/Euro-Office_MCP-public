@@ -354,9 +354,9 @@ test('DIRECT_BASIC_AUTH_PRODUCT_CALLS=0: the product runtime never builds the le
 
 // M11.2 left the exposure unchanged; M11.3b.2 released the two READ tools; M11.4b.1 (owner, owner channel) adds
 // xlsx_execute_task -- docx_execute_task stays withheld (exact-set guard: test/static/tool-exposure-exact-set-guard.test.cjs)
-test('tool exposure: product_status + the two READ tools + xlsx_execute_task exposed, docx_execute_task withheld', () => {
-  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task']);
-  assert.deepEqual(TOOL_ROWS.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'YES').map(r => r.TOOL).sort(), ['docx_execute_task']);
+test('tool exposure: product_status + the two READ tools + xlsx_execute_task + (GH #228 proposed state) docx_execute_task exposed, no row withheld', () => {
+  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(TOOL_ROWS.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'YES').map(r => r.TOOL).sort(), []);
 });
 
 test('M12: the own token is read from EURO_OFFICE_MCP_TOKEN_PATH at call time and only travels as the Bearer header', async () => {

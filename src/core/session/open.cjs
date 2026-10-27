@@ -42,6 +42,19 @@ async function openSession({ driver, url, user, pass, fileId, adapterKind, metri
 }
 
 /**
+ * reuseSession -- GH #100 U4. The handle of a KEPT session for a new call: the same driver and the descriptor its open() returned, a fresh
+ * handle (fresh metrics, fresh mutation generation). It opens nothing; the open spans are marked back to back, so a reused call reports ~0 open.
+ */
+function reuseSession({ driver, opened, fileId, adapterKind, metrics }) {
+  metrics.clock.mark('openEntry');
+  const handle = new SessionHandle({ id: opened.id, fileId, adapterKind, frame: opened.frame || null, apiWhere: opened.apiWhere || null, metrics });
+  bindDriver(handle, driver);
+  metrics.clock.mark('handleReturned').span('sessionOpenMs', 'openEntry', 'handleReturned');
+  handle.openedMs = metrics.clock.spans().sessionOpenMs;
+  return handle;
+}
+
+/**
  * Readiness is a SEMANTIC probe supplied by the adapter — the only adapter call allowed before
  * READY (M0 section 4). It polls a condition; it never sleeps a fixed interval, because a fixed
  * delay is not a correctness mechanism (PROJECT invariant 6, owner requirement 17).
@@ -116,4 +129,20 @@ async function closeSession(handle) {
   }
 }
 
-module.exports = { openSession, awaitReady, closeSession, defaultWait };
+/**
+ * releaseSession -- GH #100 U4. The call end of a session that STAYS open (the driver's release(), U1): the same result shape as closeSession,
+ * with outcome 'released'. Never throws; a release that is not ok is a failed call end and the caller closes the session instead.
+ */
+async function releaseSession(handle) {
+  const { driverOf } = require('./internal.cjs');
+  try {
+    const released = await driverOf(handle).release();
+    const confirmation = (released && released.confirmation) || null;
+    if (released && released.ok === true) return { ok: true, outcome: 'released', detail: released.detail || null, confirmation };
+    return { ok: false, outcome: 'release-failed', detail: (released && released.detail) || 'unknown', confirmation };
+  } catch (err) {
+    return { ok: false, outcome: 'release-threw', detail: err.message };
+  }
+}
+
+module.exports = { openSession, reuseSession, releaseSession, awaitReady, closeSession, defaultWait };

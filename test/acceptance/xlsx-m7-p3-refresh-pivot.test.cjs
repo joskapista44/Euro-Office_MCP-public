@@ -27,7 +27,7 @@ const book = () => [
   { name: 'Host', cells: { A1: { v: 'keep' } } },
   { name: 'Other', cells: { A1: { v: 'x' } } },
 ];
-const CREATE = { intent: 'create_pivot', name: 'PE', sheet: 'Src', range: 'A1:C7', rows: 'reg', columns: 'prod', sum: 'amt', host: 'Host', at: 'H3' };
+const CREATE = { intent: 'create_pivot', name: 'PE', sheet: 'Src', range: 'A1:C7', rows: 'reg', columns: 'prod', sum: 'amt', pivotSheet: 'Host', at: 'H3' };
 const create = (over = {}) => ({ id: 'm7-p3-seed', steps: [{ ...CREATE, ...over }] });
 const STEP = { intent: 'refresh_pivot', pivot: 'PE', sourceSheet: 'Src', sourceRange: 'A1:C7' };
 const one = (over = {}) => ({ id: 'm7-p3', steps: [{ ...STEP, ...over }] });
@@ -142,7 +142,7 @@ test('another pivot (another cache) is unchanged: refreshing PE leaves PQ\'s ide
 test('refused before the write: no such pivot, an ambiguous name, a header that is not the pivot\'s fields, a grown extent over a non-empty cell, an extent over the source, an unread raw identity', async () => {
   await refused(await seeded(), one({ pivot: 'Nope' }), 'xlsx-pivot-not-found');
   const amb = await seeded();
-  assert.equal((await run(amb, create({ host: 'Other', at: 'H3' }))).result.ok, false, 'create refuses the taken name');
+  assert.equal((await run(amb, create({ pivotSheet: 'Other', at: 'H3' }))).result.ok, false, 'create refuses the taken name');
   sheet(amb, 'Other').objects = { charts: [], names: [], pivots: [{ ...tableOf(amb) }] };
   await refused(amb, one(), 'xlsx-pivot-name-ambiguous');
   const hdr = await seeded();
@@ -151,7 +151,7 @@ test('refused before the write: no such pivot, an ambiguous name, a header that 
   const full = await seeded();
   sheet(full, 'Host').cells.L8 = { v: 'busy' };
   await refused(full, one({ sourceSheet: 'Src2' }), 'xlsx-pivot-destination-not-empty');
-  const over = await seeded({ host: 'Src2', at: 'A20' }); // table A20:D24
+  const over = await seeded({ pivotSheet: 'Src2', at: 'A20' }); // table A20:D24
   sheet(over, 'Src2').cells = { ...sheet(over, 'Src2').cells, ...Object.fromEntries(MORE.flatMap((r, i) => r.map((v, j) => [`${'CDE'[j]}${22 + i}`, { v }]))) };
   await refused(over, one({ sourceSheet: 'Src2', sourceRange: 'C22:E28' }), 'xlsx-pivot-destination-overlaps-source');
   const raw = await seeded();

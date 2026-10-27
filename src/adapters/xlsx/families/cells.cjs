@@ -23,8 +23,8 @@ const { observedStyleChanges } = require('../style-axis.cjs');
  *     = + - @ ' (formula / injection / apostrophe prefix), a numeric-, boolean- or date-looking string,
  *     an empty string and surrounding whitespace. The source let `=...` strings through and failed only
  *     after the write (B-C01);
- *   - writing over a cell that holds a formula, and writing into a merged area, are refused (the source
- *     had no such guard);
+ *   - writing over a cell that holds a formula, and writing into a NON-anchor cell of a merged area, are refused (the
+ *     source had no such guard); the anchor (top-left) of a merged area is writable (X-M01);
  *   - L3 is real: every OTHER read cell of the workbook keeps its formula, and a non-formula cell keeps
  *     its value (a formula cell's value may follow its inputs); the source read nothing outside the range;
  *   - the retry is the terminal state read fresh (classifyOperation), never a retry token.
@@ -32,8 +32,8 @@ const { observedStyleChanges } = require('../style-axis.cjs');
  * M7 S26 / S28 (owner M7 GO 2026-10-03; tier D probe docs/evidence/M7-D-PROBE.md, session = reopen): a TYPED value in
  * the values matrix --
  *   { text: '<string>' }                  -> SetNumberFormat('@') THEN SetValue(text): the exact string is kept
- *                                           (001, 1/2, TRUE, ' a ', 2026-10-03 measured; COUNT 0, nf '@');
- *                                           a text starting with = + - @ stays refused (=x reads back as a formula);
+ *                                           (001, 1/2, TRUE, ' a ', 2026-10-03 measured; COUNT 0, nf '@'; X-T01 LIVE:
+ *                                           1. 001 1E10 01/02 =1+1 +1 -1 and edge whitespace, stored as a shared string);
  *                                           the reverse order coerces (measured), so the order is the contract
  *   { date: 'YYYY-MM-DD', format }         -> SetValue(serial) THEN SetNumberFormat(format), format one of the measured
  *   { date: 'YYYY-MM-DDTHH:MM', format }      masks (DATE_MASKS); the serial is computed here (1900 system,
@@ -44,11 +44,17 @@ const { observedStyleChanges } = require('../style-axis.cjs');
 
 const MAX_CELLS = 1000;
 const MAX_TEXT = 32767;
-const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range', 'values', 'formulas']);
+const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range', 'values', 'formulas', 'replaceFormulas']);
 const MAX_FORMULA = 8192;
 const ERROR_VALUE = /^#(DIV\/0!|NAME\?|REF!|VALUE!|N\/A|NUM!|NULL!|GETTING_DATA)$/;
 
-/** A formula the planner accepts: '=' first, tokenizable, bounded, no external [book] reference. */
+/**
+ * A formula the planner accepts: '=' first, tokenizable, bounded, no external [book] reference. GH #298 C: a structured
+ * (table) reference IS accepted (sheetRefs tells it from a book) -- the LIVE design probe
+ * (docs/evidence/gh298-c-structured-ref-probe-20261026.json) measured the read-back keeping it (case folded to the
+ * table's own, which the canonical comparison already ignores) and an UNRESOLVABLE one (no such table, [@Col] outside a
+ * table) silently dropped by the engine: the cell does not take it, so L1 fails it, named, never a guessed success.
+ */
 function formulaProblem(f) {
   if (typeof f !== 'string' || !f.startsWith('=')) return 'a formula must be a string starting with =';
   if (f.length > MAX_FORMULA) return `formula longer than ${MAX_FORMULA} characters`;
@@ -89,9 +95,9 @@ function typedValue(t) {
 function textValue(text) {
   if (typeof text !== 'string' || text === '') return { problem: 'text must be a non-empty string' };
   if (text.length > MAX_TEXT) return { problem: `text longer than ${MAX_TEXT} characters` };
-  // a text '=x' reads back with GetFormula '=x', which the observation cannot tell from a formula (measured); the
-  // + - @ prefixes are not measured -- all four stay refused
-  if (/^[=+\-@]/.test(text)) return { problem: 'a text starting with = + - @ is not supported (read back as a formula / not measured)' };
+  // X-T01 (LIVE xt01-r1): the native Text type ('@' first, then the value) stores = + - prefixed text, number-, date-
+  // and whitespace-edged text EXACTLY (a shared string, no formula, no apostrophe, no quotePrefix); the observation tells
+  // a '=...' text from a formula by nf '@' + COUNT 0 + GetValue === GetFormula (inventory.cjs normalizeCell)
   return { v: text, nf: '@', order: 'nf-first', kind: 'text' };
 }
 
@@ -119,8 +125,9 @@ function valueProblem(v) {
   if (typeof v !== 'string') return `unsupported value type ${v === null ? 'null' : typeof v} (values only: finite numbers and plain text)`;
   if (v === '') return 'empty string (clearing is a separate operation)';
   if (v.length > MAX_TEXT) return `longer than ${MAX_TEXT} characters`;
-  if (v !== v.trim()) return 'leading or trailing whitespace';
-  for (const [re, why] of COERCIBLE) if (re.test(v)) return why;
+  const TYPED = " -- to store it exactly as text use the typed value { text: '...' } (the native Text cell type)";
+  if (v !== v.trim()) return `leading or trailing whitespace${TYPED}`;
+  for (const [re, why] of COERCIBLE) if (re.test(v)) return `${why}${TYPED}`;
   return null;
 }
 
@@ -157,6 +164,8 @@ function plan(step, index) {
       cells: Object.freeze(cells),
       footprint: Object.freeze({ value: rangeText(g) }), // M7 S3: what the step modifies, per axis
       preservationMode: 'PRIMITIVE_INTEGRAL',
+      // GitHub #79: a formula cell is replaced by a DIFFERENT formula only when the step says so explicitly
+      replaceFormulas: !!step.replaceFormulas,
     },
   };
 }
@@ -231,9 +240,16 @@ function gate(primary, op) {
   for (const { a } of op.cells) {
     const cell = cellAt(primary, op.selector.sheet, a);
     if (!cell) return { ok: false, reason: 'xlsx-target-cell-unread', cell: a };
-    if (cell.merge && cell.merge !== a) return { ok: false, reason: 'xlsx-write-into-merged-area-refused', cell: a, mergeArea: cell.merge };
-    if (cell.f !== '' && !(want(op, a).formula !== undefined && formula.sameFormula(want(op, a).formula, cell.f))) {
-      return { ok: false, reason: 'xlsx-write-over-formula-refused', cell: a, formula: cell.f };
+    // X-M01: a cell's MergeArea is the WHOLE merged range (AA80:AA83), so the top-left (anchor) never equalled it and
+    // was refused with the rest; the anchor holds the merged range's value (normal worksheet semantics) -- writable.
+    if (cell.merge && cell.merge !== a && cell.merge.split(':')[0] !== a) return { ok: false, reason: 'xlsx-write-into-merged-area-refused', cell: a, mergeArea: cell.merge };
+    if (cell.f !== '') {
+      const w = want(op, a);
+      const sameFormula = w.formula !== undefined && formula.sameFormula(w.formula, cell.f);
+      // GitHub #79: a DIFFERENT formula replaces one only with the step's explicit replaceFormulas:true;
+      // `values` (w.formula undefined) never overwrites a formula, flag or not
+      const replacing = w.formula !== undefined && !sameFormula && op.replaceFormulas === true;
+      if (!sameFormula && !replacing) return { ok: false, reason: 'xlsx-write-over-formula-refused', cell: a, formula: cell.f };
     }
     if (want(op, a).nf !== undefined && !('nf' in cell)) return { ok: false, reason: 'xlsx-target-format-unread', cell: a };
     cells[a] = cell;
@@ -323,7 +339,7 @@ function droppedBlank(after, k, cell) {
   return !!s && (s.used === null || !overlaps(parseRange(s.used), parseRange(a)));
 }
 
-function verifyPreservation(op, before, after) {
+function verifyPreservation(op, before, after, { siblings = [] } = {}) {
   const b = before && before.primary;
   const a = after && after.primary;
   if (!b || !a || !b.complete || !a.complete) return { ok: false, evidence: { reason: 'xlsx-preservation-observation-incomplete' } };
@@ -331,7 +347,8 @@ function verifyPreservation(op, before, after) {
   if (names(b) !== names(a)) return { ok: false, evidence: { reason: 'xlsx-sheet-list-changed', before: b.sheets.map(s => s.name), after: a.sheets.map(s => s.name) } };
   const tierGap = tierChange(b, a);
   if (tierGap) return tierGap;
-  const target = new Set(op.cells.map(c => key(op.selector.sheet, c.a)));
+  // GH #99: a batch round's siblings wrote their own windows (each proven by its own L1) -- not a foreign change here
+  const target = new Set([op, ...siblings].flatMap(o => o.cells.map(c => key(o.selector.sheet, c.a))));
   const changed = [];
   for (const [k, cell] of Object.entries(b.cells)) {
     if (target.has(k)) continue;
@@ -384,8 +401,8 @@ function digestChanges(before, after) {
  * step asks for it) -- every style key observed on both sides unchanged, the written cells included: a write changes
  * values, never style. A standalone write reads no style and claims nothing about it (the M6 contract).
  */
-function writePreservation(op, before, after) {
-  const rest = verifyPreservation(op, before, after);
+function writePreservation(op, before, after, context = {}) {
+  const rest = verifyPreservation(op, before, after, context);
   if (!rest.ok && rest.evidence && rest.evidence.reason) return rest;
   const typed = new Set(op.cells.filter(c => c.nf !== undefined).map(c => key(op.selector.sheet, c.a)));
   const s = observedStyleChanges(before.primary, after.primary);
@@ -424,7 +441,10 @@ function wholeTaskChecks(op, finalObservation) {
 /** The windows a live read must cover for this operation (the target range itself). */
 // a typed value reads the number format of its OWN cells too -- empty target cells outside the used range are read
 // through the window only (LIVE m7-d-acc1: formatSheets alone left A2 unread)
-const windowsOf = op => [{ sheet: op.selector.sheet, range: op.selector.range, ...(op.cells.some(c => c.nf !== undefined) ? { format: true } : {}) }];
+// X-T01: the target range is always read WITH its number format -- a Text-typed '=...' cell is a text literal only when
+// its nf '@' is seen (inventory.cjs normalizeCell); without it a later write over that text would be refused as a formula.
+// A typed write keeps its full format read (M7 S26); a plain write reads the number format ALONE (`nf`, PUBLIC getter).
+const windowsOf = op => [{ sheet: op.selector.sheet, range: op.selector.range, ...(op.cells.some(c => c.nf !== undefined) ? { format: true } : { nf: true }) }];
 
 /** A typed value needs the number format read on its sheet (the public GetNumberFormat, W4a). */
 const liveExtras = op => (op.cells.some(c => c.nf !== undefined) ? { formatSheets: [op.selector.sheet] } : {});

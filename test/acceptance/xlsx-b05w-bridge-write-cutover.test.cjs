@@ -15,15 +15,23 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
 
 /**
  * M11.5a.4.1 (owner GO the owner, owner channel, internal tracker): B05-WRITE product cutover to the Bridge WRITE
- * capability. Part A runs the PRODUCT's lowered command + the driver's injected client against the REAL /6 bridge block
+ * capability. Part A runs the PRODUCT's lowered command + the driver's injected client against the REAL bridge block
  * (fake Api whose every touch is recorded). Part B runs the canonical executor over the fake driver, which returns what
  * the real driver returns for each body outcome (xlsx-driver b05DispatchResult, pinned in part A).
+ *
+ * DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): the 9.3.4.60 family (/5 through /16) is retired --
+ * ACCEPTED carries ONE entry now (9.3.5.0/16), so V6 is the 9.3.5.0 block (ALL capabilities in one file, unlike the
+ * 9.3.4.60 family's per-revision rev6/rev7/.. candidate directories) and RT6 is that one accepted identity. V5 (the
+ * 9.3.4.60 BASE block, never had B05 at all) is UNCHANGED and keeps serving its one role unaffected by the
+ * retirement: a real, historical, genuinely-unaccepted-for-B05 block -- now simply unaccepted for EVERYTHING, which
+ * is the SAME outcome (PATCH_VERSION_MISMATCH) its one test already asserted.
  */
 
-const DIR = path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.4.60', 'euro-office-bridge-v1');
-const V5 = fs.readFileSync(path.join(DIR, 'bridge-block.js'), 'utf8');
-const V6 = fs.readFileSync(path.join(DIR, 'rev6-candidate', 'bridge-block.js'), 'utf8');
-const RT6 = '9.3.4|euro-office-bridge-v1/9.3.4.60/6';
+const DIR935 = path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.5.0', 'euro-office-bridge-v1');
+const V935 = fs.readFileSync(path.join(DIR935, 'bridge-block.js'), 'utf8');
+const V6 = V935;
+const V5 = fs.readFileSync(path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.4.60', 'euro-office-bridge-v1', 'bridge-block.js'), 'utf8');
+const RT6 = '9.3.5|euro-office-bridge-v1/9.3.5.0/16';
 const RT5 = '9.3.4|euro-office-bridge-v1/9.3.4.60/5';
 const task = (spec, range = 'A1') => ({ id: 'b05c', steps: [{ intent: 'format_range', sheet: 'Data', range, format: spec }] });
 const INDENT = { align: { horizontal: 'left', indent: 2 } };
@@ -31,7 +39,7 @@ const SHRINK = { align: { shrink: true } };
 const BOTH = { align: { horizontal: 'left', indent: 3, shrink: true } };
 const lowered = (spec, range) => format.lower(planOperations(task(spec, range)).operations[0], { sheet: 'Data' });
 
-// ---- Part A: the product command against the REAL /6 block ------------------------------------------------------------
+// ---- Part A: the product command against the REAL 9.3.5.0 block (V6 alias) --------------------------------------------
 
 /** fake workbook `Data`: per-cell inner models (indent / shrink state), public setters and every inner touch recorded. */
 function fakeEditor(block = V6, { missing = [], throws = [], perCell = {} } = {}) {
@@ -88,8 +96,14 @@ const editManifest = (src, fn) => {
   return src.replace(m[1], JSON.stringify(obj));
 };
 for (const [label, block, reason] of [
-  ['/5 (no WRITE capability)', V5, 'PATCH_VERSION_MISMATCH'],
-  ['/6 claiming /9', editManifest(V6, m => { m.patchVersion = 'euro-office-bridge-v1/9.3.4.60/9'; }), 'PATCH_VERSION_MISMATCH'],
+  // DS9346: V5 is documentServerVersion 9.3.4 -- now refused one check EARLIER than before
+  // (RUNTIME_VERSION_MISMATCH, classifyHandshake's own first accepted-list check), since 9.3.4 is
+  // no longer an accepted documentServerVersion at all, not merely one whose /5 patch lacks B05.
+  ['/5 (no WRITE capability)', V5, 'RUNTIME_VERSION_MISMATCH'],
+  // DS9346: with ACCEPTED carrying ONE entry, any patchVersion other than the accepted one mismatches --
+  // no "safely unclaimed number" chase needed anymore (the 9.3.4.60-era comment chain this replaced had
+  // to keep moving this example forward as the accepted list grew; a single-entry list has no such edge).
+  ['9.3.5.0 claiming an unaccepted revision', editManifest(V6, m => { m.patchVersion = 'euro-office-bridge-v1/9.3.5.0/999'; }), 'PATCH_VERSION_MISMATCH'],
   ['/6 without the write entry', editManifest(V6, m => { m.capabilities = m.capabilities.filter(c => c.id !== W); }), 'CAPABILITY_MISSING'],
   ['/6, write entry version 2', editManifest(V6, m => { m.capabilities.find(c => c.id === W).version = 2; }), 'CAPABILITY_VERSION_MISMATCH'],
   ['/6, write entry kind READ', editManifest(V6, m => { m.capabilities.find(c => c.id === W).kind = 'READ'; }), 'CAPABILITY_KIND_MISMATCH'],
@@ -206,19 +220,10 @@ for (const [label, spec, check] of [['indent', INDENT, c => c.indent === 2], ['s
   });
 }
 
-// M11.5b.1 compatibility: /7 = /6 + the B10 print WRITE capability; the B05 Bridge WRITE stays byte-identical, so B05 APPLIES on /7
-test('B both on /7 (M11.5b.1 compat): APPLIED via the Bridge WRITE + FORCESAVE_CONFIRMED; retry SATISFIED 0/0', async () => {
-  const store = createStore(book());
-  const first = await run(store, task(BOTH), { runtime: '9.3.4|euro-office-bridge-v1/9.3.4.60/7' });
-  assert.equal(op(first.result).status, OPERATION_STATUS.APPLIED, JSON.stringify(first.result.execution));
-  assert.equal(first.result.persistenceState, 'FORCESAVE_CONFIRMED');
-  assert.equal(first.driver.calls.bridgeWrites, 1);
-  const again = await run(store, task(BOTH), { runtime: '9.3.4|euro-office-bridge-v1/9.3.4.60/7' });
-  assert.equal(op(again.result).status, OPERATION_STATUS.SATISFIED);
-  assert.deepEqual([again.m.commands, again.driver.calls.dispatch, again.driver.calls.bridgeWrites], [0, 0, 0]);
-});
-
-for (const rt of [RT5, '9.3.4|euro-office-bridge-v1/9.3.4.60/4', '9.3.4|euro-office-bridge-v1/9.3.4.60/9', 'unknown']) {
+// GH #326/#327: the accepted list widened again (9.3.5.0/16 + /17, compatibility-first) -- /17 moved OFF this
+// refused list onto the accepted one, so this example moves forward to /18 (the next unclaimed number), the
+// SAME "keep moving this example forward" edge the DS9346-era comment this replaced already named.
+for (const rt of [RT5, '9.3.4|euro-office-bridge-v1/9.3.4.60/4', '9.3.5|euro-office-bridge-v1/9.3.5.0/18', 'unknown']) {
   test(`B wrong runtime ${rt}: B05 FAIL_CLOSED after the prewrite READ, before any write -- dispatch 0, Bridge write 0, mutation 0`, async () => {
     const store = createStore(book()); const before = JSON.stringify(store.durable);
     const { result, driver } = await run(store, task(BOTH), { runtime: rt });
@@ -229,13 +234,13 @@ for (const rt of [RT5, '9.3.4|euro-office-bridge-v1/9.3.4.60/4', '9.3.4|euro-off
   });
 }
 
-test('B DS5_POLICY=B05_ONLY_FAIL_CLOSED: on /5 a non-B05 format key still APPLIES (capability-specific refusal, no XLSX shutdown)', async () => {
+test('B DS5_POLICY=B05_ONLY_FAIL_CLOSED: on a runtime without B05, a non-B05 format key still APPLIES (capability-specific refusal, no XLSX shutdown)', async () => {
   const { result, driver } = await run(createStore(book()), task({ align: { horizontal: 'right' } }), { runtime: RT5 });
   assert.equal(op(result).status, OPERATION_STATUS.APPLIED);
   assert.equal(driver.calls.dispatch, 1);
 });
 
-test('B already holding on /5: SATISFIED with 0 write (the gate decides only a write)', async () => {
+test('B already holding on a runtime without B05: SATISFIED with 0 write (the gate decides only a write)', async () => {
   const b = book(); b[0].cells.A1.shrink = true;
   const { result, driver } = await run(createStore(b), task(SHRINK), { runtime: RT5 });
   assert.equal(op(result).status, OPERATION_STATUS.SATISFIED);

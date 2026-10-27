@@ -63,7 +63,8 @@ test('FIRST session: APPLY -> 1 dispatch -> L1 -> L3 -> L2 -> barrier -> close; 
 test('the live read covers the target window even outside every used range', async () => {
   const store = createStore(book());
   const { driver } = await run(store, task('H10:H11', [['a'], [2]]));
-  assert.deepEqual(driver.reads[0].windows, [{ sheet: 'Data', range: 'H10:H11' }]);
+  // X-T01: the target window is always read with its number format ALONE (a Text '=...' literal is told from a formula by nf '@')
+  assert.deepEqual(driver.reads[0].windows, [{ sheet: 'Data', range: 'H10:H11', nf: true }]);
 });
 
 test('SECOND session (reopened retry): SATISFIED, 0 write, 0 command, no barrier', async () => {
@@ -128,7 +129,8 @@ test('ignored command -> L1 FAIL, nothing persisted', async () => {
 });
 
 for (const [name, t, script, reason] of [
-  ['into a merged area', task('E1:E1', [['m']]), {}, 'xlsx-write-into-merged-area-refused'],
+  // alice-1: the anchor E1 of E1:F1 is writable now (test/acceptance/mona1-failure-reason.test.cjs); a NON-anchor cell is refused
+  ['into a merged area', task('F1:F1', [['m']]), {}, 'xlsx-write-into-merged-area-refused'],
   ['over a formula', task('C2', [[5]]), {}, 'xlsx-write-over-formula-refused'],
   ['on a missing sheet', task('A1', [['x']], 'Nope'), {}, 'xlsx-sheet-not-found'],
   ['on a case-mismatched sheet name', task('A1', [['x']], 'data'), {}, 'xlsx-sheet-sheet-name-case-mismatch'],

@@ -107,7 +107,11 @@ test('the command body: only the requested setters', () => {
 });
 
 test('the per-sheet build list is exactly the W8b-proven build; otherwise the read is unobservable, never "the default"', () => {
-  assert.deepEqual([...EO_PAGE_LAYOUT_PER_SHEET_RUNTIMES], ['9.3.4|euro-office-bridge-v1/9.3.4.60/5', '9.3.4|euro-office-bridge-v1/9.3.4.60/6', '9.3.4|euro-office-bridge-v1/9.3.4.60/7', '9.3.4|euro-office-bridge-v1/9.3.4.60/8']);
+  // DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): XLSX_RUNTIME_IDS (aliased here) collapsed to the
+  // single accepted 9.3.5.0/16 entry -- the historical 9.3.4.60/5..16 chain this list used to carry (progressively
+  // widened by X-O03/6b / X-O08 / X-O05/5-B, as listed in the prior revision of this comment) was retired.
+  // GH #326/#327: widened again to /16 + /17 (compatibility-first, sheet.protection.read/v1 client-wiring only).
+  assert.deepEqual([...EO_PAGE_LAYOUT_PER_SHEET_RUNTIMES], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17']);
   const ws = { GetName: () => 'P', GetIndex: () => 0, GetUsedRange: () => null, GetPageOrientation: () => 'xlLandscape', GetPrintGridlines: () => true, GetPrintHeadings: () => false, GetTopMargin: () => 19.1, GetBottomMargin: () => 19.1, GetLeftMargin: () => 72, GetRightMargin: () => 17.8 };
   const Api = { GetSheets: () => [ws], GetSheet: () => ws, WorksheetFunction: { COUNT: () => 0 } };
   assert.equal(new Function('Api', readQuery([], { pageSheets: ['*'] }))(Api).pageReads.P, 'UNOBSERVABLE:per-sheet-read-not-verified');

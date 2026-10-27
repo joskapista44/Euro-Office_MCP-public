@@ -149,6 +149,13 @@ function gate(primary, op) {
   if (s.length !== 1) return { ok: false, reason: s.length > 1 ? 'xlsx-sheet-ambiguous' : 'xlsx-sheet-not-found', available: primary.sheets.map(x => x.name) };
   const axis = primary.layout && primary.layout[op.selector.sheet];
   if (!axis || typeof axis !== 'object') return { ok: false, reason: 'xlsx-layout-unobservable', detail: axis || 'not-read' };
+  // below the read bound (FULL) the L3 must prove every OTHER sheet's layout unchanged -- one it cannot read
+  // (truncated) would fail that proof only AFTER the write (LIVE: DISPATCHED_OUTCOME_UNKNOWN), so refuse it here;
+  // under BOUNDED that gap is the named notProven 'layout-on-unobserved-sheets' (scopeOf below)
+  if (primary.bounded !== true) {
+    const gaps = Object.entries(primary.layout).filter(([n, ax]) => n !== op.selector.sheet && (!ax || typeof ax !== 'object')).map(([n]) => n);
+    if (gaps.length) return { ok: false, reason: 'xlsx-layout-other-sheet-unobservable', sheets: gaps.slice(0, 20), count: gaps.length };
+  }
   const found = {};
   for (const i of op.items) {
     const e = entriesOf(axis, op)[i];
@@ -273,16 +280,57 @@ function verifyPrimitive(op, _before, after) {
 const AUTO_ROW_DEFAULTS = Object.freeze([14.25, 15]);
 const sameAutoRow = (e, n) => e.hidden === n.hidden && ((e.height === null && AUTO_ROW_DEFAULTS.includes(n.height)) || (n.height === null && AUTO_ROW_DEFAULTS.includes(e.height)));
 
+/**
+ * X-L13/8 (the (b)-group BOUNDED classification, owner decision): what this L3 proves, machine-readable.
+ * FULL: every other column/row of every sheet (cross-sheet layout) AND the target sheet's full style. BOUNDED
+ * (the reduced observation above the read bound): the cross-sheet layout axis STAYS proven -- its cost is
+ * capped by MAX_LAYOUT_ITEMS, not used cells, so dropping `styleSheets` does not reduce it -- but style on the
+ * target sheet does NOT: `layout_range` has no ring at all (`windowsOf()` below returns `[]`), so once
+ * `styleSheets` is gone, NOTHING on the target sheet is read with style. `notProven` is therefore set
+ * UNCONDITIONALLY from `b.bounded`, never inferred from `styleCompared` -- inferring it would read a
+ * zero-cells-compared result (there is no ring to populate it) as a vacuously-true FULL style proof (the
+ * `an-empty-test-subject-looks-like-a-passing-test` class). `truncatedSheets` (only possible under BOUNDED,
+ * and only for a sheet OTHER than the target -- the target's own entry is already proven by L1/gate() before
+ * L3 runs): a sheet whose OWN used-range row+column count exceeded MAX_LAYOUT_ITEMS adds
+ * `layout-on-unobserved-sheets` to `notProven` too, named -- below the bound this sheet-level gap keeps
+ * TODAY'S unchanged behaviour (a real "layout-unobservable" L3 FAIL further down), since this card does not
+ * touch the FULL-tier path.
+ */
+function scopeOf(b, truncatedSheets) {
+  if (!(b && b.bounded === true)) return { preservationScope: 'FULL' };
+  // X-L13/8 (zero LIVE r1 finding): when a sheet's own layout read was truncated, `proven` must NOT
+  // claim "every sheet" any more -- that would make the receipt partially false (write-tools maps
+  // `proven` straight into the client-facing receipt, same as `notProven`). `truncatedSheets.length`
+  // narrows this the SAME way it already widens `notProven` below.
+  const layoutProven = truncatedSheets.length ? 'other-columns-and-rows-of-observed-sheets' : 'other-columns-and-rows-of-every-sheet';
+  return {
+    preservationScope: 'BOUNDED',
+    proven: ['target-value', 'target-layout', layoutProven, 'sheet-values-outside-windows-digest'],
+    notProven: truncatedSheets.length ? ['style-on-target-sheet', 'layout-on-unobserved-sheets'] : ['style-on-target-sheet'],
+    ...(truncatedSheets.length ? { truncatedSheets } : {}),
+  };
+}
+
 function verifyPreservation(op, before, after) {
   const rest = cells.verifyPreservation(op, before, after);
   if (!rest.ok && rest.evidence && rest.evidence.reason) return rest;
   const b = before.primary.layout;
   const a = after.primary.layout;
   if (!b || !a) return { ok: false, evidence: { reason: 'xlsx-layout-unobservable', before: !!b, after: !!a } };
+  const bounded = before.primary.bounded === true;
   const changed = [];
+  const truncatedSheets = [];
   for (const [sheet, ax] of Object.entries(b)) {
     const now = a[sheet];
-    if (typeof ax !== 'object' || typeof now !== 'object' || now === null) { changed.push({ sheet, change: 'layout-unobservable' }); continue; }
+    if (typeof ax !== 'object' || typeof now !== 'object' || now === null) {
+      // X-L13/8: under BOUNDED, another sheet's own layout-truncation is a NAMED gap (scopeOf's notProven),
+      // not a false "changed" -- the target sheet's own entry already passed L1/gate() before L3 runs, so
+      // this branch, when it fires under BOUNDED, can only ever be a DIFFERENT sheet. Below the bound (not
+      // bounded) this is unchanged: a real, fail-closed "layout-unobservable" L3 FAIL.
+      if (bounded) { truncatedSheets.push(sheet); continue; }
+      changed.push({ sheet, change: 'layout-unobservable' });
+      continue;
+    }
     for (const kind of ['cols', 'rows']) {
       const size = kind === 'cols' ? 'width' : 'height';
       for (const [i, e] of Object.entries(ax[kind])) {
@@ -296,7 +344,7 @@ function verifyPreservation(op, before, after) {
     }
   }
   const style = observedStyleChanges(before.primary, after.primary);
-  return { ok: rest.ok && changed.length === 0 && style.changed.length === 0, evidence: { ...rest.evidence, layoutChanged: changed.slice(0, 20), layoutChangedCount: changed.length, styleCompared: style.compared, styleChanged: style.changed.slice(0, 20), styleChangedCount: style.changed.length } };
+  return { ok: rest.ok && changed.length === 0 && style.changed.length === 0, evidence: { ...rest.evidence, layoutChanged: changed.slice(0, 20), layoutChangedCount: changed.length, styleCompared: style.compared, styleChanged: style.changed.slice(0, 20), styleChangedCount: style.changed.length, ...scopeOf(before.primary, truncatedSheets) } };
 }
 
 function wholeTaskChecks(op, finalObservation) {
@@ -308,4 +356,14 @@ function wholeTaskChecks(op, finalObservation) {
 const windowsOf = () => [];
 const liveExtras = op => ({ layout: [{ sheet: op.selector.sheet, ...op.extent, ...(op.prop === 'width' ? { canon: [op.value] } : {}) }], styleSheets: [op.selector.sheet] });
 
-module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras, TOL };
+/**
+ * X-L13/8 (the (b)-group BOUNDED classification, owner decision): the BOUNDED variant keeps `layout` (tier-independent cost, capped by
+ * MAX_LAYOUT_ITEMS -- see xlsx-driver.cjs's TIERED_EXTRAS comment; gate()/verifyPrimitive() need this reader
+ * for the op's OWN target, so it cannot be dropped) and DROPS `styleSheets` (the one axis whose cost scales
+ * with used cells). Unconditional -- every layout_range prop (width/height/hidden/autofit) is column/row
+ * metadata only, none of them has a code path that could touch cell style (see the module header comment),
+ * so there is no excluded sub-case the way format_range excludes shared-edge border modes.
+ */
+const boundedExtras = op => ({ layout: [{ sheet: op.selector.sheet, ...op.extent, ...(op.prop === 'width' ? { canon: [op.value] } : {}) }] });
+
+module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras, boundedExtras, TOL };

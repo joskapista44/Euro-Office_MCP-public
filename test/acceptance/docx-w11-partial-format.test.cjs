@@ -206,7 +206,7 @@ test('faults at L1: no mutation / part / paragraph-level only / another occurren
     assert.equal(status(x), OPERATION_STATUS.DISPATCHED_OUTCOME_UNKNOWN, fault);
     assert.equal(x.primitiveVerification[0].verdict, 'FAIL', fault);
     assert.equal(x.appliedOperations[0].uncertainty.reason, UNCERTAINTY_REASON.VERIFY_CANNOT_PROVE_TERMINAL_STATE, fault);
-    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED, fault);
+    assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST, fault);
     assert.equal(driver.calls.forceSave, 0, fault);
   }
 });

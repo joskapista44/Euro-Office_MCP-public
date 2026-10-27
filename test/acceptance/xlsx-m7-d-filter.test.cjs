@@ -77,8 +77,8 @@ test('R19 RED: the xlAnd pair reads back joined by xlOr -> L1 FAIL', async () =>
   assert.equal(result.execution.primitiveVerification[0].verdict, 'FAIL');
 });
 
-test('R19 refused at planning: three values; one value twice; an unmeasured operator; two criteria forms at once', () => {
-  for (const extra of [{ field: 2, values: ['x', 'y', 'z'] }, { field: 2, values: ['x', 'x'] }, { field: 3, and: ['>=1', '<6'] }, { field: 3, and: ['>1'] }, { field: 2, value: 'x', values: ['x', 'z'] }, { field: 2 }]) {
+test('R19 refused at planning: eleven values (GH #301 D2: 3..10 is measured now); one value twice; an unmeasured operator; two criteria forms at once', () => {
+  for (const extra of [{ field: 2, values: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'] }, { field: 2, values: ['x', 'x'] }, { field: 3, and: ['>=1', '<6'] }, { field: 3, and: ['>1'] }, { field: 2, value: 'x', values: ['x', 'z'] }, { field: 2 }]) {
     assert.equal(planOperations(step(extra)).ok, false, JSON.stringify(extra));
   }
 });

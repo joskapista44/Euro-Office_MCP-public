@@ -34,7 +34,13 @@ const { tableReadWithVerticalMerges, cellSelector, scopeOf, CELL_KEYS } = requir
  *     reconciled grid (table.cjs tableReadWithVerticalMerges) shows that the new row's boundary cuts NO
  *     vertical merge in ANY column AND the target row is outside every merge (a row copied from inside
  *     or at the edge of a merge could extend it -- NOT_MEASURED, so refused); an unreconciled grid ->
- *     refused. A DELETE on such a table stays refused (FAIL_CLOSED_UNSUPPORTED_SHAPE:vertical-merge);
+ *     refused. A DELETE is refused ONLY when the deleted row falls INSIDE a vertical merge's span
+ *     (FAIL_CLOSED_UNSUPPORTED_SHAPE:row-delete-inside-a-vertical-merge, W06-3 -- narrowed
+ *     from the earlier per-table blanket: an unrelated row's delete elsewhere in the SAME table is
+ *     clean, LIVE-measured); a row inside the span is refused because the TOP row's own
+ *     delete is measured destructive (the merged content disappears, (a)) -- the BOTTOM
+ *     row's delete measured clean on one two-row merge (b)) is NOT widened into a narrower
+ *     allow-rule here (n=1, not generalized);
  *   - an inserted row does NOT inherit the target row's text properties (bold 14 pt target ->
  *     plain 11 pt new row, probe 4): the contract claims the new row's SHAPE and emptiness only.
  *
@@ -82,7 +88,9 @@ function plan(step, index) {
   if (tableAnchor !== null && (!tableAnchor || tableAnchor === norm(sel.text))) return { ok: false, detail: `step ${index}: a table anchor must be a non-empty cell text other than the target cell's` };
   if (kind.action === 'remove' && tableAnchor === null) return { ok: false, detail: `step ${index}: delete_table_row requires a surviving table anchor (tableCell.tableAnchor or terminalTableAnchor)` };
   if (!Number.isInteger(step.terminalRowCount) || step.terminalRowCount < (kind.action === 'add' ? 2 : 1)) return { ok: false, detail: `step ${index}: ${step.intent} requires terminalRowCount, the target table's row count after this operation` };
-  return { ok: true, operation: { id: step.id || `s${index}`, intent: step.intent, selector: step.selector, targetText: norm(sel.text), tableAnchor, terminalRowCount: step.terminalRowCount, preservationMode: 'PRIMITIVE_INTEGRAL', ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) } };
+  // GH #291 T-05: the explicit merge-extending insert mode -- only `true`, only on an insert
+  if (step.extendMerge !== undefined && (step.extendMerge !== true || kind.action !== 'add')) return { ok: false, detail: `step ${index}: extendMerge is only true, and only on insert_table_row_before / insert_table_row_after` };
+  return { ok: true, operation: { id: step.id || `s${index}`, intent: step.intent, selector: step.selector, targetText: norm(sel.text), tableAnchor, terminalRowCount: step.terminalRowCount, preservationMode: 'PRIMITIVE_INTEGRAL', ...(step.extendMerge === true ? { extendMerge: true } : {}), ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) } };
 }
 
 /**
@@ -138,17 +146,41 @@ function locate(primary, op) {
 }
 
 /**
- * M5: a row operation on a table with vertical merges ([top, bottom] rows). Delete: refused. Insert
- * before row R cuts a merge covering R-1 and R; after R one covering R and R+1 -- every merge, i.e.
- * every column, is checked. A target row inside any merge is refused too (the copied row could extend
- * it). The target row may be absent (a delete's terminal state): then only the delete rule applies.
+ * M5: a row operation on a table with vertical merges ([top, bottom] rows). Insert before row R
+ * cuts a merge covering R-1 and R; after R one covering R and R+1 -- every merge, i.e. every
+ * column, is checked. A target row inside any merge is refused too (the copied row could extend
+ * it). The target row may be absent (an operation's terminal state): then no further check
+ * applies, and `locate()`'s caller is free to reach a SATISFIED/retry verdict on that absence.
+ *
+ * W06-3 (LIVE-measured, the reviewer's decision): DELETE narrowed from "refused whenever the
+ * table has ANY vertical merge" to "refused only when the DELETED ROW falls inside a span" --
+ * (A) measured an UNRELATED row's delete as clean (the merge, elsewhere in the table,
+ * untouched); (a) measured the merge's OWN TOP row's delete as DESTRUCTIVE (the merged
+ * content disappeared, the surviving row left with no vMerge at all) -- genuine data loss, not a
+ * theoretical caution. (b) measured the OWN BOTTOM row's delete as clean (the merge shrinks to
+ * one row, content kept) on a single two-row merge -- NOT widened into a narrower allow-rule
+ * here: n=1, one specific shape (a 2-row merge, its bottom row only), and (a)'s own outcome on
+ * the SAME merge's other row shows the two rows are not symmetric. A future unit may build on
+ * (b) with its own measurement; this one does not generalize from it. The new reason name is
+ * DISTINCT from the insert-side ones (never conflate "a row delete would corrupt a merge" with
+ * "an insert would cut or land inside one" -- different operations, different mechanisms).
  */
 function verticalMergeGuard(spans, op, ri) {
   if (!spans || spans.length === 0) return null;
   const kind = INTENTS[op.intent];
-  if (kind.action === 'remove') return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:vertical-merge';
+  if (kind.action === 'remove') {
+    // GH #291 T-06 (LIVE, docs/evidence/gh291-vmerge-structure-probe-20261021.json): a CONTINUATION row's delete is clean -- the
+    // owner keeps its content, its rowspan shrinks by one (a two-row merge ends); the OWNER (top) row stays refused (W06-2a, destructive)
+    if (ri !== null && spans.some(([top]) => top === ri)) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-delete-inside-a-vertical-merge';
+    return null;
+  }
   if (ri === null) return null;
   const [a, b] = kind.before ? [ri - 1, ri] : [ri, ri + 1];
+  // GH #291 T-05 (LIVE, docs/evidence/gh291t5-row-insert-merge-probe-20261022.json): a new row INSIDE a merge's span (the boundary
+  // cuts it) extends that merge by one row -- the owner keeps its content, the new row's cell in that column is a continuation; at
+  // the merge's top or bottom edge (nothing cut) the new row lands outside and the merge is untouched. The explicit caller mode
+  // allows exactly the cutting case; the default refuses it, as before.
+  if (op.extendMerge === true) return spans.some(([top, bottom]) => top <= a && bottom >= b) ? null : 'FAIL_CLOSED_UNSUPPORTED_SHAPE:extend-merge-requested-but-the-insert-cuts-no-vertical-merge';
   if (spans.some(([top, bottom]) => top <= a && bottom >= b)) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-insert-cuts-a-vertical-merge';
   if (spans.some(([top, bottom]) => top <= ri && ri <= bottom)) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:row-insert-target-row-inside-a-vertical-merge';
   return null;
@@ -289,12 +321,19 @@ function verifyPreservation(op, before, after) {
   if (!a.ok) return { ok: false, evidence: { reason: `after-${a.reason}` } };
   const seq = expectedSequence(op, b.table.rows, b.ri);
   if (a.rows !== seq.length || a.html.rows.length !== seq.length) return { ok: false, evidence: { reason: 'row-count-not-as-expected' } };
-  const span = c => [c.span, c.rowspan];
+  const span = c => [c.span, c.rowspan || 1];
+  // GH #291 T-06: a deleted continuation row shortens every merge that covers it -- the owner's expected rowspan is one less
+  const kind = INTENTS[op.intent];
+  const removed = kind.action === 'remove' ? b.ri : null;
+  // GH #291 T-05: an insert that cuts a merge (only reachable with extendMerge) lengthens it -- that owner's expected rowspan is one more
+  const [ca, cb] = kind.before ? [b.ri - 1, b.ri] : [b.ri, b.ri + 1];
+  const cuts = (src, rs) => kind.action === 'add' && src <= ca && src + rs - 1 >= cb;
+  const expectedSpan = (c, src) => { const rs = c.rowspan || 1; return [c.span, rs - (removed !== null && src < removed && removed <= src + rs - 1 ? 1 : 0) + (cuts(src, rs) ? 1 : 0)]; };
   const changedRows = [];
   seq.forEach((src, i) => {
     if (src === null) return;
     const cells = JSON.stringify(a.table.rows[i].map(cellKey)) === JSON.stringify(b.table.rows[src].map(cellKey));
-    const spans = JSON.stringify(a.html.rows[i].map(span)) === JSON.stringify(b.html.rows[src].map(span));
+    const spans = JSON.stringify(a.html.rows[i].map(span)) === JSON.stringify(b.html.rows[src].map(c => expectedSpan(c, src)));
     if (!cells || !spans) changedRows.push({ row: i, from: src, cells, spans });
   });
   const others = r => r.tables.map((t, ti) => (ti === (r === b.read ? b.ti : a.ti) ? null : JSON.stringify([t.rows.map(row => row.map(cellKey)), r.html[ti].rows.map(row => row.map(span))]))).filter(x => x !== null);

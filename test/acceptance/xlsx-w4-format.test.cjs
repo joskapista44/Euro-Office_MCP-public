@@ -83,6 +83,45 @@ test('a black border reading null after a reopen (the measured shape) is still S
   assert.equal(again.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
 });
 
+// X-B07: border.color 'auto' (the editor's Automatic colour, PUBLIC Api.AutoColor(), read as c: null -- LIVE-measured)
+test("X-B07: border color 'auto' applies, the command uses Api.AutoColor(), the edge reads c: null, retry SATISFIED 0/0", async () => {
+  const store = createStore(book());
+  const spec = { border: { sides: ['top'], style: 'thin', color: 'auto' } };
+  const driver = createFakeXlsxDriver(store, {});
+  const bodies = []; const real = driver.dispatch.bind(driver);
+  driver.dispatch = async (h, command) => { bodies.push(String(command && command.body || '')); return real(h, command); };
+  let n = 0;
+  const t = task('C4', spec);
+  const result = await withSession({ driver, fileId: 'disposable', now: () => (n += 1), ready: { wait: async () => {} }, persistence: { wait: async () => {} } }, xlsxAdapter, createExecutor(t, { observation: { live: liveScope(t) } }));
+  assert.equal(result.ok, true, JSON.stringify(result.execution.appliedOperations[0].evidence));
+  assert.ok(bodies.some(b => b.includes('Api.AutoColor()')), 'the command writes Api.AutoColor()');
+  assert.ok(!bodies.some(b => b.includes('CreateColorFromRGB')), 'no RGB colour object for an auto border');
+  assert.deepEqual(cell(store, 'C4').border.t, { s: 7, c: null });
+  const again = await run(store, task('C4', spec));
+  assert.equal(again.m.commands, 0);
+  assert.equal(again.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
+});
+
+test("X-B07: an explicit BLACK edge (c: 0) is NOT 'auto' -- an 'auto' request on it applies (no false SATISFIED)", async () => {
+  const store = createStore(book());
+  await run(store, task('C4', { border: { sides: ['top'], style: 'thin', color: '#000000' } }));
+  const { result, m } = await run(store, task('C4', { border: { sides: ['top'], style: 'thin', color: 'auto' } }));
+  assert.equal(result.ok, true);
+  assert.equal(m.commands, 1);
+  assert.deepEqual(cell(store, 'C4').border.t, { s: 7, c: null });
+});
+
+for (const [name, border, why] of [
+  ["'auto' on a diagonal (unmeasured)", { sides: ['diagonalDown'], style: 'thin', color: 'auto' }, /diagonal/],
+  ['a colour that is neither #RRGGBB nor auto', { sides: ['top'], style: 'thin', color: 'automatic' }, /'#RRGGBB' or 'auto'/],
+]) {
+  test(`X-B07: plan refuses ${name}`, async () => {
+    const { result } = await run(createStore(book()), task('C4', { border }));
+    assert.equal(result.ok, false);
+    assert.match(JSON.stringify(result), why);
+  });
+}
+
 test('a neighbour\'s facing side may change with a border (the shared edge) -- nothing else of it', async () => {
   const { result } = await run(createStore(book()), task('B3', { border: { sides: ['top'], style: 'thin', color: '#0000FF' } }));
   assert.equal(result.ok, true, 'B2 reads the new edge as its bottom; allowed');
@@ -92,11 +131,13 @@ for (const [name, t, script, why] of [
   // X-F02: an EMPTY cell's font is no longer refused by default -- only when the
   // engine's reader itself throws for that cell (emptyFontUnobservable, below).
   ['the font of an EMPTY cell whose reader throws', task('C3', { font: { bold: true } }), { emptyFontUnobservable: ['C3'] }, 'xlsx-format-font-unobservable'],
-  ['the font of a FORMULA cell (not measured)', task('C2', { font: { italic: true } }), {}, 'xlsx-format-font-on-formula-unmeasured'],
   ['the font of a mixed-run cell', task('A1', { font: { bold: true } }), { mixedRuns: ['A1'] }, 'xlsx-format-font-unobservable'],
   ['alignment on an unverified build', task('A1', { align: { horizontal: 'left' } }), { appearanceBuild: false }, 'xlsx-format-align-unobservable'],
   ['borders on an unverified build', task('A1', { border: { sides: ['top'], style: 'thin', color: '#000000' } }), { appearanceBuild: false }, 'xlsx-format-border-unobservable'],
-  ['a merged area', task('E1:F1', { fill: '#FF0000' }), {}, 'xlsx-format-in-merged-area-refused'],
+  // GH #90 (design #ref): fill/font on a merge are no longer unconditionally refused (see
+  // gh90-format-fill-font-merged-cells.test.cjs) -- numberFormat stays refused on any merge membership, unchanged.
+  ['a range crossing a merged area (X-B10: a whole merge is allowed)', task('E1', { numberFormat: '0.00' }), {}, 'xlsx-format-merge-crosses-range-refused'],
+  ['a merged area with an unmeasured axis (rotation)', task('E1:F1', { align: { rotation: 45 } }), {}, 'xlsx-format-in-merged-area-refused'],
   ['a missing sheet', task('A1', { wrap: true }, 'Nope'), {}, 'xlsx-sheet-not-found'],
   ['a truncated read', task('A1', { wrap: true }), { readTruncated: true }, 'xlsx-observation-truncated'],
 ]) {
@@ -279,10 +320,13 @@ test('GREEN: font.italic false reaches an EMPTY cell (the internal reader is ind
   assert.equal(italicStill.result.ok, true, JSON.stringify(italicStill.result.execution.primitiveVerification));
 });
 
-test('font.italic:true (axis font, unchanged) stays refused on a FORMULA cell -- the asymmetry with italic:false (axis italic) is intentional, not a regression', async () => {
-  const { result } = await run(createStore(book()), task('C2', { font: { italic: true } }));
-  assert.equal(result.ok, false);
-  assert.equal(result.execution.appliedOperations[0].evidence.evidence.reason, 'xlsx-format-font-on-formula-unmeasured');
+test('font.italic:true on a FORMULA cell is no longer refused (X-F03 LIVE-measured) -- it applies and reads back italic, the formula untouched', async () => {
+  const store = createStore(book());
+  const before = cell(store, 'C2').f;
+  const { result } = await run(store, task('C2', { font: { italic: true } }));
+  assert.equal(result.ok, true, JSON.stringify(result.execution.appliedOperations[0].evidence));
+  assert.equal(cell(store, 'C2').font.italic, true);
+  assert.equal(cell(store, 'C2').f, before, 'the formula itself is not touched');
 });
 
 // X-F05 (LIVE m7-s21-probe1/2): underline/strikeout/subscript/superscript, the SAME

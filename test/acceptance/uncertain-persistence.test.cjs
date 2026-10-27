@@ -116,11 +116,11 @@ test('A. no verified + no uncertain -> no barrier, NOT_REQUIRED, CERTAIN', async
   assert.notEqual(neg.result.persistenceState, PERSISTENCE_STATE.NOT_REQUIRED);
 });
 
-test('B. uncertain only -> NO barrier, UNCERTAIN_NOT_PERSISTED (never NOT_REQUIRED)', async () => {
+test('B. uncertain only -> NO barrier, UNCERTAIN_MAY_PERSIST (never NOT_REQUIRED)', async () => {
   const { result, driver } = await run({ op1: 'throw' });
   assert.equal(driver.calls.forceSave, 0, 'the framework never forceSaves solely for an unproven mutation');
-  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
-  assert.equal(result.persistenceOutcome, 'UNCERTAIN_NOT_PERSISTED');
+  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
+  assert.equal(result.persistenceOutcome, 'UNCERTAIN_MAY_PERSIST');
   assert.equal(result.mutationCertainty, 'UNCERTAIN');
   assert.equal(result.ok, false);
   assert.equal(result.uncertainOperations.length, 1);
@@ -307,7 +307,7 @@ test('L. lifecycle backstop: executor throws after an unrecorded dispatch -> unc
   const { result, driver } = await run({ op1: 'ok' }, { executorThrowAfterDispatch: true });
   assert.equal(driver.calls.dispatch, 1);
   assert.equal(result.execution.outcome, 'execution-threw');
-  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_NOT_PERSISTED);
+  assert.equal(result.persistenceState, PERSISTENCE_STATE.UNCERTAIN_MAY_PERSIST);
   assert.equal(driver.calls.forceSave, 0);
   const u = result.uncertainOperations[0];
   assert.equal(u.operationId, null);

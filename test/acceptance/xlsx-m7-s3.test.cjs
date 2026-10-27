@@ -99,7 +99,7 @@ test('planner: a step that declares no axes (merge, clear, sort ...) gets no exe
   for (const other of [
     { intent: 'merge_range', id: 'm', sheet: 'Data', range: 'A1:B1' },
     { intent: 'clear_range', id: 'c', sheet: 'Data', range: 'B2' },
-    { intent: 'sort_range', id: 's', sheet: 'Data', range: 'A2:C3', key: 'B', order: 'asc', hasHeaders: false },
+    { intent: 'sort_range', id: 's', sheet: 'Data', range: 'A2:C3', keyColumn: 'B', order: 'asc', hasHeaders: false },
   ]) {
     const p = planOperations(task(WRITE, other));
     assert.equal(p.ok, false, other.intent);

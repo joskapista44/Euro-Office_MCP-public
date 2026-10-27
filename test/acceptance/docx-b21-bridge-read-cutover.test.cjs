@@ -16,9 +16,14 @@ const path = require('node:path');
 const hf = require('../../src/adapters/docx/families/header-footer.cjs');
 const driver = require('../../src/drivers/eurooffice/docx-driver.cjs');
 const { DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES, DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES, runtimeIdOf } = require('../../src/core/runtime-identity.cjs');
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): V2 (historical 9.3.4.60, no B21 capability)
+// stays as the NEGATIVE control. V3's role (the POSITIVE, capability-carrying block) is now played by the
+// 9.3.5.0 block -- byte-identical B21 handler, proven by docx-b21-read-handler-identity.test.cjs -- since the
+// historical 9.3.4.60/3 identity is retired. GH #292 S4 D-state: the 9.3.5.0 word /5 block (the only accepted runtime;
+// its B21 handler byte-identical to /3 and /4); /3 and /4 are now refused NEGATIVE controls.
 const DIR = path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.4.60', 'euro-office-bridge-word-v1');
 const V2 = fs.readFileSync(path.join(DIR, 'rev2-candidate', 'bridge-block.js'), 'utf8');
-const V3 = fs.readFileSync(path.join(DIR, 'rev3-candidate', 'bridge-block.js'), 'utf8');
+const V3 = fs.readFileSync(path.join(__dirname, '..', '..', 'documentserver-patches', '9.3.5.0', 'euro-office-bridge-word-v1', 'rev5-candidate', 'bridge-block.js'), 'utf8');
 
 /** fake Word document + the REAL bridge block installed on the same Api; every Get_TitlePage/IsEvenAndOdd and bridge
  * read() recorded. ONE section, header-footer part already exists (title/even are flipped, not created). */
@@ -75,32 +80,41 @@ test('word /2 (no B21 Bridge READ capability): the product re-check gets null, z
   // the driver's second line (the actual production gate, exercised before ANY dispatch) refuses the SAME command
   const refused = driver.internalWriteRefusal(cmd, '9.3.4|euro-office-bridge-word-v1/9.3.4.60/2');
   assert.deepEqual([refused.ok, refused.dispatched, refused.outcome], [false, false, 'b21-bridge-read-runtime-not-proven']);
-  assert.equal(driver.internalWriteRefusal(cmd, '9.3.4|euro-office-bridge-word-v1/9.3.4.60/3'), null, 'word /3: let through');
+  assert.equal(driver.internalWriteRefusal(cmd, '9.3.5|euro-office-bridge-word-v1/9.3.5.0/5'), null, 'the accepted 9.3.5.0/5 runtime: let through');
+  for (const old of ['3', '4']) assert.equal(driver.internalWriteRefusal(cmd, `9.3.5|euro-office-bridge-word-v1/9.3.5.0/${old}`).outcome, 'b21-bridge-read-runtime-not-proven', `D-state: the retired 9.3.5.0/${old} is refused`);
 });
 
-test('b21BridgeReadPrelude: the editor-side runtime gate itself is narrowed to word /3 ONLY -- this is a SECOND, independent layer behind the driver\'s dispatch-side second line, and a widened gate here must be caught even if the dispatch gate is also somehow bypassed', () => {
-  // (a) structural: the generated source embeds the word-/3-only runtime list, not the wider B18 (/2+/3) one
+test('b21BridgeReadPrelude: the editor-side runtime gate itself is narrowed to the accepted runtime ONLY -- this is a SECOND, independent layer behind the driver\'s dispatch-side second line, and a widened gate here must be caught even if the dispatch gate is also somehow bypassed', () => {
+  // (a) structural: the generated source embeds its OWN DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES parameter.
+  // DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): B18 and B21 now COLLAPSE to the same single-entry
+  // list (both gate on the one accepted 9.3.5.0/3 identity) -- the historical "B21 is /3-only, narrower than
+  // B18's /2+/3" distinction this structural half checked is retired along with the /2 entry that made it
+  // narrower. The (b) behavioural half below is UNCHANGED and still closes the real gap: it proves the runtime
+  // check itself refuses an off-list runtime even when the capability is (unrealistically) advertised there.
   const src = driver.b21BridgeReadPrelude();
-  assert.ok(src.includes(JSON.stringify(DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES)), 'embeds DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES ([/3] only)');
-  assert.equal(src.includes(JSON.stringify(DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES)), false, 'does NOT embed the wider B18 (/2+/3) list');
+  assert.ok(src.includes(JSON.stringify(DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES)), 'embeds DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES (the single accepted entry)');
+  assert.deepEqual([...DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES], [...DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES], 'DS9346: the two lists are now the same single accepted entry');
   // (b) behavioural, isolating the runtime check from capability-presence masking: a manifest on word /2 that
   // (unrealistically) ALSO advertises the capability must still be refused -- by the RUNTIME check alone, not by
   // capability absence. If the prelude's own runtime-list parameter were ever widened to include /2 (e.g. swapped for
   // DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES), this fake would let it through; a realistic /2 fixture (capability
   // genuinely absent) could not tell the difference, which is exactly the gap this test closes.
-  const manifest = patchVersion => ({ bridgeVersion: '1.0.0', documentServerVersion: '9.3.4', patchVersion,
+  // DS9346: documentServerVersion tracks the patch -- 9.3.5 for the accepted 9.3.5.0/3 patch, 9.3.4 for the
+  // retired historical word /2 (which must now also fail at the RUNTIME level, not just the patch level).
+  const manifest = patchVersion => ({ bridgeVersion: '1.0.0', documentServerVersion: patchVersion.includes('9.3.5.0') ? '9.3.5' : '9.3.4', patchVersion,
     capabilities: [{ id: 'docx.section.variantState.read/v1', version: 1, kind: 'READ', format: 'DOCX', mutation: 'NO' }] });
   const client = patchVersion => {
     const Api = { GetEuroOfficeBridge: () => ({ manifest: () => manifest(patchVersion), read: () => ({ ok: true, value: { titlePage: true, evenAndOdd: false } }) }) };
     return new Function('Api', `${driver.b21BridgeReadPrelude()} return __eoB21Variant(0);`)(Api);
   };
   assert.equal(client('euro-office-bridge-word-v1/9.3.4.60/2'), null, 'word /2, even with the capability (unrealistically) advertised: the runtime gate itself refuses');
-  assert.deepEqual(client('euro-office-bridge-word-v1/9.3.4.60/3'), { titlePage: true, evenAndOdd: false }, 'word /3: accepted');
-  assert.equal(runtimeIdOf({ documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-word-v1/9.3.4.60/3' }), runtimeIdOf(DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES[0]), 'sanity: /3 is the entry under test');
+  assert.deepEqual(client('euro-office-bridge-word-v1/9.3.5.0/5'), { titlePage: true, evenAndOdd: false }, 'the accepted 9.3.5.0/5 patch: accepted');
+  for (const old of ['3', '4']) assert.equal(client(`euro-office-bridge-word-v1/9.3.5.0/${old}`), null, `D-state: the retired 9.3.5.0/${old}, even with the capability advertised: refused`);
+  assert.equal(runtimeIdOf({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-word-v1/9.3.5.0/5' }), runtimeIdOf(DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES[0]), 'sanity: the accepted 9.3.5.0/5 is the entry under test');
 });
 
 test('__eoB21Variant: the prelude\'s OWN validator rejects any malformed/incomplete bridge value as null, never trusts it as-is', () => {
-  const manifest = () => ({ bridgeVersion: '1.0.0', documentServerVersion: '9.3.4', patchVersion: 'euro-office-bridge-word-v1/9.3.4.60/3',
+  const manifest = () => ({ bridgeVersion: '1.0.0', documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-word-v1/9.3.5.0/5',
     capabilities: [{ id: 'docx.section.variantState.read/v1', version: 1, kind: 'READ', format: 'DOCX', mutation: 'NO' }] });
   const client = readResult => {
     const Api = { GetEuroOfficeBridge: () => ({ manifest, read: () => readResult }) };

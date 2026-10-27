@@ -27,9 +27,14 @@ const { createStore, createFakeDocxDriver } = require('../fakes/fake-docx-driver
  */
 
 // since owner decision (B) (internal tracker) the gate key is the served Word bridge manifest's runtime identity
+// DS9346 (owner D5=B, VALTAS, docs/DS9346-RUNTIME-RETIREMENT.md): VERIFIED (DOCX_RUNTIME_ID) is now the single
+// ACCEPTED 9.3.5.0 identity (/5 since the GH #292 S4 D-state) -- it carries BOTH numberingRemoveBridge AND sectionVariant (B18 and B21 collapse
+// to the same one-entry list). The historical word /1, /2, /3 (9.3.4.60) identities are all RETIRED -- kept
+// here, under their old names, purely as negative (off-list) examples.
 const { DOCX_RUNTIME_ID: VERIFIED, DOCX_RUNTIME_IDS, cacheKeyOf } = require('../../src/core/runtime-identity.cjs');
-const VERIFIED_V2 = '9.3.4|euro-office-bridge-word-v1/9.3.4.60/2'; // M11.5d.1: the compat Word /2
-const VERIFIED_V3 = '9.3.4|euro-office-bridge-word-v1/9.3.4.60/3'; // M11.5e.2: the compat Word /3 (B21 Bridge READ)
+const VERIFIED_V1 = '9.3.4|euro-office-bridge-word-v1/9.3.4.60/1'; // retired: M11.5d, word /1 (no Bridge WRITE/READ)
+const VERIFIED_V2 = '9.3.4|euro-office-bridge-word-v1/9.3.4.60/2'; // retired: M11.5d.1, the compat Word /2
+const VERIFIED_V3 = '9.3.4|euro-office-bridge-word-v1/9.3.4.60/3'; // retired: M11.5e.2, the compat Word /3 (B21 Bridge READ)
 const UNKNOWN = '9.3.4|euro-office-bridge-word-v1/9.3.4.60/0';
 const PLAIN = { bold: false, italic: false, underline: false, strike: false, fontFamily: 'Arial', fontSize: 22, language: 'hu-HU' };
 const A = 'Alpha item.';
@@ -67,12 +72,12 @@ const USERS = [
 ];
 
 for (const [name, store, steps, at] of USERS) {
-  test(`B18 runtime gate (POSITIVE): ${name} on word /2 -> APPLIED`, async () => {
-    const { x } = await run(store(), task(...steps), { runtime: VERIFIED_V2 });
+  test(`B18 runtime gate (POSITIVE): ${name} on the accepted 9.3.5.0/3 runtime -> APPLIED`, async () => {
+    const { x } = await run(store(), task(...steps), { runtime: VERIFIED });
     assert.ok(x.appliedOperations.every(e => e.status === OPERATION_STATUS.APPLIED), JSON.stringify(x.appliedOperations.map(e => [e.status, e.evidence])));
   });
 
-  for (const [label, build] of [['word /1 (no Bridge WRITE)', VERIFIED], ['unknown build', UNKNOWN], ['unparsable build (null)', null]]) {
+  for (const [label, build] of [['retired word /1 (no Bridge WRITE)', VERIFIED_V1], ['retired word /2', VERIFIED_V2], ['retired word /3', VERIFIED_V3], ['unknown build', UNKNOWN], ['unparsable build (null)', null]]) {
     test(`B18 runtime gate (NEGATIVE): ${name} on ${label} -> refused PREWRITE, 0 dispatch / 0 write / 0 command for the step`, async () => {
       const s = store();
       const durableBefore = JSON.stringify(s.durable);
@@ -91,9 +96,9 @@ for (const [name, store, steps, at] of USERS) {
 
 test('B18 runtime gate (NEGATIVE): the removal via outdent at level 0 -- the Bridge WRITE alone not proven -> refused PREWRITE, 0 dispatch for the step', async () => {
   const steps = [{ intent: 'set_list_level', selector: { text: E2 }, level: 0 }, { intent: 'outdent_list_item', selector: { text: E2 } }];
-  const ok = await run(createStore(listDoc()), task(...steps), { runtime: VERIFIED_V2 });
+  const ok = await run(createStore(listDoc()), task(...steps), { runtime: VERIFIED });
   assert.ok(ok.x.appliedOperations.every(e => [OPERATION_STATUS.APPLIED, OPERATION_STATUS.SATISFIED].includes(e.status)), JSON.stringify(ok.x.appliedOperations.map(e => [e.status, e.evidence])));
-  const { x, driver } = await run(createStore(listDoc()), task(...steps), { runtime: VERIFIED_V2, gateOverride: { numberingRemoveBridge: false } });
+  const { x, driver } = await run(createStore(listDoc()), task(...steps), { runtime: VERIFIED, gateOverride: { numberingRemoveBridge: false } });
   assert.equal(status(x, 1), OPERATION_STATUS.FAILED);
   assert.equal(reason(x, 1), B18_REFUSAL);
   assert.equal(driver.calls.refusedInternal || 0, 0);
@@ -104,8 +109,8 @@ test('B18 driver second line: a removal command reaching dispatch off word /2 is
   const d = driverModule.createEuroOfficeDocxDriver({ url: 'http://unused.invalid', user: 'u', pass: 'p', loadPlaywright: () => ({ ok: false }) });
   const r = await d.dispatch(null, { kind: 'callCommand', body: 'return 1;', meta: { family: 'list', listAction: 'remove_list', bridgeNumberingRemove: true } });
   assert.deepEqual([r.ok, r.dispatched, r.outcome], [false, false, 'b18-bridge-write-runtime-not-proven']);
-  for (const rt of [VERIFIED, UNKNOWN, null]) assert.equal(driverModule.internalWriteRefusal({ meta: { bridgeNumberingRemove: true } }, rt).outcome, 'b18-bridge-write-runtime-not-proven', String(rt));
-  assert.equal(driverModule.internalWriteRefusal({ meta: { bridgeNumberingRemove: true } }, VERIFIED_V2), null, 'word /2: let through');
+  for (const rt of [VERIFIED_V1, VERIFIED_V2, VERIFIED_V3, UNKNOWN, null]) assert.equal(driverModule.internalWriteRefusal({ meta: { bridgeNumberingRemove: true } }, rt).outcome, 'b18-bridge-write-runtime-not-proven', String(rt));
+  assert.equal(driverModule.internalWriteRefusal({ meta: { bridgeNumberingRemove: true } }, VERIFIED), null, 'the accepted 9.3.5.0/3 runtime: let through');
   assert.equal(driverModule.internalWriteRefusal({ meta: {} }, VERIFIED), null, 'a non-removal command is not touched');
 });
 
@@ -134,24 +139,37 @@ test('driver second line: dispatch refuses a command naming an internal dependen
   }
 });
 
-test('driver gate: the gate key is the Word manifest runtime id (the URL cache key is diagnostic only); B18 = the word /2 /3 Bridge WRITE list; B21 = the word /3 Bridge READ list only', () => {
+test('driver gate: the gate key is the Word manifest runtime id (the URL cache key is diagnostic only); B18 = B21 = S4 = L7 = the single accepted 9.3.5.0/5 identity (DS9346 + the GH #292 S4 D-state: every older word revision is retired)', () => {
   assert.equal(cacheKeyOf('https://eurooffice.example.org/9.3.4-94bc577ecccd9583be1b130bd5a6b407/web-apps/apps/documenteditor/main/index.html?x=1'), '9.3.4-94bc577ecccd9583be1b130bd5a6b407');
-  assert.equal(VERIFIED, '9.3.4|euro-office-bridge-word-v1/9.3.4.60/1');
-  assert.deepEqual([...driverModule.B18_BRIDGE_WRITE_RUNTIMES], [VERIFIED_V2, VERIFIED_V3]);
+  assert.equal(VERIFIED, '9.3.5|euro-office-bridge-word-v1/9.3.5.0/5');
+  // DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the historical word /2 /3 9.3.4.60 chain is retired.
+  // GH #292 S4 D-state (owner GO 2026-10-24): word /3 and /4 are retired too (with their DS rollback points) -- /5 (= /4 + the
+  // GH #293 L7 list members READ / list detach WRITE; every /3 and /4 handler byte-identical, the handler-identity tests) is
+  // the single accepted Word runtime, and every Bridge gate list collapses to it.
+  const OLD3 = '9.3.5|euro-office-bridge-word-v1/9.3.5.0/3';
+  const OLD4 = '9.3.5|euro-office-bridge-word-v1/9.3.5.0/4';
+  assert.deepEqual([...driverModule.B18_BRIDGE_WRITE_RUNTIMES], [VERIFIED]);
   assert.ok(Object.isFrozen(driverModule.B18_BRIDGE_WRITE_RUNTIMES));
-  assert.deepEqual([...DOCX_RUNTIME_IDS], [VERIFIED, VERIFIED_V2, VERIFIED_V3]);
-  assert.equal(driverModule.internalGateOf(VERIFIED_V2).numberingRemoveBridge, true);
-  assert.equal(driverModule.internalGateOf(VERIFIED_V3).numberingRemoveBridge, true, 'M11.5e.2: word /3 carries the B18 Bridge WRITE byte-identically');
+  assert.deepEqual([...DOCX_RUNTIME_IDS], [VERIFIED]);
+  assert.equal(driverModule.internalGateOf(VERIFIED_V1).numberingRemoveBridge, false, 'retired word /1: no longer accepted at all');
+  assert.equal(driverModule.internalGateOf(VERIFIED_V2).numberingRemoveBridge, false, 'retired word /2');
+  assert.equal(driverModule.internalGateOf(VERIFIED_V3).numberingRemoveBridge, false, 'retired word /3');
   const ok = driverModule.internalGateOf(VERIFIED);
-  assert.deepEqual(Object.keys(ok).sort(), ['numberingRemoveBridge', 'runtime', 'sectionVariant']);
-  assert.equal(ok.numberingRemoveBridge, false, 'word /1 has no Bridge WRITE: the removal is refused there');
+  assert.deepEqual(Object.keys(ok).sort(), ['listScopeBridge', 'numberingRemoveBridge', 'runtime', 'sectionVariant', 'styleNextLinkBridge']);
+  assert.deepEqual([ok.numberingRemoveBridge, ok.sectionVariant, ok.styleNextLinkBridge, ok.listScopeBridge], [true, true, true, true], 'word /5 carries every Bridge capability');
+  for (const old of [OLD3, OLD4]) {
+    const g = driverModule.internalGateOf(old);
+    assert.deepEqual([g.numberingRemoveBridge, g.sectionVariant, g.styleNextLinkBridge, g.listScopeBridge], [false, false, false, false], `D-state: the retired ${old} carries none`);
+  }
+  assert.deepEqual([...driverModule.S4_BRIDGE_WRITE_RUNTIMES], [VERIFIED]);
+  assert.deepEqual([...driverModule.L7_BRIDGE_RUNTIMES], [VERIFIED]);
   assert.equal(driverModule.internalGateOf(UNKNOWN).numberingRemoveBridge, false);
-  // M11.5e.4: B21 cut over to the word /3 Bridge READ ONLY -- narrower than B18's list (word /1, /2 have no capability)
-  assert.deepEqual([...driverModule.B21_BRIDGE_READ_RUNTIMES], [VERIFIED_V3]);
+  assert.deepEqual([...driverModule.B21_BRIDGE_READ_RUNTIMES], [VERIFIED]);
   assert.ok(Object.isFrozen(driverModule.B21_BRIDGE_READ_RUNTIMES));
-  assert.equal(ok.sectionVariant, false, 'word /1 has no Bridge READ: the variant re-check is refused there');
-  assert.equal(driverModule.internalGateOf(VERIFIED_V2).sectionVariant, false, 'word /2 has no B21 Bridge READ either');
-  assert.equal(driverModule.internalGateOf(VERIFIED_V3).sectionVariant, true);
+  assert.equal(ok.sectionVariant, true, 'the accepted 9.3.5.0/3 runtime carries the B21 Bridge READ');
+  assert.equal(driverModule.internalGateOf(VERIFIED_V1).sectionVariant, false, 'retired word /1');
+  assert.equal(driverModule.internalGateOf(VERIFIED_V2).sectionVariant, false, 'retired word /2: no B21 Bridge READ either');
+  assert.equal(driverModule.internalGateOf(VERIFIED_V3).sectionVariant, false, 'retired word /3: no longer accepted at all');
   assert.equal(driverModule.internalGateOf(UNKNOWN).sectionVariant, false);
   assert.equal(driverModule.applyInternalGate, undefined, 'M11.5d.4: the RemoveNumPr presence read and its gate are gone');
 });
@@ -160,7 +178,7 @@ test('driver gate: propertyQuery() gates the Word bridge reads on the stable Wor
   const { BRIDGE_CAPABILITIES } = require('../../src/drivers/eurooffice/ds-bridge.cjs');
   const { ACCEPTED_RUNTIMES } = require('../../src/core/runtime-identity.cjs');
   assert.equal(driverModule.PROPERTY_QUERY, driverModule.propertyQuery());
-  assert.ok(driverModule.PROPERTY_QUERY.includes(JSON.stringify(ACCEPTED_RUNTIMES.docx)), 'the accepted Word runtimes (/1 + /2 + /3) are threaded into __eoBridgeRead');
+  assert.ok(driverModule.PROPERTY_QUERY.includes(JSON.stringify(ACCEPTED_RUNTIMES.docx)), 'the accepted Word runtime(s) are threaded into __eoBridgeRead');
   assert.equal(/9\.3\.4-[0-9a-f]{8,}/.test(driverModule.PROPERTY_QUERY), false, 'no cache key in the query');
   assert.doesNotMatch(driverModule.PROPERTY_QUERY, /\.GetLvl\(/);
   assert.doesNotMatch(driverModule.PROPERTY_QUERY, /GetFormat/);
