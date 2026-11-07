@@ -26,6 +26,8 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
 
 const RT6 = '9.3.5|euro-office-bridge-v1/9.3.5.0/16';
 const RT17 = '9.3.5|euro-office-bridge-v1/9.3.5.0/17';
+const RT18 = '9.3.5|euro-office-bridge-v1/9.3.5.0/18';
+const RT19 = '9.3.5|euro-office-bridge-v1/9.3.5.0/19';
 const book = () => [{ name: 'Data', cells: { A1: { v: 'x' }, B1: { v: 'y' } }, merges: [] }];
 const task = spec => ({ id: 'b05w', steps: [{ intent: 'format_range', sheet: 'Data', range: 'A1', format: spec }] });
 const INDENT = { align: { horizontal: 'left', indent: 2 } };
@@ -79,10 +81,10 @@ test('scope (B05_ONLY): a PUBLIC align.horizontal on /5 is untouched by this gat
   assert.equal(driver.calls.dispatch, 1);
 });
 
-// GH #326/#327: the format-side and driver-side B05 lists stay pinned to each other, now both /16 + /17.
-test('the driver second line: the SAME two-entry (9.3.5.0/16 + /17) list; a B05 command is refused WITHOUT an editor elsewhere; an unmarked one is not', async () => {
+// GH #326/#327, then the /18 cutover: the format-side and driver-side B05 lists stay pinned to each other, now both /16 + /17 + /18.
+test('the driver second line: the SAME five-entry (9.3.5.0/16 + /17 + /18 + /19 + /21) list; a B05 command is refused WITHOUT an editor elsewhere; an unmarked one is not', async () => {
   assert.deepEqual([...format.B05_BRIDGE_WRITE_RUNTIMES], [...drv.B05_BRIDGE_WRITE_RUNTIMES]);
-  assert.deepEqual([...drv.B05_BRIDGE_WRITE_RUNTIMES], [RT6, RT17]);
+  assert.deepEqual([...drv.B05_BRIDGE_WRITE_RUNTIMES], [RT6, RT17, RT18, RT19, '9.3.5|euro-office-bridge-v1/9.3.5.0/21', '9.3.5|euro-office-bridge-v1/9.3.5.0/22', '9.3.5|euro-office-bridge-v1/9.3.5.0/23', '9.3.5|euro-office-bridge-v1/9.3.5.0/24', '9.3.5|euro-office-bridge-v1/9.3.5.0/25', '9.3.5|euro-office-bridge-v1/9.3.5.0/26', '9.3.5|euro-office-bridge-v1/9.3.5.0/27', '9.3.5|euro-office-bridge-v1/9.3.5.0/28', '9.3.5|euro-office-bridge-v1/9.3.5.0/29']);
   const d = drv.createEuroOfficeXlsxDriver({ url: 'u', user: 'u', pass: 'p', loadPlaywright: () => ({ ok: false }) });
   const lowered = format.lower(planOperations(task(INDENT)).operations[0], { sheet: 'Data' });
   const r = await d.dispatch(null, lowered);

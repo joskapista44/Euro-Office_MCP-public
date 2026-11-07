@@ -1,5 +1,6 @@
 'use strict';
 
+const { EXACT_PARAGRAPH_LOOKUP } = require('./paragraph-lookup.cjs');
 const { norm, resolveTextUnit, textUnits } = require('../inventory.cjs');
 
 /**
@@ -243,11 +244,14 @@ function lower(op, target) {
 function commandBody(meta) {
   // the whole-unit lowering is the one measured in rich probes 1-5, byte for byte; only a matchText step gets the in-paragraph range search (GH #266)
   const EXACT = meta.matchText === undefined
-    ? "const exact = () => (doc.Search(m.targetText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.targetText);"
-    : `const exact = () => {
-    const parents = (doc.Search(m.targetText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.targetText);
-    if (parents.length !== 1) return [];
-    const paragraph = parents[0].GetParagraph(0);
+    ? `${EXACT_PARAGRAPH_LOOKUP}
+  const exact = () => {
+    const r = unitRangeOf(m.targetText);
+    return r && String(r.GetText(textOpts) || '') === m.targetText ? [r] : [];
+  };`
+    : `${EXACT_PARAGRAPH_LOOKUP}
+  const exact = () => {
+    const paragraph = exactParagraphOf(m.targetText);
     if (!paragraph || typeof paragraph.Search !== 'function') return [];
     return (paragraph.Search(m.matchText, true) || []).filter(r => String(r.GetText(textOpts) || '') === m.matchText);
   };`;
@@ -267,9 +271,9 @@ try {
   }
   const before = hits[0].GetTextPr();
   if (!before || !hits[0].AddHyperlink(m.url, m.tooltip)) return;
-  const again = exact();
-  if (again.length !== 1) return;
-  again[0].SetTextPr(before);
+  // the properties go back on the range the link was added on: once linked, neither the paragraph-position range (the
+  // hyperlink takes a position) nor the in-paragraph search finds the text again (measured LIVE, docs/evidence/add-link-lookup-regression-probe-20261029.json)
+  hits[0].SetTextPr(before);
 } catch (_) {}
 `;
 }

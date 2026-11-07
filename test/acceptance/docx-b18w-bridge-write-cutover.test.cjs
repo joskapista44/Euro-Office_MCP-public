@@ -32,7 +32,10 @@ function editor(block, paras) {
     GetNumbering: () => (p.num ? { GetLevelIndex: () => p.num.level, GetNumbering: () => ({ GetLevel: () => ({}) }) } : null),
     Paragraph: { Pr: { NumPr: p.num ? { NumId: p.num.numId } : null }, RemoveNumPr: () => { calls.remove.push(p.text); p.num = null; } },
   });
-  const doc = { Search: t => P.filter(p => p.text.includes(t)).map(p => ({ GetText: () => p.text, GetParagraph: () => api(p) })) };
+  // GH #311/#312: the product command finds its paragraph by iterating the body (paragraph-lookup.cjs); the Bridge block keeps its own Search
+  const para = p => ({ ...api(p), GetClassType: () => 'paragraph', GetText: () => p.text });
+  const doc = { Search: t => P.filter(p => p.text.includes(t)).map(p => ({ GetText: () => p.text, GetParagraph: () => api(p) })),
+    GetElementsCount: () => P.length, GetElement: i => para(P[i]) };
   const Api = { GetDocument: () => doc };
   new Function('Api', block.replace(/,\s*$/, ''))(Api);
   const raw = Api.GetEuroOfficeBridge;

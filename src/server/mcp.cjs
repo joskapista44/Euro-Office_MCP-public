@@ -1,5 +1,7 @@
 'use strict';
 
+const { wireSchema } = require('./schema-defs.cjs');
+
 /**
  * A minimal MCP server over stdio (owner decision, owner channel 2026-10-08, point 3) -- a TRANSPORT adapter only:
  * no lifecycle or executor of its own.
@@ -47,7 +49,8 @@ function createMcpServer({ tools, info, log, input = process.stdin, output = pro
       case 'notifications/initialized': initialized = true; return;
       case 'ping': if (!isNotification) reply(id, {}); return;
       case 'tools/list':
-        reply(id, { tools: Object.entries(tools).map(([name, t]) => ({ name, description: t.description, inputSchema: t.inputSchema })) });
+        // GH #358: the wire form hoists repeated sub-schemas into $defs (schema-defs.cjs); the in-process schema stays inline
+        reply(id, { tools: Object.entries(tools).map(([name, t]) => ({ name, description: t.description, inputSchema: wireSchema(t.inputSchema) })) });
         return;
       case 'tools/call': {
         const name = params && params.name;

@@ -305,7 +305,7 @@ test('lowering: one callCommand per operation, public API only, no editor backdo
     assert.doesNotMatch(body, /frame\.evaluate|window\.|SetDocPosType|private_|asc_|getSelectedElements/);
     assert.doesNotThrow(() => new Function(body));
   }
-  assert.match(ln, /again\[0\]\.SetTextPr\(before\)/, 'the link restores the text properties');
+  assert.match(ln, /hits\[0\]\.SetTextPr\(before\)/, 'the link restores the text properties on the range it was added on');
   assert.match(ln, /hits\[0\]\.AddHyperlink\(m\.url, m\.tooltip\)/, 'the link covers the exact target RANGE');
   assert.doesNotMatch(ln, /GetParagraph\(0\)|paragraph\.AddHyperlink/, 'never the paragraph-wide link (probe 4)');
   assert.match(nt, /finally \{ doc\.MoveCursorToStart\(\); \}/, 'the note returns the cursor to the main body');

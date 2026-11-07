@@ -36,6 +36,11 @@ async function readNumbering(paragraphs, opts) {
 }
 
 const fmt = (numFmt, lvlText, suff, lvlJc, start) => ({ numFmt, lvlText, suff, lvlJc, ...(start === undefined ? {} : { start }) });
+// GH #319: none of this file's fixtures set a glyph colour/font -- the expected PROJECTION (what
+// numberingFormatFieldsOf actually returns) names both absent fields, same discipline as every
+// other key; `fmt()` above stays untouched since it ALSO builds the fake driver's raw INPUT, where
+// the two keys are correctly just not present at all.
+const expectedFmt = (...args) => ({ ...fmt(...args), color: 'UNOBSERVABLE:color-not-set', font: 'UNOBSERVABLE:font-not-set' });
 
 // ---- bullet + numbered + multilevel, present:true, every field measured -------------------------------------------
 
@@ -60,15 +65,15 @@ test('GH #225: bullet list, numbered list and a two-level numbered list, each fu
   const bA = items.find(i => i.text === 'Bullet A');
   assert.deepEqual(bA, { text: 'Bullet A', kind: 'list_item', numbering: {
     present: true, type: 'bullet', numId: 'n1', level: 0, levelFormats: [5, 5, 5, 5, 5, 5, 5, 5, 5],
-    format: fmt('bullet', '-', 'tab', 'left', 1), // GH #293 N5: no abstractId -- session-local, never a read field
+    format: expectedFmt('bullet', '-', 'tab', 'left', 1), // GH #293 N5: no abstractId -- session-local, never a read field
   } });
   const bB = items.find(i => i.text === 'Bullet B');
   assert.equal(bB.numbering.numId, bA.numbering.numId, 'SHARED_NUMID_OBSERVABLE: both items name the SAME numId');
 
   const nA = items.find(i => i.text === 'Numbered A');
-  assert.deepEqual(nA.numbering, { present: true, type: 'numbered', numId: 'n2', level: 0, levelFormats: [13, 13, 13, 13, 13, 13, 13, 13, 13], format: fmt('decimal', '%1.', 'tab', 'left', 1) });
+  assert.deepEqual(nA.numbering, { present: true, type: 'numbered', numId: 'n2', level: 0, levelFormats: [13, 13, 13, 13, 13, 13, 13, 13, 13], format: expectedFmt('decimal', '%1.', 'tab', 'left', 1) });
   const nSub = items.find(i => i.text === 'Numbered A sub');
-  assert.deepEqual(nSub.numbering, { present: true, type: 'numbered', numId: 'n2', level: 1, levelFormats: [13, 13, 13, 13, 13, 13, 13, 13, 13], format: fmt('lowerLetter', '%2.', 'tab', 'left', 1) });
+  assert.deepEqual(nSub.numbering, { present: true, type: 'numbered', numId: 'n2', level: 1, levelFormats: [13, 13, 13, 13, 13, 13, 13, 13, 13], format: expectedFmt('lowerLetter', '%2.', 'tab', 'left', 1) });
   // distinct numIds: n1 (bullet) and n2 (numbered) never share identity
   assert.notEqual(bA.numbering.numId, nA.numbering.numId);
 });
@@ -112,7 +117,7 @@ test('GH #225: levelFormats unreadable (its OWN gate) -- format and identity sta
   const doc = { numberingFormats: { n1: Object.assign(Array(9).fill(null), { 0: fmt('decimal', '%1.', 'tab', 'left', 3) }) } };
   const [item] = await readNumbering(paras, { doc, script: { levelFormatsUnreadable: true } });
   assert.equal(item.numbering.levelFormats, null);
-  assert.deepEqual(item.numbering.format, fmt('decimal', '%1.', 'tab', 'left', 3));
+  assert.deepEqual(item.numbering.format, expectedFmt('decimal', '%1.', 'tab', 'left', 3));
   assert.equal(item.numbering.numId, 'n1');
 });
 

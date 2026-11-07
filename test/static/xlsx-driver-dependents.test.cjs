@@ -50,6 +50,9 @@ test('B11 bridge body: names in the production shape and filter (hidden/_xlnm-na
     sheetNames: { H: { loc: def('Loc', 'D!$B$2'), dup: def('Dup', 'H!$E$5') } },
     dv: { H: { elems: [{ type: 4, ranges: [{ r1: 0, c1: 4, r2: 0, c2: 4 }], formula1: { text: 'D!$A$1:$A$2' }, formula2: null, operator: 0 }] } },
   }));
+  // GH #362 2nd unit: a SEPARATE, unfiltered hidden-name list (write-planning collision search) -- here only
+  // 'Hid' qualifies (ref present, hidden, not '_xlnm'-named); the other six names are all either visible or excluded.
+  assert.deepEqual(r.hiddenNames, [{ name: 'Hid', scopeSheet: null }]);
   assert.deepEqual(r.names, [
     { name: 'Dup', ref: 'A!$D$4', scopeSheet: null }, { name: 'Dup', ref: 'H!$E$5', scopeSheet: 'H' },
     { name: 'Loc', ref: 'D!$B$2', scopeSheet: 'H' }, { name: 'Print_Titles', ref: 'D!$1:$1', scopeSheet: null }, { name: 'Table1', ref: 'A!$F$2:$G$3', scopeSheet: null }, { name: 'Wb', ref: 'D!$B$2', scopeSheet: null },
@@ -60,28 +63,32 @@ test('B11 bridge body: names in the production shape and filter (hidden/_xlnm-na
 test('B11 bridge body: every gap is UNOBSERVABLE on its own axis, never an empty list, no internal fallback', () => {
   const base = { sheets: ['A'], wbNames: { x: def('X', 'A!$A$1') } };
   // an unaccepted runtime (another patch revision) -> the bridge client's own identity gate
-  assert.deepEqual(runBody(withPatch(model(base), 'euro-office-bridge-v1/9.3.4.60/2')), { names: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', validations: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH' });
+  // GH #362 2nd unit: hiddenNames mirrors names on every gap (both axes come from the SAME dn read).
+  assert.deepEqual(runBody(withPatch(model(base), 'euro-office-bridge-v1/9.3.4.60/2')), { names: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', hiddenNames: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', validations: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH' });
   // DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the served block is now the 9.3.5.0/16 identity.
   assert.equal(BRIDGE_RUNTIME_ID, '9.3.5|euro-office-bridge-v1/9.3.5.0/16', 'POSITIVE CONTROL: the served block is the accepted runtime');
   // no bridge at all
   const nb = model(base); delete nb.api.GetEuroOfficeBridge;
-  assert.deepEqual(runBody(nb), { names: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE', validations: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE' });
+  assert.deepEqual(runBody(nb), { names: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE', hiddenNames: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE', validations: 'UNOBSERVABLE:BRIDGE_UNAVAILABLE' });
   // a capability missing from the manifest
   const nc = model(base); const realB = nc.api.GetEuroOfficeBridge;
   nc.api.GetEuroOfficeBridge = () => { const b = realB(); const m = b.manifest(); m.capabilities = m.capabilities.filter(c => c.id !== 'workbook.definedNames.read/v1'); return { manifest: () => m, read: b.read }; };
   const rnc = runBody(nc);
   assert.equal(rnc.names, 'UNOBSERVABLE:CAPABILITY_MISSING');
+  assert.equal(rnc.hiddenNames, 'UNOBSERVABLE:CAPABILITY_MISSING');
   assert.deepEqual(rnc.validations, { A: [] }, 'the OTHER axis is unaffected');
   // a malformed capability result
   const mf = model(base); const realM = mf.api.GetEuroOfficeBridge;
   mf.api.GetEuroOfficeBridge = () => { const b = realM(); return { manifest: b.manifest, read: () => ({ ok: true, value: 'x' }) }; };
-  assert.deepEqual(runBody(mf), { names: 'UNOBSERVABLE:UNEXPECTED_SHAPE', validations: 'UNOBSERVABLE:UNEXPECTED_SHAPE' });
+  assert.deepEqual(runBody(mf), { names: 'UNOBSERVABLE:UNEXPECTED_SHAPE', hiddenNames: 'UNOBSERVABLE:UNEXPECTED_SHAPE', validations: 'UNOBSERVABLE:UNEXPECTED_SHAPE' });
   // a capability's own refusal (a sheet scope that does not resolve) -> its reason, prefixed
   const bad = model({ sheets: ['A'], sheetNames: {} });
   bad.asc.editor.wbModel.dependencyFormulas.defNames.sheet = { ghost: { g: def('G', 'A!$A$1') } };
-  assert.equal(runBody(bad).names, 'UNOBSERVABLE:BRIDGE:sheet-scope-unresolved');
+  const badR = runBody(bad);
+  assert.equal(badR.names, 'UNOBSERVABLE:BRIDGE:sheet-scope-unresolved');
+  assert.equal(badR.hiddenNames, 'UNOBSERVABLE:BRIDGE:sheet-scope-unresolved');
   // POSITIVE CONTROL: the same base reads fine
-  assert.deepEqual(runBody(model(base)), { names: [{ name: 'X', ref: 'A!$A$1', scopeSheet: null }], validations: { A: [] } });
+  assert.deepEqual(runBody(model(base)), { names: [{ name: 'X', ref: 'A!$A$1', scopeSheet: null }], hiddenNames: [], validations: { A: [] } });
 });
 
 test('B11: no direct-internal dependency read is left in the driver (DIRECT_INTERNAL_FALLBACK=0)', () => {
@@ -92,9 +99,11 @@ test('B11: no direct-internal dependency read is left in the driver (DIRECT_INTE
 });
 
 test('readLive: the dependency read is one callCommand through the bridge body; a failed command is UNOBSERVABLE, never an empty inventory', async () => {
+  // GH #362 2nd unit: `result` simulates the editor's REAL bridge-body output, which always carries hiddenNames
+  // alongside names (dependentsBridgeBody) -- `want` mirrors it, since addDependents() now passes it through.
   for (const [reply, want, wantGate] of [
-    [{ ok: true, outcome: 'command-completed', result: { names: [], validations: { S: [] } } }, { names: [], validations: { S: [] } }, true],
-    [{ ok: true, outcome: 'command-completed', result: { names: 'UNOBSERVABLE:CAPABILITY_MISSING', validations: { S: [] } } }, { names: 'UNOBSERVABLE:CAPABILITY_MISSING', validations: { S: [] } }, false],
+    [{ ok: true, outcome: 'command-completed', result: { names: [], hiddenNames: [], validations: { S: [] } } }, { names: [], hiddenNames: [], validations: { S: [] } }, true],
+    [{ ok: true, outcome: 'command-completed', result: { names: 'UNOBSERVABLE:CAPABILITY_MISSING', hiddenNames: 'UNOBSERVABLE:CAPABILITY_MISSING', validations: { S: [] } } }, { names: 'UNOBSERVABLE:CAPABILITY_MISSING', hiddenNames: 'UNOBSERVABLE:CAPABILITY_MISSING', validations: { S: [] } }, false],
     [{ ok: true, outcome: 'command-completed', result: null }, 'UNOBSERVABLE:dependency-read-failed:command-completed', false],
     [{ ok: false, outcome: 'command-callback-timeout' }, 'UNOBSERVABLE:dependency-read-failed:command-callback-timeout', false],
   ]) {

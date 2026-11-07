@@ -330,7 +330,7 @@ test('M11.3a: the READ tools construct a driver ONLY with the broker configSourc
     .replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n');
   const calls = code.match(/createEuroOffice(Docx|Xlsx)Driver\([^)]*\)/g) || [];
   assert.equal(calls.length, 2, 'one constructor per format');
-  for (const c of calls) assert.match(c, /^createEuroOffice(Docx|Xlsx)Driver\(\{ configSource, loadPlaywright \}\)$/, c);
+  for (const c of calls) assert.match(c, /^createEuroOffice(Docx|Xlsx)Driver\(\{ configSource, loadPlaywright, timeoutMs, commandTimeoutMs \}\)$/, c);
   assert.match(code, /configSource\.kind !== 'BROKER'/, 'a non-broker source is refused before the constructor');
   assert.equal(/\b(url|user|pass)\s*:/.test(code), false, 'no url/user/pass option anywhere in the READ tools');
   const { productDriver } = require('../../src/server/read-tools.cjs');
@@ -355,7 +355,7 @@ test('DIRECT_BASIC_AUTH_PRODUCT_CALLS=0: the product runtime never builds the le
 // M11.2 left the exposure unchanged; M11.3b.2 released the two READ tools; M11.4b.1 (owner, owner channel) adds
 // xlsx_execute_task -- docx_execute_task stays withheld (exact-set guard: test/static/tool-exposure-exact-set-guard.test.cjs)
 test('tool exposure: product_status + the two READ tools + xlsx_execute_task + (GH #228 proposed state) docx_execute_task exposed, no row withheld', () => {
-  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   assert.deepEqual(TOOL_ROWS.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'YES').map(r => r.TOOL).sort(), []);
 });
 

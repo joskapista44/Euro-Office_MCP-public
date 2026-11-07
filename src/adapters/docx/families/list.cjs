@@ -1,5 +1,6 @@
 'use strict';
 
+const { EXACT_PARAGRAPH_LOOKUP } = require('./paragraph-lookup.cjs');
 const { norm } = require('../inventory.cjs');
 
 /** M11.5d.4: B18 -- the numbering removal through the word /2 Bridge WRITE (the driver's __eoB18Remove; no direct internal path, no fallback). */
@@ -455,9 +456,8 @@ try {
   const textOpts = { Numbering: false };
   const doc = Api.GetDocument();
   if (!doc) return;
-  const hits = (doc.Search(m.targetText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.targetText);
-  if (hits.length !== 1) return;
-  const paragraph = hits[0].GetParagraph(0);
+${EXACT_PARAGRAPH_LOOKUP}
+  const paragraph = exactParagraphOf(m.targetText);
   if (!paragraph) return;
   const current = typeof paragraph.GetNumbering === 'function' ? paragraph.GetNumbering() : null;
   const liveLevel = current && typeof current.GetLevelIndex === 'function' ? current.GetLevelIndex() : null;
@@ -466,9 +466,9 @@ try {
   if (m.listAction === 'apply_list') {
     let numbering = null;
     if (m.continueFromText) {
-      const prev = (doc.Search(m.continueFromText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.continueFromText);
-      if (prev.length !== 1) return;
-      const pl = prev[0].GetParagraph(0).GetNumbering();
+      const prev = exactParagraphOf(m.continueFromText);
+      if (!prev) return;
+      const pl = prev.GetNumbering();
       numbering = pl && typeof pl.GetNumbering === 'function' ? pl.GetNumbering() : null;
       if (!numbering) return;
     } else numbering = doc.CreateNumbering(m.type);

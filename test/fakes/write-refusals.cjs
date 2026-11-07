@@ -10,7 +10,8 @@ const FILE = '1303626';
 const VALID = Object.freeze({
   write_range: { intent: 'write_range', sheet: 'Budget', range: 'A1:B2', values: [['Name', 3], ['pear', 7.5]] },
   insert_rows: { intent: 'insert_rows', sheet: 'Budget', at: 3, count: 2, anchor: { column: 'A', value: 'pear' } },
-  delete_rows: { intent: 'delete_rows', sheet: 'Budget', at: 2, count: 1, anchor: { column: 'A', value: 7 } },
+  // owner decision B (2026-11-02): a delete names its witness too -- the first REMOVED row (at `at`), here A2 'pear' of write_range above
+  delete_rows: { intent: 'delete_rows', sheet: 'Budget', at: 2, count: 1, anchor: { column: 'A', value: 7 }, witness: { column: 'A', value: 'pear' } },
   rename_sheet: { intent: 'rename_sheet', sheet: 'Budget', name: 'Budget_2026' },
   unmerge_range: { intent: 'unmerge_range', sheet: 'Budget', range: 'C1:D1' },
   set_chart_title: { intent: 'set_chart_title', sheet: 'Budget', name: 'Chart 1', title: 'Sales 2026' },

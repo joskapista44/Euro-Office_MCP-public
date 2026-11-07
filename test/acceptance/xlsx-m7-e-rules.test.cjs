@@ -23,7 +23,8 @@ const book = (rules = RULES()) => {
 };
 const step = (intent, extra) => ({ id: 'm7-e-r2', steps: [{ intent, sheet: 'P', ...extra }] });
 const INS = step('insert_rows', { at: 5, count: 2, anchor: { column: 'A', value: 'r5' } });
-const DEL = step('delete_rows', { at: 5, count: 2, anchor: { column: 'A', value: 'r7' } });
+// owner decision B (2026-11-02): the witness is the first REMOVED row (A5 'r5')
+const DEL = step('delete_rows', { at: 5, count: 2, anchor: { column: 'A', value: 'r7' }, witness: { column: 'A', value: 'r5' } });
 const COL = step('insert_columns', { at: 'D', count: 1, anchor: { row: 1, value: 'd1' } });
 
 async function run(store, t, script = {}) {
@@ -44,9 +45,16 @@ for (const [name, t] of [['insert rows 5:6', INS], ['delete rows 5:6', DEL], ['i
     const a = await run(store, t);
     assert.equal(a.result.ok, true, JSON.stringify([op(a.result).evidence, a.result.execution.preservationVerification]));
     assert.equal(rulesOf(store), before);
+    const settled = JSON.stringify(store.durable);
     const again = await run(store, t);
     assert.equal(again.m.commands, 0);
-    assert.equal(op(again.result).status, OPERATION_STATUS.SATISFIED);
+    if (t === DEL) {
+      // owner decision B (2026-11-02): a delete has no SATISFIED path -- the already-deleted shape is refused, 0 writes
+      assert.equal(op(again.result).status, OPERATION_STATUS.FAILED);
+      assert.equal(reason(again.result), 'xlsx-structure-delete-prior-execution-unprovable');
+      assert.equal(again.m.writes, 0);
+      assert.equal(JSON.stringify(store.durable), settled, 'the refused retry changed nothing');
+    } else assert.equal(op(again.result).status, OPERATION_STATUS.SATISFIED);
   });
 }
 
@@ -63,7 +71,7 @@ for (const [name, rule, t] of [
   ['an absolute reference after the cut', { kind: 'conditional', range: 'C1:C2', formula: '=$C$9>2' }, INS],
   ['a sheet-qualified reference', { kind: 'conditional', range: 'C1:C2', formula: '=Q!$A$1>2' }, INS],
   ['a defined name in the formula', { kind: 'conditional', range: 'C1:C2', formula: '=Limit>2' }, INS],
-  ['delete columns (not measured)', { kind: 'conditional', type: 'xlCellValue', operator: 'xlGreater', range: 'A1:A2', formula: '15' }, step('delete_columns', { at: 'D', count: 1, anchor: { row: 1, value: 'e1' } })],
+  ['delete columns (not measured)', { kind: 'conditional', type: 'xlCellValue', operator: 'xlGreater', range: 'A1:A2', formula: '15' }, step('delete_columns', { at: 'D', count: 1, anchor: { row: 1, value: 'e1' }, witness: { row: 1, value: 'd1' } })],
 ]) {
   test(`R2 / R3a refused before the write: ${name}`, async () => {
     const store = createStore(book([rule]));

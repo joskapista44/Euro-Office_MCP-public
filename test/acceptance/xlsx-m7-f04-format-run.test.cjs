@@ -94,9 +94,9 @@ test('refused BEFORE dispatch: an empty cell has no run to address', async () =>
   assert.equal(reason(result), 'xlsx-format-run-on-empty-cell');
 });
 
-test('refused BEFORE dispatch: text over the 256-char ceiling (xlsx-format-run-text-too-long)', async () => {
+test('refused BEFORE dispatch: text over the 1024-char ceiling (xlsx-format-run-text-too-long)', async () => {
   const b = book();
-  b[0].cells.A5 = { v: 'x'.repeat(300) };
+  b[0].cells.A5 = { v: 'x'.repeat(1100) }; // GH #364 raised RUN_MAP_CHAR_CEILING 256 -> 1024; must stay PAST it
   const { result, driver } = await run(createStore(b), task([runA()], 'A5'));
   assert.equal(result.ok, false);
   assert.equal(driver.calls.dispatch, 0);

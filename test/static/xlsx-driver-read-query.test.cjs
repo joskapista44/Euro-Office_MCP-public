@@ -146,10 +146,13 @@ test('run-map: two runs merged from per-character reads, the font-tuple compared
   });
 });
 
-test('run-map fail-closed: empty cell, text over the 256-char ceiling, a throwing getter', () => {
+test('run-map fail-closed: empty cell, text over the 1024-char ceiling, a throwing getter', () => {
   const empty = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(runFontApi('', () => font(null, null, 'Calibri', 11, null)));
   assert.equal(empty.runReads['Data!A1'], 'UNOBSERVABLE:empty-cell');
-  const long = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(runFontApi('x'.repeat(257), () => font(null, null, 'Calibri', 11, null)));
+  // GH #364 raised RUN_MAP_CHAR_CEILING 256 -> 1024; both sides of the new boundary measured here.
+  const atCeiling = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(runFontApi('x'.repeat(1024), () => font(null, null, 'Calibri', 11, null)));
+  assert.notEqual(atCeiling.runReads['Data!A1'], 'UNOBSERVABLE:text-too-long');
+  const long = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(runFontApi('x'.repeat(1025), () => font(null, null, 'Calibri', 11, null)));
   assert.equal(long.runReads['Data!A1'], 'UNOBSERVABLE:text-too-long');
   const throwing = new Function('Api', readQuery([], { runCells: [{ sheet: 'Data', cell: 'A1' }] }))(runFontApi('x', () => { throw new Error('boom'); }));
   assert.match(throwing.runReads['Data!A1'], /^UNOBSERVABLE:/);
@@ -218,7 +221,7 @@ test('copy_sheet (M11.5c.4 Bridge WRITE): the adapter and the driver gate on the
   // DS9346 (owner D5=B, docs/DS9346-RUNTIME-RETIREMENT.md): the historical 9.3.4.60/8..16 chain this list
   // used to carry was retired -- the single accepted entry became 9.3.5.0/16, byte-identical handler proven
   // by b03-write-handler-identity.test.cjs. GH #326/#327 widens again to /16 + /17 (same byte-identity proof).
-  assert.deepEqual([...B03_BRIDGE_WRITE_RUNTIMES], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17'], 'the explicit manifest runtime id, never a cache key');
+  assert.deepEqual([...B03_BRIDGE_WRITE_RUNTIMES], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17', '9.3.5|euro-office-bridge-v1/9.3.5.0/18', '9.3.5|euro-office-bridge-v1/9.3.5.0/19', '9.3.5|euro-office-bridge-v1/9.3.5.0/21', '9.3.5|euro-office-bridge-v1/9.3.5.0/22', '9.3.5|euro-office-bridge-v1/9.3.5.0/23', '9.3.5|euro-office-bridge-v1/9.3.5.0/24', '9.3.5|euro-office-bridge-v1/9.3.5.0/25', '9.3.5|euro-office-bridge-v1/9.3.5.0/26', '9.3.5|euro-office-bridge-v1/9.3.5.0/27', '9.3.5|euro-office-bridge-v1/9.3.5.0/28', '9.3.5|euro-office-bridge-v1/9.3.5.0/29'], 'the explicit manifest runtime id, never a cache key');
   const d = createEuroOfficeXlsxDriver({ url: 'u', user: 'u', pass: 'p', loadPlaywright: () => ({ ok: false }) });
   const lowered = sheets.lower({ intent: 'copy_sheet', selector: { sheet: 'A', name: 'B' } });
   assert.equal(lowered.kind, 'callCommand'); assert.equal(lowered.meta.bridgeCopyWrite, true);

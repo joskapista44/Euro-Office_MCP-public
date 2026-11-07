@@ -21,6 +21,9 @@ const formula = require('../formula.cjs');
  *     values.
  * Refused before the write (named): a single cell (not measured), a merge in the area, an unread / unobservable cell,
  * a non-empty area cell, an array member in the area or the ring, a protected sheet (protection-gate's default).
+ * READ mirror (GH #343): `read_array_formulas` (array-formula-read.cjs) reports anchor / ref / formula / type 'array' with this
+ * file's own `memberOf` / `isMember` (one definition, no copy); an array crossing the requested range is named, not guessed, and two
+ * ADJACENT arrays with the SAME formula are not told apart by the public API.
  * L1: every area cell a member whose formula is the written one (formula.sameFormula), no ring cell a member.
  * L3: every other cell unchanged (cells.verifyPreservation; the area cells are the op's own). Retry: the terminal state
  * on a fresh read -> SATISFIED, 0 write / 0 command. The release referee is the saved <f t="array" ref="<area>">.
@@ -60,6 +63,10 @@ function plan(step, index) {
   };
 }
 
+/** THE array-member definition (LIVE probe, see the header): GetFormulaArray starts with '=' AND the cell's own GetFormula
+ * is not empty. The write guard (memberOf below) and the product READ (array-formula-read.cjs, GH #343) both use this one function. */
+const isMember = (raw, ownFormula) => typeof raw === 'string' && raw.startsWith('=') && ownFormula !== '';
+
 /** One cell's array membership: true | false, or the reason it cannot be told. */
 function memberOf(p, sheet, a) {
   const cell = cellAt(p, sheet, a);
@@ -67,7 +74,7 @@ function memberOf(p, sheet, a) {
   const raw = p.arrayReads ? p.arrayReads[`${sheet}!${a}`] : undefined;
   if (raw === undefined) return { problem: 'xlsx-array-formula-unobservable', why: 'not-read' };
   if (typeof raw === 'string' && raw.startsWith('UNOBSERVABLE')) return { problem: 'xlsx-array-formula-unobservable', why: raw };
-  const member = typeof raw === 'string' && raw.startsWith('=') && cell.f !== '';
+  const member = isMember(raw, cell.f);
   return { cell, member, raw: member ? raw : null };
 }
 
@@ -152,4 +159,4 @@ function wholeTaskChecks(op, finalObservation) {
 const windowsOf = op => [{ sheet: op.selector.sheet, range: op.outer }];
 const liveExtras = op => ({ arrayCells: [...op.cells.map(c => c.a), ...op.ring].map(cell => ({ sheet: op.selector.sheet, cell })) });
 
-module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };
+module.exports = { INTENTS, isMember, memberOf, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };

@@ -59,17 +59,23 @@ test('insert 2 rows at 3 (anchor r3): APPLIED -- cells moved, formulas on BOTH s
   assert.equal(again.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
 });
 
-test('delete 1 row at 3 (surviving anchor r4): APPLIED; retry SATISFIED 0/0 -- an identical retry does NOT delete again', async () => {
+test('delete 1 row at 3 (surviving anchor r4, removed witness r3): APPLIED; retry refused as unprovable 0/0 -- an identical retry does NOT delete again', async () => {
   const store = createStore(book());
-  const t = step('delete_rows', { at: 3, count: 1, anchor: { column: 'A', value: 'r4' } });
+  const t = step('delete_rows', { at: 3, count: 1, anchor: { column: 'A', value: 'r4' }, witness: { column: 'A', value: 'r3' } });
   const { result } = await run(store, t);
   assert.equal(result.ok, true, JSON.stringify(result.execution.primitiveVerification));
   assert.equal(P(store).A3.v, 'r4');
   assert.equal(P(store).C1.f, '=SUM(B1:B4)');
   assert.equal(Q(store).A1.f, '=P!B4');
+  // owner decision B (2026-11-02): the already-deleted shape is no longer SATISFIED -- refused, nothing written
+  const after = JSON.stringify(store.durable);
   const again = await run(store, t);
   assert.equal(again.m.commands, 0);
-  assert.equal(again.result.execution.appliedOperations[0].status, OPERATION_STATUS.SATISFIED);
+  assert.equal(again.m.writes, 0);
+  assert.equal(again.result.ok, false);
+  assert.equal(again.result.execution.appliedOperations[0].status, OPERATION_STATUS.FAILED);
+  assert.equal(reason(again.result), 'xlsx-structure-delete-prior-execution-unprovable');
+  assert.equal(JSON.stringify(store.durable), after, 'the retry changed nothing');
   assert.equal(P(store).A3.v, 'r4', 'still there: no second delete');
 });
 
@@ -82,7 +88,10 @@ test('columns: insert 1 column at B (anchor: row 1 holds 1 in B) and delete it a
   assert.equal(P(store).D1.f, '=SUM(C1:C5)');
   assert.equal(Q(store).A1.f, '=P!C5');
   assert.equal(r1.driver.calls.dispatch, 1);
-  const del = step('delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 1 } });
+  // owner decision B (2026-11-02): the delete needs a witness in the column it removes -- the inserted column is blank,
+  // so one literal is put there first (B1, otherwise empty)
+  P(store).B1 = { v: 'new-b' };
+  const del = step('delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 1 }, witness: { row: 1, value: 'new-b' } });
   const r2 = await run(store, del);
   assert.equal(r2.result.ok, true, JSON.stringify(r2.result.execution.primitiveVerification));
   assert.equal(P(store).B1.v, 1);
@@ -92,9 +101,9 @@ for (const [name, t, why, mutate] of [
   ['the anchor is neither before nor after', step('insert_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' } }), 'xlsx-structure-anchor-state-conflict'],
   ['the anchor is not unique', step('insert_rows', { at: 3, count: 1, anchor: { column: 'A', value: 'dup' } }), 'xlsx-structure-anchor-not-unique', b => { b[0].cells.A3 = { v: 'dup' }; b[0].cells.A4 = { v: 'dup' }; }],
   ['the anchor is missing', step('insert_rows', { at: 3, count: 1, anchor: { column: 'A', value: 'nope' } }), 'xlsx-structure-anchor-not-found'],
-  ['a delete whose block a formula references (it would become #REF!)', step('delete_rows', { at: 5, count: 1, anchor: { column: 'A', value: 'r6' } }), 'xlsx-structure-delete-referenced-by-formulas', b => { b[0].cells.A6 = { v: 'r6' }; }],
+  ['a delete whose block a formula references (it would become #REF!)', step('delete_rows', { at: 5, count: 1, anchor: { column: 'A', value: 'r6' }, witness: { column: 'A', value: 'r5' } }), 'xlsx-structure-delete-referenced-by-formulas', b => { b[0].cells.A6 = { v: 'r6' }; }],
   // M7 S5 R5: an insert inside a merge now GROWS it (xlsx-m7-s5.test.cjs); a delete of its top-left stays refused
-  ['a delete removing a merge\'s top-left', step('delete_columns', { at: 'E', count: 1, anchor: { row: 1, value: 'f1' } }), 'xlsx-structure-merge-top-left-deleted', b => { b[0].cells.F1 = { v: 'f1' }; b[0].merges = ['E2:F2']; b[0].cells.E2 = { v: 'm' }; }],
+  ['a delete removing a merge\'s top-left', step('delete_columns', { at: 'E', count: 1, anchor: { row: 1, value: 'f1' }, witness: { row: 2, value: 'm' } }), 'xlsx-structure-merge-top-left-deleted', b => { b[0].cells.F1 = { v: 'f1' }; b[0].merges = ['E2:F2']; b[0].cells.E2 = { v: 'm' }; }],
   ['a missing sheet', { id: 'x', steps: [{ intent: 'insert_rows', sheet: 'Nope', at: 1, count: 1, anchor: { column: 'A', value: 'x' } }] }, 'xlsx-sheet-not-found'],
 ]) {
   test(`refused BEFORE dispatch: ${name}`, async () => {
@@ -151,9 +160,9 @@ test('planner: shapes, the anchor, the only step of its task', () => {
 test('the command body: exact-name sheet, the entire-span public Insert / Delete', () => {
   for (const [intent, extra, want] of [
     ['insert_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'x' } }, ['A3:XFD4', 'Insert', 'down']],
-    ['delete_rows', { at: 3, count: 1, anchor: { column: 'A', value: 'x' } }, ['A3:XFD3', 'Delete', 'up']],
+    ['delete_rows', { at: 3, count: 1, anchor: { column: 'A', value: 'x' }, witness: { column: 'A', value: 'w' } }, ['A3:XFD3', 'Delete', 'up']],
     ['insert_columns', { at: 'B', count: 2, anchor: { row: 1, value: 'x' } }, ['B1:C1048576', 'Insert', 'right']],
-    ['delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'x' } }, ['B1:B1048576', 'Delete', 'left']],
+    ['delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'x' }, witness: { row: 1, value: 'w' } }, ['B1:B1048576', 'Delete', 'left']],
   ]) {
     const cmd = structure.lower(planOperations(step(intent, extra)).operations[0]);
     const calls = [];

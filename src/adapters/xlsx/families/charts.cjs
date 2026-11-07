@@ -5,7 +5,7 @@ const { sheetNameProblem } = require('../sheet-name.cjs');
 const { cellAt } = require('../inventory.cjs');
 const cells = require('./cells.cjs');
 const drawings = require('../drawings.cjs');
-const { XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS } = require('../runtime.cjs');
+const { XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B29_BRIDGE_WRITE_RUNTIME_IDS } = require('../runtime.cjs');
 
 /**
  * X-O05/3 (internal tracker; reviewed and accepted): gapOverlap/seriesOrder go through the DS
@@ -50,6 +50,23 @@ const B24_BRIDGE_WRITE_RUNTIMES = XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS;
  * verifiable. Never added to that set: these two are NEVER SATISFIED, always APPLY, the SAME
  * write-only discipline the six ORIGINAL targets (STYLE_TARGETS) already follow. */
 const CHART_SERIES_STYLE_WRITE_ONLY_TARGETS = Object.freeze(['markerSymbol', 'lineStyle']);
+/**
+ * GH #346 AUTO-REPAIR Egyseg 3 (design docs/GH346-DPT-AUTO-REPAIR-DESIGN-20261104.md Dontesi pont 5):
+ * `dataPoint` moves OFF the position-based public setter (STYLE_TARGETS.dataPoint's own `fill`/
+ * `outline` setter names, SetDataPointFill/SetDataPointOutLine, are now DEAD for this target -- see
+ * `lower()`'s own dedicated dataPoint branch below) and onto the idx-correct Bridge write
+ * chart.series.dataPoint.style.write/v1 (Egyseg 2, LANDED `fbb08b5b`), gated on B29
+ * (/27-ONLY, unlike B22's /12../27 or B24's /15../27 -- unit 2's own XLSX_B29_BRIDGE_WRITE_RUNTIME_IDS).
+ * UNLIKE markerSymbol/lineStyle above, `dataPoint` IS read-and-compare verifiable (chart.series.
+ * style.read/v1's /27+ `effective`/`duplicated` fields, Egyseg 1, already in every chart read via
+ * `pointStyles` -- see styleBridgeNow/styleBridgeMatches's own dataPoint branch), so it stays OUT of
+ * CHART_SERIES_STYLE_WRITE_ONLY_TARGETS and is grouped with marker/gridlines/gapOverlap/seriesOrder
+ * instead, the SAME "verified, never semanticsNotProven" class. Dispatched as a bare boolean in
+ * `lower()`'s meta (bridgeDataPointStyleWrite), the SAME single-capability shape bridgeChartDeleteWrite
+ * already uses -- no capability-ID constant is needed here (the driver's own
+ * dataPointStyleBridgeWritePrelude() resolves the id from BRIDGE_WRITES.DATA_POINT_STYLE_WRITE).
+ */
+const B29_BRIDGE_WRITE_RUNTIMES = XLSX_B29_BRIDGE_WRITE_RUNTIME_IDS;
 /** ECMA-376 ST_MarkerStyle, minus auto/picture (round8d/build-rev15.py's own measured set) --
  * 'none' goes through the handler's own setNoneMarker() path, server-side; this client-side enum
  * only validates the REQUEST shape, mirroring the ALREADY-RELEASED `symbol` enum convention
@@ -246,6 +263,20 @@ const LINE_STYLE_SMOOTH_CHART_TYPES = Object.freeze(['lineNormal']);
  * `chart-style-plotarea-fill`), threaded into `operations[i].semanticsNotProven` by
  * `write-tools.cjs`'s `mapExecutionResult` (16fd90b9's own mechanism, reused unchanged here -- NOT
  * re-derived, NOT a second notProven axis).
+ *
+ * *** SUPERSEDED for `dataPoint`, GH #346 AUTO-REPAIR Egyseg 3 (design docs/
+ * GH346-DPT-AUTO-REPAIR-DESIGN-20261104.md): the paragraph above now describes only the REMAINING
+ * five write-only targets (plotArea/title/legend/chart/series). `dataPoint` moved OFF the
+ * position-based public setter entirely (GH #346's own root cause -- SetDataPointFill/
+ * SetDataPointOutLine address `oSeries.dPt` by ARRAY POSITION, not by idx) and onto the idx-correct
+ * Bridge write `chart.series.dataPoint.style.write/v1` (B29, /27-ONLY) -- it IS now read-and-compare
+ * verifiable, through the SAME `chart.series.style.read/v1` capability's `effective`/`duplicated`
+ * fields (`pointStyles` in every chart read), the SAME class `marker`/`gridlines` below already are.
+ * `classifyStyle`/the `set_chart_style` PRIMITIVE read-and-compare it like every other verifiable
+ * target, so it CAN return SATISFIED and its write is NEVER `semanticsNotProven`
+ * (`styleNotProven` excludes it, same as marker/gridlines/gapOverlap/seriesOrder). See
+ * `styleBridgeNow`/`styleBridgeMatches`'s own dataPoint branch and `lower()`'s own dedicated
+ * dataPoint `else if` branch. ***
  *
  * X-O04/11: `marker` { seriesIndex, fill?, outline? } (scatter/lineNormal series only, matching the
  * LIVE-proven fixtures -- the SAME scope the X-O04/10 READ capability already uses) and `gridlines`
@@ -984,6 +1015,21 @@ function styleBridgeNow(op, chart) {
     if (badIndex !== -1) return { unobservable: true, reason: orders[badIndex], index: badIndex };
     return { unobservable: false, value: orders.every(o => typeof o === 'number') ? { order: orders } : undefined };
   }
+  // GH #346 AUTO-REPAIR Egyseg 3: dataPoint's own bridge-read value lives in `chart.pointStyles`
+  // (Egyseg 1, `chart.series.style.read/v1` target 'dataPoint', `si:pi` keyed, attached whenever a
+  // chart read requests chartStyle -- read-tools.cjs's own read_charts operation always does). A
+  // key that was never read at all (an out-of-range point, or a chart read that for some reason
+  // never reached this one point) is its OWN unobservable reason, never silently treated as absent.
+  if (op.styleTarget === 'dataPoint') {
+    const ps = chart.pointStyles;
+    if (ps === undefined) return { unobservable: true, reason: 'UNOBSERVABLE:point-styles-not-read' };
+    if (isUnobservableStyle(ps)) return { unobservable: true, reason: ps };
+    const key = `${op.seriesIndex}:${op.dataPointIndex}`;
+    const entry = ps && typeof ps === 'object' ? ps[key] : undefined;
+    if (entry === undefined) return { unobservable: true, reason: 'UNOBSERVABLE:point-not-read' };
+    if (isUnobservableStyle(entry)) return { unobservable: true, reason: entry };
+    return { unobservable: false, value: entry };
+  }
   const s = Array.isArray(chart.series) ? chart.series[op.seriesIndex] : undefined;
   const m = s && s.markerStyle;
   if (isUnobservableStyle(m)) return { unobservable: true, reason: m };
@@ -1002,6 +1048,24 @@ function styleBridgeMatches(op, now) {
   if (op.styleTarget === 'seriesOrder') {
     const now0 = (now.value || {}).order;
     return Array.isArray(now0) && now0.length === op.styleOrder.length && now0.every((o, i) => o === op.styleOrder[i]);
+  }
+  // GH #346 AUTO-REPAIR Egyseg 3: `element !== 'present'` (nothing stored at this idx yet) and a
+  // STILL-stored `duplicated` (dedup not yet applied -- the renderer's first-match-wins entry may
+  // already equal the request, but the duplicate itself still needs normalising) both mean "not yet
+  // satisfied", even when fill/outline would otherwise already match. `fill`/`outline` here are the
+  // {form:'rgb',hex}-shaped chart.series.style.read/v1 value (Egyseg 1) -- NOT the plain hex string
+  // markerStyle's own simpler shape uses below, so this is its own comparison, not a fallthrough into
+  // the generic tail. outlineWidthEmu is deliberately NOT compared, the SAME choice gridlines/marker
+  // make above (width is written but never read back into the SATISFIED decision).
+  if (op.styleTarget === 'dataPoint') {
+    const v = now.value || {};
+    if (v.element !== 'present') return false;
+    if (v.duplicated) return false;
+    const fillHex = v.fill && v.fill.form === 'rgb' ? v.fill.hex : null;
+    const outlineHex = v.outline && v.outline.form === 'rgb' ? v.outline.hex : null;
+    if (op.styleFill !== null && fillHex !== op.styleFill) return false;
+    if (op.styleOutline !== null && outlineHex !== op.styleOutline.color) return false;
+    return true;
   }
   const v = now.value || {};
   if (op.styleFill !== null && v.fill !== op.styleFill) return false;
@@ -1043,6 +1107,15 @@ function classifyStyle(g, op, where, p) {
     const runtime = p && p.runtime ? p.runtime.identity : null;
     if (!B24_BRIDGE_WRITE_RUNTIMES.includes(runtime)) {
       return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-chart-style-bridge-write-runtime-not-proven', ...where, target: op.styleTarget, runtime, proven: B24_BRIDGE_WRITE_RUNTIMES } };
+    }
+  }
+  // GH #346 AUTO-REPAIR Egyseg 3: the SAME "never touch the editor on an unsupported runtime"
+  // discipline as gapOverlap/seriesOrder/markerSymbol/lineStyle above -- but on B29 (/27-ONLY,
+  // narrower than B22's /12../27 or B24's /15../27).
+  if (op.styleTarget === 'dataPoint') {
+    const runtime = p && p.runtime ? p.runtime.identity : null;
+    if (!B29_BRIDGE_WRITE_RUNTIMES.includes(runtime)) {
+      return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-chart-style-bridge-write-runtime-not-proven', ...where, target: op.styleTarget, runtime, proven: B29_BRIDGE_WRITE_RUNTIMES } };
     }
   }
   if (op.styleTarget === 'marker' && !MARKER_CHART_TYPES.includes(hits[0].type)) {
@@ -1091,7 +1164,7 @@ function classifyStyle(g, op, where, p) {
       return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-chart-style-series-order-length-mismatch', ...where, requested: op.styleOrder.length, seriesCount } };
     }
   }
-  if (op.styleTarget === 'marker' || op.styleTarget === 'gridlines' || CHART_STYLE_BRIDGE_WRITE_TARGETS.includes(op.styleTarget)) {
+  if (op.styleTarget === 'marker' || op.styleTarget === 'gridlines' || op.styleTarget === 'dataPoint' || CHART_STYLE_BRIDGE_WRITE_TARGETS.includes(op.styleTarget)) {
     const now = styleBridgeNow(op, hits[0]);
     if (now.unobservable) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-chart-style-bridge-unobservable', ...where, target: op.styleTarget, detail: now.reason } };
     if (styleBridgeMatches(op, now)) return { state: 'SATISFIED', evidence: { ...where, target: op.styleTarget, proof: 'fresh-live-chart-style-bridge-read' } };
@@ -1203,6 +1276,29 @@ function lower(op) {
   if (!g.ok) return g;
   const w = __eoSeriesStyleWrite(${JSON.stringify(args)}, ${JSON.stringify(requested)});
   if (!w.ok) return __eoSeriesStyleFail(w);`;
+  } else if (op.intent === 'set_chart_style' && op.styleTarget === 'dataPoint') {
+    // GH #346 AUTO-REPAIR Egyseg 3 (design docs/GH346-DPT-AUTO-REPAIR-DESIGN-20261104.md Dontesi
+    // pont 5): the SAME "no in-body chart/sheet lookup, the handler resolves it server-side" shape
+    // gapOverlap/seriesOrder/markerSymbol/lineStyle above already use -- but through the dedicated,
+    // single-capability B29 (/27-ONLY) gate/write client (__eoDataPointStyleGate/
+    // __eoDataPointStyleWrite/__eoDataPointStyleFail). The public, array-position-based
+    // SetDataPointFill/SetDataPointOutLine setter (STYLE_TARGETS.dataPoint's own `fill`/`outline`
+    // names, GH #346's own root cause) is NEVER called on this path -- `args` carries `point` (the
+    // idx), never a tömb-pozíció, and the Bridge handler itself resolves hits by idx (Egyseg 2).
+    // Only the requested axis travels: a caller who asked for fill ONLY never also sends outline
+    // (and vice versa), the SAME "only what was asked" convention markerSymbol/lineStyle's own
+    // `requested` array already follows above -- though here the receipt shape (outcome/removed/
+    // before/after) carries no `applied` echo to verify against, so no `requested` array is needed.
+    const args = { series: op.seriesIndex, point: op.dataPointIndex };
+    if (op.styleFill !== null) args.fill = { form: 'rgb', hex: op.styleFill };
+    if (op.styleOutline !== null) {
+      args.outline = { form: 'rgb', hex: op.styleOutline.color };
+      args.outlineWidthEmu = styleEmu(op.styleOutline.width);
+    }
+    call = `const g = __eoDataPointStyleGate(name, ${JSON.stringify(op.name)});
+  if (!g.ok) return g;
+  const w = __eoDataPointStyleWrite(${JSON.stringify(args)});
+  if (!w.ok) return __eoDataPointStyleFail(w);`;
   } else if (op.intent === 'set_chart_style') {
     // X-O04/1+2: WRITE-ONLY, by design -- the setter's OWN return value is the ONLY evidence of
     // success (no getter exists to re-confirm it later), checked here, fail-closed, the SAME
@@ -1211,9 +1307,12 @@ function lower(op) {
     // bAllMarkers=true, the LIVE-measured shape that persists) AND its return value is NOT checked
     // (X-O04/1 round 1 measured it unreliable; the trusted signal is the bridge read instead, same
     // reasoning as gridlines above).
+    // GH #346 AUTO-REPAIR Egyseg 3: `dataPoint` can never reach this branch any more (its own
+    // `else if` above intercepts it first) -- the ternary below therefore no longer carries a
+    // dataPoint case; the public, position-based setter is NOT called anywhere on that target.
     const t = STYLE_TARGETS[op.styleTarget];
     const marker = op.styleTarget === 'marker';
-    const extraArgs = marker ? `, ${op.seriesIndex}, 0, true` : !t.indexed ? '' : op.styleTarget === 'dataPoint' ? `, ${op.seriesIndex}, ${op.dataPointIndex}, false` : `, ${op.seriesIndex}, false`;
+    const extraArgs = marker ? `, ${op.seriesIndex}, 0, true` : !t.indexed ? '' : `, ${op.seriesIndex}, false`;
     let fillCall = '';
     if (op.styleFill) {
       const r = parseInt(op.styleFill.slice(0, 2), 16), gC = parseInt(op.styleFill.slice(2, 4), 16), b = parseInt(op.styleFill.slice(4, 6), 16);
@@ -1298,7 +1397,12 @@ try {
       // X-O05/5-C: the SAME capability-ID-in-meta shape as bridgeChartStyleWrite above, on its
       // OWN meta key (never bridgeChartStyleWrite itself) so the driver's two gates -- B22 for
       // gapOverlap/seriesOrder, B24 for markerSymbol/lineStyle -- never collide on one lookup.
-      bridgeSeriesStyleWrite: op.styleTarget === 'markerSymbol' ? MARKER_SYMBOL_WRITE_ID : op.styleTarget === 'lineStyle' ? LINE_STYLE_WRITE_ID : null }),
+      bridgeSeriesStyleWrite: op.styleTarget === 'markerSymbol' ? MARKER_SYMBOL_WRITE_ID : op.styleTarget === 'lineStyle' ? LINE_STYLE_WRITE_ID : null,
+      // GH #346 AUTO-REPAIR Egyseg 3: a bare boolean, like bridgeChartDeleteWrite above -- only ONE
+      // Bridge WRITE (chart.series.dataPoint.style.write/v1) sits behind the `dataPoint` target,
+      // on its OWN B29 gate (never colliding with bridgeChartStyleWrite's B22 or
+      // bridgeSeriesStyleWrite's B24).
+      bridgeDataPointStyleWrite: op.styleTarget === 'dataPoint' }),
   };
 }
 
@@ -1370,8 +1474,8 @@ const PRIMITIVE = {
       || (same(fingerprint(hits[0] || {}), fingerprint(old[0])) && (hits[0] || {}).legend === old[0].legend);
     if (hits.length !== 1 || !kept) return false;
     // X-O05/3: gapOverlap/seriesOrder are the SAME "verifiable, bridge-read-and-compare" class as
-    // marker/gridlines.
-    if (op.styleTarget !== 'marker' && op.styleTarget !== 'gridlines' && !CHART_STYLE_BRIDGE_WRITE_TARGETS.includes(op.styleTarget)) return true;
+    // marker/gridlines. GH #346 AUTO-REPAIR Egyseg 3: dataPoint joins them.
+    if (op.styleTarget !== 'marker' && op.styleTarget !== 'gridlines' && op.styleTarget !== 'dataPoint' && !CHART_STYLE_BRIDGE_WRITE_TARGETS.includes(op.styleTarget)) return true;
     const now = styleBridgeNow(op, hits[0]);
     return !now.unobservable && styleBridgeMatches(op, now);
   },
@@ -1469,8 +1573,10 @@ function styleNotProven(op) {
   if (op.intent !== 'set_chart_style') return [];
   // X-O04/11: marker/gridlines are verified via the bridge read (classifyStyle/PRIMITIVE), never
   // write-only -- unlike the six original targets below, their write is never semanticsNotProven.
-  // X-O05/3: gapOverlap/seriesOrder join them, same reasoning.
-  if (op.styleTarget === 'marker' || op.styleTarget === 'gridlines' || CHART_STYLE_BRIDGE_WRITE_TARGETS.includes(op.styleTarget)) return [];
+  // X-O05/3: gapOverlap/seriesOrder join them, same reasoning. GH #346 AUTO-REPAIR Egyseg 3:
+  // dataPoint joins them too (it moved OFF the six-original, write-only `STYLE_TARGETS` dispatch
+  // path and onto the verifiable Bridge write -- see classifyStyle/PRIMITIVE's own dataPoint branch).
+  if (op.styleTarget === 'marker' || op.styleTarget === 'gridlines' || op.styleTarget === 'dataPoint' || CHART_STYLE_BRIDGE_WRITE_TARGETS.includes(op.styleTarget)) return [];
   const t = op.styleTarget.toLowerCase();
   // X-O05/5-C: markerSymbol/lineStyle are WRITE-ONLY, like the six original targets below --
   // neither field is readable back through any capability this product has (the SAME reasoning
@@ -1515,6 +1621,10 @@ function wholeTaskChecks(op, finalObservation) {
 }
 
 const windowsOf = op => (op.intent === 'set_chart' ? [{ sheet: op.selector.sheet, range: op.selector.range }] : []);
-const liveExtras = () => ({ chartSheets: ['*'], drawingSheets: ['*'] });
+// GH #346 unit 3 (LIVE, test DS on Bridge /27, 2026-11-04): a dataPoint step's own pre-write classification and its
+// read-and-compare verification both read chart.pointStyles, which the driver only attaches when the read
+// asks for chartStyle -- without it every dataPoint write stopped at CLASSIFICATION as
+// 'UNOBSERVABLE:point-styles-not-read' before dispatch.
+const liveExtras = op => ({ chartSheets: ['*'], drawingSheets: ['*'], ...(op && op.intent === 'set_chart_style' && op.styleTarget === 'dataPoint' ? { chartStyle: true } : {}) });
 
-module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras, B22_BRIDGE_WRITE_RUNTIMES, B23_BRIDGE_WRITE_RUNTIMES, B24_BRIDGE_WRITE_RUNTIMES };
+module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras, B22_BRIDGE_WRITE_RUNTIMES, B23_BRIDGE_WRITE_RUNTIMES, B24_BRIDGE_WRITE_RUNTIMES, B29_BRIDGE_WRITE_RUNTIMES };

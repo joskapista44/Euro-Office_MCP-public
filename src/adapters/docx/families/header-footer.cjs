@@ -1,7 +1,25 @@
 'use strict';
 
-const { norm, textUnits, tablesContent } = require('../inventory.cjs');
+const { norm, normKeepTabs: hfNorm, textUnits, tablesContent } = require('../inventory.cjs');
 const { UNRESOLVED } = require('./text.cjs');
+// GH #316: the SAME validation formatting.cjs's own format_text already enforces -- ONE constant,
+// not a second copy, so the two families cannot drift apart on what a format value means.
+const { normalizeWanted, tabsEqual } = require('./formatting.cjs');
+
+/**
+ * GH #317 (real tab character): inventory.cjs's own norm() treats EVERY whitespace run, tab
+ * included, as collapsible padding -- correct for the rest of the codebase, where a tab was always
+ * forbidden input, but wrong HERE now that a literal `\t` is allowed content (a REAL `<w:tab/>`
+ * element on write, LIVE-measured in the card's own probe). hfNorm keeps
+ * every tab exactly where it is and otherwise behaves exactly like norm(): runs of SPACE-LIKE
+ * whitespace collapse to one space, and only plain spaces at the ends are trimmed (a leading or
+ * trailing TAB is content, not padding, and must survive the terminal-state comparison below).
+ * Used for every exact text/lines comparison in this family; the plain emptiness checks in plan()
+ * below intentionally keep using the PLAIN norm() -- a tab-only string has nothing to align after
+ * it and stays rejected as empty, unchanged from before this card.
+ */
+// hfNorm is inventory.cjs's normKeepTabs (imported above): the inventory's own header/footer paragraph
+// text uses the SAME function, so a tab written here is the tab read back there.
 
 /**
  * DOCX `header-footer` family (M4 Wave 5): edit_header, edit_footer (P1, PRIMITIVE_INTEGRAL).
@@ -85,9 +103,71 @@ const { UNRESOLVED } = require('./text.cjs');
  * the text, the count unchanged. L3: that paragraph's style, alignment, run properties and inline content unchanged,
  * every other paragraph of the part unchanged, plus everything the full mode compares (every other part, the body,
  * the flags). Retry: SATISFIED from the fresh paragraph text.
+ *
+ * GH #316 (optional `format`): the header/footer text could not be formatted (edit_header/edit_footer
+ * took no selector; format_text's own selector is a body-text lookup that never searches a header/footer part).
+ * LIVE-measured first (test/live/docx-gh316-header-footer-format-probe.live.cjs, probe1.json): the public API formats
+ * a header/footer run exactly the way it formats a body run, and the write round-trips through a fresh reopen. The
+ * accepted keys are a SUBSET of format_text's own TEXT_KEYS plus `alignment` -- HF_FORMAT_KEYS below -- reusing
+ * formatting.cjs's own normalizeWanted (no second validator). The write applies to the run.GetRange() (NOT the bare
+ * run) for every key: the LIVE probe measured that a bare run.SetFontSize(n) takes HALF-POINTS (probe1.json, WRITE
+ * via the raw run); the SAME call on run.GetRange() takes POINTS instead (format_text's own convention,
+ * formatting.cjs's commandBody) -- measured by THIS candidate's own product harness
+ * (test/live/docx-gh316-header-footer-format-product.live.cjs, GH #316 review R1, LIVE: 28pt stored as
+ * w:sz="56"), not by the probe (which never called GetRange()). Calling SetFontSize directly on the bare run would
+ * silently write half the requested size. Alignment is paragraph-level (ApiParagraph.SetJc,
+ * the SAME sugar the M4 Wave 5 setup probe already used). L1 re-reads the SAME run/paragraph the write targeted, from
+ * read_headers_footers: run-level keys (bold/italic/underline/strike/fontFamily/color) from `paras[idx].runs[0]`,
+ * `fontSize` from the PARAGRAPH-level `paras[idx].format.fontSize` instead -- the LIVE probe measured that
+ * `runs[0].fontSize` carries the RAW half-point value (docx-driver.cjs's header/footer run reader has no `/2`, unlike
+ * its body-run sibling two reads above it in the same file) while `format.fontSize` is already correctly halved; that
+ * asymmetry is a pre-existing, narrower gap (flagged separately, NOT fixed by this card -- the explicit ask was
+ * "+color a runs-ban", not a fontSize fix) and this family's own L1 works around it by reading the field that is
+ * already correct rather than the field that is not.
+ *
+ * GH #317 "lines": an optional `lines: string[]` instead of `text` -- a FULL-PART write
+ * of N paragraphs, mutually exclusive with `text` (exactly one of the two) and with `paragraph` (lines IS a
+ * full-replacement mode, like text, never a single-existing-paragraph edit). Every paragraph shares the SAME
+ * optional `format` (tabs included) -- there is no per-line format in this release. MECHANISM
+ * (LIVE-measured, the card's own 2b probe): RemoveAllElements leaves ONE reset paragraph (line 0,
+ * via the SAME GetElement(0)+AddText the single-text mode already uses); every further line is a NEW paragraph
+ * via `hf.Push` (a header/footer part has Push but no AddElement -- measured in the card's FIRST probe). L1
+ * (`linesTerminal`): the part holds exactly `lines.length` paragraphs, each one's text matching its own line, in
+ * order, AND (if `format` is given) every paragraph's format -- not just the first. Loss-checking before a
+ * replacement (`replacementLossLines`): generalizes the single-paragraph `replacementLoss` over EVERY existing
+ * paragraph, since RemoveAllElements destroys all of them regardless of the new line count -- a part with N
+ * existing paragraphs written with M lines is checked on its N paragraphs, exactly like the M5 gate 6 safety
+ * boundary already does for the single-paragraph case, just not count-restricted to 1. `pageNumber` is not
+ * supported with `lines` (no measured round for a PAGE field inside a multi-paragraph part).
+ *
+ * GH #317 "real tab character" (CANDIDATE, built on the card's own real-tab-character LIVE probe,
+ * NOT YET LIVE-confirmed by this candidate itself): a literal `\t` in `text`/`lines` is now ALLOWED (`\r`/`\n`
+ * remain forbidden). WRITE mechanism (LIVE-measured by the probe): `AddText` carrying a literal `\t`
+ * lowers to a REAL `<w:tab/>` run-content element, not a literal character -- the simplest of the two
+ * measured paths (the alternative, `ApiParagraph.AddTabStop()` before `AddText`, produces the SAME
+ * element; this candidate keeps the single-call AddText path, unchanged from every other write here).
+ * READ: the probe found the per-RUN text (`paras[i].runs[j].text`) already carries the tab, but the
+ * PARAGRAPH's own `GetText()` drops it -- docx-driver.cjs's header/footer paragraph reader now builds
+ * `paras[i].text` by JOINING the run texts (when every child is a run and the runs read did not
+ * throw) instead of trusting the paragraph object's own GetText(); this is a HYPOTHESIS about the
+ * root cause, not yet LIVE-confirmed -- verify with a LIVE run of this candidate.
+ * COMPARISON: a tab is CONTENT here, not collapsible padding -- every exact
+ * text/lines comparison in this family (`terminal`, `linesTerminal`, `paragraphTerminal`, the
+ * paragraph-mode structural check, and the paragraph-mode old-text re-check inside commandBody's own
+ * generated script) uses `hfNorm` (below) instead of inventory.cjs's own `norm`, which would silently
+ * strip every tab before comparing. LOSS GUARD: `replacementLoss`/`replacementLossLines` no longer
+ * count a `tab` inline marker as a loss -- it is part of the text the new text/lines carries, not
+ * content a full replacement destroys; every OTHER inline type (image, PAGE field, ...) is unchanged.
  */
 
 const KIND = Object.freeze({ edit_header: 'header', edit_footer: 'footer' });
+// GH #316: the format_text TEXT_KEYS run-level subset this family supports + `alignment` (paragraph-level). NOT the
+// full TEXT_KEYS set (language/highlight/vertAlign/characterSpacing are NOT part of the owner-decided candidate).
+// GH #317: + 'tabs' -- the SAME W-09 shape format_text already ships for body paragraphs
+// (points, align restricted to formatting.cjs's own TAB_ALIGNS), reused as-is (normalizeWanted
+// already validates it; formatMatches/replacementLoss/commandBody below add the paragraph-level
+// handling, the same place 'alignment' already lives).
+const HF_FORMAT_KEYS = Object.freeze(['bold', 'italic', 'underline', 'strike', 'fontFamily', 'fontSize', 'color', 'alignment', 'tabs']);
 const VARIANTS = Object.freeze(['default', 'even', 'title']);
 // M5 (owner decision after 28799 / 28808, option A): title and even are supported. Their visibility
 // flags (title page: per section; even/odd: document-wide) are read internally, READ ONLY
@@ -139,33 +219,95 @@ function plan(step, index) {
     return { ok: false, detail: `step ${index}: ${step.intent} requires section: { index, of } (integers, 0 <= index < of = the section count) -- no implicit section` };
   }
   if (step.selector !== undefined) return { ok: false, detail: `step ${index}: ${step.intent} takes no text selector (the target is section + kind + variant)` };
-  if (typeof step.text !== 'string' || !norm(step.text)) return { ok: false, detail: `step ${index}: ${step.intent} requires a non-empty text` };
-  if (/[\t\r\n]/.test(step.text)) return { ok: false, detail: `step ${index}: ${step.intent} text must not contain a tab or line break (one paragraph)` };
+  // GH #317 "lines": a full-part write of N paragraphs, instead of the one `text` paragraph --
+  // mutually exclusive with `text` (exactly one of the two), and with `paragraph` (lines REPLACES
+  // the whole part, the same way the single-text full mode does; it never targets one EXISTING
+  // paragraph). Measured LIVE (the 2b probe): RemoveAllElements +
+  // GetElement(0) for line 0, Push for every further line -- generalizing the SAME mechanism the
+  // single-paragraph full-replacement path below already uses for its one reset paragraph.
+  const hasText = typeof step.text === 'string';
+  const hasLines = step.lines !== undefined;
+  if (hasText === hasLines) return { ok: false, detail: `step ${index}: ${step.intent} requires exactly one of text or lines` };
+  if (hasLines && (!Array.isArray(step.lines) || step.lines.length < 1 || !step.lines.every(x => typeof x === 'string' && norm(x)))) {
+    return { ok: false, detail: `step ${index}: ${step.intent} lines must be a non-empty array of non-empty strings` };
+  }
+  // GH #317 (real tab character): a literal `\t` is now ALLOWED (a real <w:tab/>, LIVE-measured);
+  // `\r`/`\n` remain forbidden (still "one paragraph", never a line break).
+  if (hasLines && step.lines.some(x => /[\r\n]/.test(x))) return { ok: false, detail: `step ${index}: ${step.intent} each line must not contain a line break (one paragraph per line)` };
+  if (hasText) {
+    if (!norm(step.text)) return { ok: false, detail: `step ${index}: ${step.intent} requires a non-empty text` };
+    if (/[\r\n]/.test(step.text)) return { ok: false, detail: `step ${index}: ${step.intent} text must not contain a line break (one paragraph)` };
+  }
   const para = paragraphDescriptor(step.paragraph);
   const inheritedBy = inheritedByDescriptor(step.inheritedBy, s);
   if (step.pageNumber !== undefined && typeof step.pageNumber !== 'boolean') return { ok: false, detail: `step ${index}: ${step.intent} pageNumber must be a boolean` };
   if (step.pageNumber === true && para) return { ok: false, detail: `step ${index}: ${step.intent} pageNumber is a full-part write (it cannot be combined with paragraph)` };
+  if (step.pageNumber === true && hasLines) return { ok: false, detail: `step ${index}: ${step.intent} pageNumber cannot be combined with lines` };
+  if (hasLines && para) return { ok: false, detail: `step ${index}: ${step.intent} lines cannot be combined with paragraph (lines replaces the whole part, like text)` };
   if (inheritedBy === false) return { ok: false, detail: `step ${index}: ${step.intent} inheritedBy must be an ascending list of the later section indexes (> section.index, < section.of)` };
   if (para === false) return { ok: false, detail: `step ${index}: ${step.intent} paragraph must be { index, of } (integers, 0 <= index < of = the part's paragraph count)` };
+  // GH #316: optional run/paragraph formatting on the ONE paragraph this intent writes -- a subset
+  // of format_text's own keys (HF_FORMAT_KEYS), validated by the SAME normalizeWanted it uses.
+  let format;
+  if (step.format !== undefined) {
+    if (!step.format || typeof step.format !== 'object' || Array.isArray(step.format)) return { ok: false, detail: `step ${index}: ${step.intent} format must be an object` };
+    const unknown = Object.keys(step.format).filter(k => !HF_FORMAT_KEYS.includes(k));
+    if (unknown.length) return { ok: false, detail: `step ${index}: ${step.intent} format properties are limited to ${HF_FORMAT_KEYS.join(', ')} -- unknown: ${unknown.join(', ')}` };
+    const w = normalizeWanted(step.format);
+    if (!w.ok) return { ok: false, detail: `step ${index}: ${w.detail}` };
+    format = w.wanted;
+  }
   const selector = Object.freeze({ section: Object.freeze({ index: s.index, of: s.of }), part: kind, variant, ...(para ? { paragraph: para } : {}) });
-  return { ok: true, operation: { id: step.id || `s${index}`, intent: step.intent, selector, part: kind, variant, sectionIndex: s.index, sectionCount: s.of, text: step.text,
-    ...(para ? { paragraphIndex: para.index, paragraphCount: para.of } : {}), ...(inheritedBy ? { inheritedBy } : {}), ...(step.pageNumber === true ? { pageNumber: true } : {}), preservationMode: 'PRIMITIVE_INTEGRAL', ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) } };
+  return { ok: true, operation: { id: step.id || `s${index}`, intent: step.intent, selector, part: kind, variant, sectionIndex: s.index, sectionCount: s.of,
+    ...(hasLines ? { lines: Object.freeze([...step.lines]) } : { text: step.text }),
+    ...(para ? { paragraphIndex: para.index, paragraphCount: para.of } : {}), ...(inheritedBy ? { inheritedBy } : {}), ...(step.pageNumber === true ? { pageNumber: true } : {}),
+    ...(format ? { format } : {}), preservationMode: 'PRIMITIVE_INTEGRAL', ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) } };
 }
 
 // ---- the observation ----------------------------------------------------------------------------
 
 const partAt = (sections, i, kind, variant) => (sections[i] && sections[i][kind] ? sections[i][kind][variant] : null);
-const terminal = (part, text) => !!part && part.paragraphs === 1 && part.paras.length === 1 && part.paras[0].text === norm(text);
+// GH #317: hfNorm, not norm -- a tab in `text` must still match a tab in the read-back p.text.
+const terminal = (part, text) => !!part && part.paragraphs === 1 && part.paras.length === 1 && part.paras[0].text === hfNorm(text);
+// GH #317 "lines": the N-paragraph analogue of `terminal` above -- the part holds EXACTLY `lines.length`
+// paragraphs, each one's text matching the corresponding line, in order.
+const linesTerminal = (part, lines) => !!part && part.paragraphs === lines.length && part.paras.length === lines.length && part.paras.every((p, i) => p.text === hfNorm(lines[i]));
 // GH #289 H-04b: with pageNumber the one paragraph also holds exactly one PAGE field (the public ToJSON names it pgNum) and
 // nothing else; without it the paragraph holds no field (a stale field from an earlier write is not the requested state)
 const pageNumberOk = (part, op) => { const inl = part && part.paras[0] && part.paras[0].inline; return Array.isArray(inl) && JSON.stringify(inl) === JSON.stringify(op.pageNumber ? ['pgNum'] : []); };
 const paragraphMode = op => Number.isInteger(op.paragraphIndex);
+const linesMode = op => Array.isArray(op.lines);
 // GH #289 H-05 (LIVE, docs/evidence/gh289-290-remaining-probe-20261023.json): in a part that also holds tables the paragraph mode
 // counts the part's OWN paragraphs (a table and the paragraphs inside its cells are not counted) and leaves every table as it is
 const paragraphCountOf = part => (part.withTables ? part.paras.length : part.paragraphs);
 // GH #289 paragraph mode: the part still holds the caller's paragraph count, and the named paragraph holds the text
-const paragraphTerminal = (part, op) => !!part && paragraphCountOf(part) === op.paragraphCount && part.paras.length === op.paragraphCount && part.paras[op.paragraphIndex].text === norm(op.text);
+// GH #317: hfNorm, not norm -- same reason as terminal()/linesTerminal() above.
+const paragraphTerminal = (part, op) => !!part && paragraphCountOf(part) === op.paragraphCount && part.paras.length === op.paragraphCount && part.paras[op.paragraphIndex].text === hfNorm(op.text);
 const OTHER_KIND = Object.freeze({ header: 'footer', footer: 'header' });
+
+/**
+ * GH #316: whether the target paragraph's observed format matches `op.format` (true if op.format is
+ * absent -- every existing caller's `done` check is unaffected). Run-level keys (bold/italic/
+ * underline/strike/fontFamily/color) read from the ONE run's own `runs[0]`; `fontSize` reads from the
+ * PARAGRAPH-level `format.fontSize` instead (see this family's module comment: `runs[0].fontSize`
+ * carries the driver's un-halved raw value, `format.fontSize` is already correct).
+ */
+function formatMatches(part, idx, wanted) {
+  if (!wanted) return true;
+  const para = part && part.paras && part.paras[idx];
+  if (!para) return false;
+  const run = Array.isArray(para.runs) && para.runs.length === 1 ? para.runs[0] : null;
+  for (const k of Object.keys(wanted)) {
+    if (k === 'alignment') { if (!para.format || para.format.alignment !== wanted.alignment) return false; continue; }
+    if (k === 'fontSize') { if (!para.format || typeof para.format.fontSize !== 'number' || Math.abs(para.format.fontSize - wanted.fontSize) > 0.01) return false; continue; }
+    // GH #317: tabs are PARAGRAPH-level, like alignment -- read from para.format.tabs, never run[k].
+    if (k === 'tabs') { if (!para.format || !tabsEqual(para.format.tabs, wanted.tabs)) return false; continue; }
+    if (!run) return false;
+    if (k === 'color') { if (typeof run.color !== 'string' || run.color.toUpperCase() !== String(wanted.color).toUpperCase()) return false; continue; }
+    if (run[k] !== wanted[k]) return false;
+  }
+  return true;
+}
 
 /** The even/odd flag is document-wide: every section must report the same readable value, else null (unknown). */
 function evenFlag(sections) {
@@ -188,7 +330,13 @@ function partState(primary, op) {
   if (sections.length !== op.sectionCount) return { ok: false, reason: 'FAIL_CLOSED:section-descriptor-mismatch', sectionCount: sections.length };
   const part = partAt(sections, op.sectionIndex, op.part, op.variant);
   const flag = flagOn(sections, op);
-  return { ok: true, sections, part, flag, defaultText: d.defaultText || null, done: (paragraphMode(op) ? paragraphTerminal(part, op) : terminal(part, op.text) && (!op.pageNumber || pageNumberOk(part, op))) && flag === true };
+  // GH #316: formatMatches is a no-op (returns true) when op.format is absent -- every pre-existing op unaffected.
+  // GH #317 "lines": N-paragraph analogue of the single-text full mode -- every paragraph must match
+  // its own line AND (if op.format is present) every paragraph's format, not just one.
+  const textDone = paragraphMode(op) ? paragraphTerminal(part, op) : linesMode(op) ? linesTerminal(part, op.lines) : terminal(part, op.text) && (!op.pageNumber || pageNumberOk(part, op));
+  const formatOk = linesMode(op) ? !!part && part.paras.every((_, i) => formatMatches(part, i, op.format)) : formatMatches(part, paragraphMode(op) ? op.paragraphIndex : 0, op.format);
+  const done = textDone && flag === true && formatOk;
+  return { ok: true, sections, part, flag, defaultText: d.defaultText || null, done };
 }
 
 /**
@@ -251,7 +399,7 @@ function shapeGuard(s, op) {
   if (!s.part && op.sectionIndex > 0) return 'FAIL_CLOSED_UNSUPPORTED_SHAPE:linked-to-previous';
   if (s.part && !s.part.simple) return 'header-footer-not-plain-paragraphs-of-runs';
   if (s.flag === false) { const a = activationGuard(s, op); if (a) return a; }
-  return s.part ? replacementLoss(s.part, s.defaultText) : null;
+  return s.part ? (linesMode(op) ? replacementLossLines(s.part, s.defaultText, op.format) : replacementLoss(s.part, s.defaultText, op.format)) : null;
 }
 
 /**
@@ -274,7 +422,10 @@ function paragraphGuard(s, op) {
     [() => !Array.isArray(p.runs), 'header-footer-run-format-unreadable'],
     [() => !Array.isArray(p.inline), 'header-footer-inline-content-unreadable'],
     [() => textRuns.length !== 1, () => `${P}text-runs:${textRuns.length}`],
-    [() => norm(textRuns[0].text) !== p.text, `${P}text-not-in-one-run`],
+    // GH #317: hfNorm, not norm -- an already-tabbed paragraph's one run carries the tab (the SAME
+    // raw value p.text now carries, since docx-driver.cjs builds p.text by joining the run texts);
+    // plain norm() would strip the tab from this side only and refuse every tabbed paragraph here.
+    [() => hfNorm(textRuns[0].text) !== p.text, `${P}text-not-in-one-run`],
   ];
   const hit = checks.find(([c]) => (typeof c === 'function' ? c() : c));
   if (!hit) return null;
@@ -294,21 +445,72 @@ function paragraphGuard(s, op) {
  * evaluated on the fresh observation right before the dispatch.
  */
 const LOSS = 'FAIL_CLOSED_UNSUPPORTED_SHAPE:header-footer-replacement-would-drop-';
-function replacementLoss(part, defaults) {
+// GH #316: a property this guard would otherwise refuse on is NOT a silent loss when the caller's
+// OWN `format` names that exact property -- the caller is explicitly setting a new value, not
+// having an unnoticed one dropped. `style`/`inline` stay hard refusals (neither is in
+// HF_FORMAT_KEYS, so a caller can never acknowledge losing them).
+function replacementLoss(part, defaults, format) {
+  const named = k => !!format && Object.prototype.hasOwnProperty.call(format, k);
   if (part.paragraphs !== 1 || part.paras.length !== 1) return `${LOSS}paragraphs`;
   const p = part.paras[0];
   // GH #289: a field (PAGE ...) or an image reads as runs with no text -- the replacement would drop it silently
   if (!Array.isArray(p.inline)) return 'header-footer-inline-content-unreadable';
-  if (p.inline.length) return `${LOSS}inline:${p.inline.join(',')}`;
+  // GH #317: a `tab` inline marker is NOT a loss -- it is part of the TEXT the new text/lines
+  // carries (a real <w:tab/>, LIVE-measured), not a structure the plain-text replacement destroys.
+  // Every OTHER inline type (image, PAGE field, ...) remains a loss exactly as before.
+  const nonTabInline = p.inline.filter(t => t !== 'tab');
+  if (nonTabInline.length) return `${LOSS}inline:${nonTabInline.join(',')}`;
   const f = p.format || {};
   if (f.style) return `${LOSS}style:${f.style}`;
-  if (f.alignment !== undefined && f.alignment !== 'left') return `${LOSS}alignment:${f.alignment}`;
+  if (!named('alignment') && f.alignment !== undefined && f.alignment !== 'left') return `${LOSS}alignment:${f.alignment}`;
+  // GH #317: tabs are PARAGRAPH-level, like alignment -- a part with its own existing tab stops,
+  // dropped silently by a full replacement unless the caller's own format names 'tabs'.
+  if (!named('tabs') && Array.isArray(f.tabs) && f.tabs.length) return `${LOSS}tabs`;
   if (!Array.isArray(p.runs)) return 'header-footer-run-format-unreadable';
   if (!defaults) return 'header-footer-default-text-format-unreadable';
   for (const r of p.runs.filter(x => x.text !== '')) {
-    for (const k of ['bold', 'italic', 'underline', 'strike']) if (r[k] !== false) return `${LOSS}run-${k}`;
-    if (r.fontFamily !== defaults.fontFamily) return `${LOSS}run-font-family`;
-    if (r.fontSize !== defaults.fontSize) return `${LOSS}run-font-size`;
+    for (const k of ['bold', 'italic', 'underline', 'strike']) if (!named(k) && r[k] !== false) return `${LOSS}run-${k}`;
+    if (!named('fontFamily') && r.fontFamily !== defaults.fontFamily) return `${LOSS}run-font-family`;
+    if (!named('fontSize') && r.fontSize !== defaults.fontSize) return `${LOSS}run-font-size`;
+    // GH #316 review R1 (LIVE): `color` is now readable on a header/footer run (docx-driver.cjs) -- an
+    // explicitly-coloured run (not 'auto', not unread) the caller's format does not name would be silently
+    // decolourised by the plain-run replacement, the SAME class of loss as fontFamily/fontSize above.
+    if (!named('color') && typeof r.color === 'string' && r.color !== 'auto') return `${LOSS}run-color`;
+  }
+  return null;
+}
+
+/**
+ * GH #317 "lines": the N-paragraph analogue of replacementLoss above. A full replacement
+ * (RemoveAllElements) destroys EVERY paragraph the existing part holds, regardless of how many new
+ * lines the caller is writing -- so each existing paragraph is checked the SAME way
+ * replacementLoss checks its one, independent of lines.length (a 2-paragraph existing part written
+ * with 3 lines, or a 3-paragraph one written with 2, both lose exactly as much as a mismatched
+ * count would for the single-text case; this checks the loss directly instead of hard-refusing on
+ * a count mismatch, since "replace N paragraphs with M" is the whole point of this mode). The
+ * single-text `replacementLoss` is intentionally UNCHANGED -- its own `paragraphs !== 1` hard
+ * refusal is a separate, owner-accepted safety boundary (M5 gate 6) that this mode does not alter.
+ */
+function replacementLossLines(part, defaults, format) {
+  const named = k => !!format && Object.prototype.hasOwnProperty.call(format, k);
+  if (!Array.isArray(part.paras) || part.paras.length !== part.paragraphs) return `${LOSS}paragraphs`;
+  for (const p of part.paras) {
+    if (!Array.isArray(p.inline)) return 'header-footer-inline-content-unreadable';
+    // GH #317: see the single-paragraph replacementLoss above -- a `tab` inline marker is text, not loss.
+    const nonTabInline = p.inline.filter(t => t !== 'tab');
+    if (nonTabInline.length) return `${LOSS}inline:${nonTabInline.join(',')}`;
+    const f = p.format || {};
+    if (f.style) return `${LOSS}style:${f.style}`;
+    if (!named('alignment') && f.alignment !== undefined && f.alignment !== 'left') return `${LOSS}alignment:${f.alignment}`;
+    if (!named('tabs') && Array.isArray(f.tabs) && f.tabs.length) return `${LOSS}tabs`;
+    if (!Array.isArray(p.runs)) return 'header-footer-run-format-unreadable';
+    if (!defaults) return 'header-footer-default-text-format-unreadable';
+    for (const r of p.runs.filter(x => x.text !== '')) {
+      for (const k of ['bold', 'italic', 'underline', 'strike']) if (!named(k) && r[k] !== false) return `${LOSS}run-${k}`;
+      if (!named('fontFamily') && r.fontFamily !== defaults.fontFamily) return `${LOSS}run-font-family`;
+      if (!named('fontSize') && r.fontSize !== defaults.fontSize) return `${LOSS}run-font-size`;
+      if (!named('color') && typeof r.color === 'string' && r.color !== 'auto') return `${LOSS}run-color`;
+    }
   }
   return null;
 }
@@ -320,7 +522,10 @@ function classify(primary, op) {
   if (!s.ok) return { state: 'FAIL_CLOSED', evidence: { reason: s.reason, sectionCount: s.sectionCount } };
   if (s.done) {
     if (op.recovery === UNRESOLVED) return { state: 'FAIL_CLOSED', evidence: { reason: 'preservation-baseline-unavailable' } };
-    return { state: 'SATISFIED', evidence: { section: op.sectionIndex, part: op.part, variant: op.variant, text: norm(op.text), proof: paragraphMode(op) ? 'fresh-live-paragraph-holds-the-text' : 'fresh-live-part-holds-exactly-one-paragraph-with-the-text' } };
+    const proof = paragraphMode(op) ? 'fresh-live-paragraph-holds-the-text' : linesMode(op) ? 'fresh-live-part-holds-exactly-the-lines' : 'fresh-live-part-holds-exactly-one-paragraph-with-the-text';
+    // GH #317: hfNorm, not norm, in the reported evidence too -- a tab in the evidence should read
+    // back the same tab the terminal-state check above actually matched on.
+    return { state: 'SATISFIED', evidence: { section: op.sectionIndex, part: op.part, variant: op.variant, ...(linesMode(op) ? { lines: op.lines.map(hfNorm) } : { text: hfNorm(op.text) }), proof } };
   }
   const guard = shapeGuard(s, op);
   const aff = inheritingSections(s.sections, op);
@@ -358,10 +563,12 @@ function preDispatchCheck(op, target) {
 // ---- lower --------------------------------------------------------------------------------------
 
 function lower(op, target) {
-  const meta = Object.freeze({ family: 'headerFooter', action: 'headerFooter', part: target.part, variant: target.variant, sectionIndex: target.sectionIndex, sectionCount: target.sectionCount, create: target.create, activate: target.activate === true, text: op.text,
+  const meta = Object.freeze({ family: 'headerFooter', action: 'headerFooter', part: target.part, variant: target.variant, sectionIndex: target.sectionIndex, sectionCount: target.sectionCount, create: target.create, activate: target.activate === true,
+    ...(linesMode(op) ? { lines: op.lines } : { text: op.text }),
     ...(paragraphMode(op) ? { mode: 'paragraph', paragraphIndex: target.paragraphIndex, paragraphCount: target.paragraphCount, oldText: target.oldText } : {}),
     inheritedBy: target.inheritedBy,
     ...(op.pageNumber ? { pageNumber: true } : {}),
+    ...(op.format ? { format: op.format } : {}),
     // M11.5e.4: a title/even command re-reads the variant state through the word /3 Bridge READ -- the driver prepends
     // its prelude and the second line refuses it off /3, before anything is sent
     ...(target.variant !== 'default' ? { bridgeSectionVariantRead: true } : {}) });
@@ -375,11 +582,41 @@ function lower(op, target) {
  * created part is on the first section; that the part holds only paragraphs of runs. Then the whole
  * content is replaced: RemoveAllElements (one reset paragraph remains, probe 2) + AddText on it.
  * Any guard miss returns unchanged. No cursor call: the public write leaves it in the body.
+ *
+ * GH #316: when `m.format` is present, applied to the text run AFTER AddText (both modes) -- run-level
+ * keys via `run.GetRange()` (NOT the bare run: the LIVE probe measured run.SetFontSize(n) takes
+ * HALF-POINTS, run.GetRange().SetFontSize(n) takes POINTS, the SAME convention format_text uses),
+ * `alignment` via ApiParagraph.SetJc (paragraph-level, no range needed).
  */
 function commandBody(meta) {
   return `
 try {
   const m = ${JSON.stringify(meta)};
+  // GH #316: run-level keys through run.GetRange() (points, not the bare run's half-points); alignment
+  // on the paragraph directly (ApiParagraph.SetJc).
+  const applyFormat = (run, para) => {
+    if (!m.format) return;
+    const range = run.GetRange();
+    if (range) {
+      if ('bold' in m.format) range.SetBold(m.format.bold);
+      if ('italic' in m.format) range.SetItalic(m.format.italic);
+      if ('underline' in m.format) range.SetUnderline(m.format.underline);
+      if ('strike' in m.format) range.SetStrikeout(m.format.strike);
+      if ('fontFamily' in m.format) range.SetFontFamily(m.format.fontFamily);
+      if ('fontSize' in m.format) range.SetFontSize(m.format.fontSize);
+      if ('color' in m.format) range.SetColor(Api.HexColor(m.format.color.replace('#', '')));
+    }
+    if ('alignment' in m.format) para.SetJc(m.format.alignment === 'justify' ? 'both' : m.format.alignment);
+    // GH #317: tabs are PARAGRAPH-level, via ParaPr (the SAME object + call shape formatting.cjs's
+    // own body-paragraph commandBody already uses: paraPr.SetTabs(posInTwips[], align[])).
+    if ('tabs' in m.format) {
+      const paraPr = typeof para.GetParaPr === 'function' ? para.GetParaPr() : null;
+      if (paraPr && typeof paraPr.SetTabs === 'function') {
+        const t = m.format.tabs;
+        paraPr.SetTabs(t.map(x => Math.round(x.pos * 20)), t.map(x => x.align));
+      }
+    }
+  };
   const doc = Api.GetDocument();
   const secs = doc.GetSections() || [];
   if (secs.length !== m.sectionCount) return;
@@ -407,7 +644,10 @@ try {
   // style and alignment, the run's properties and every run without text (a field, an image) stay as they are
   if (m.mode === 'paragraph') {
     if (!existing) return;
-    const norm = t => String(t || '').replace(/\\s+/g, ' ').trim();
+    // GH #317: tab-preserving, like header-footer.cjs's own node-side hfNorm -- m.oldText (the
+    // paragraph's own read-side text, which now carries a real tab verbatim) must still match this
+    // on-page re-read when the paragraph holds one.
+    const norm = t => String(t || '').replace(/[^\\S\\t]+/g, ' ').replace(/^ +/, '').replace(/ +$/, '');
     const paras = [];
     for (let i = 0; i < existing.GetElementsCount(); i += 1) {
       const e = existing.GetElement(i);
@@ -425,6 +665,7 @@ try {
     if (textRuns.length !== 1) return;
     textRuns[0].ClearContent();
     textRuns[0].AddText(m.text);
+    applyFormat(textRuns[0], p);
     return;
   }
   if (existing) {
@@ -437,9 +678,29 @@ try {
   const hf = existing || get(sec, true);
   if (!hf) return;
   hf.RemoveAllElements();
+  if (Array.isArray(m.lines)) {
+    // GH #317 "lines" (LIVE-measured, the 2b probe): paragraph 0 via the ONE reset
+    // paragraph RemoveAllElements leaves, every further line via Push -- each own text + format
+    // (tabs included, the SAME applyFormat the single-paragraph mode above already uses).
+    const p0 = hf.GetElement(0);
+    if (!p0 || p0.GetClassType() !== 'paragraph') return;
+    p0.AddText(m.lines[0]);
+    applyFormat(p0.GetElement(0), p0);
+    for (let i = 1; i < m.lines.length; i += 1) {
+      if (typeof hf.Push !== 'function') return;
+      const np = Api.CreateParagraph();
+      np.AddText(m.lines[i]);
+      hf.Push(np);
+      applyFormat(np.GetElement(0), np);
+    }
+    if (m.activate && m.variant === 'title') sec.SetTitlePage(true);
+    if (m.activate && m.variant === 'even') doc.SetEvenAndOddHdrFtr(true);
+    return;
+  }
   const p = hf.GetElement(0);
   if (!p || p.GetClassType() !== 'paragraph') return;
   p.AddText(m.text);
+  applyFormat(p.GetElement(0), p);
   // GH #289 H-04b: a PAGE field after the text (public ApiParagraph.AddPageNumber, LIVE probe 1 W4)
   if (m.pageNumber) p.AddPageNumber();
   // activation AFTER the part holds its text (public API): title page per section, even/odd document-wide
@@ -522,6 +783,11 @@ function verifyPreservation(op, before, after) {
  * GH #289 paragraph mode, L3 inside the target part: the paragraph count; every OTHER paragraph (text, format, runs,
  * inline content); the target paragraph's format, its run properties (every run, in order, text aside) and its inline
  * content. Only the target paragraph's text may change.
+ *
+ * GH #316: when `op.format` is present, the target paragraph's own format/run-properties are the
+ * REQUESTED change, not an unrequested one -- L1 (formatMatches) already proves they land correctly;
+ * this check is skipped for the target paragraph only. Every OTHER paragraph, and the target's own
+ * inline content, are checked exactly as before.
  */
 function targetPartChanges(b, a, op) {
   if (!b || !a) return ['target-part-missing'];
@@ -533,18 +799,22 @@ function targetPartChanges(b, a, op) {
   b.paras.forEach((x, i) => {
     const y = a.paras[i];
     if (i !== op.paragraphIndex) { if (JSON.stringify([x.text, x.format, x.runs, x.inline]) !== JSON.stringify([y.text, y.format, y.runs, y.inline])) out.push(`paragraph-${i}`); return; }
-    if (JSON.stringify(x.format) !== JSON.stringify(y.format)) out.push(`paragraph-${i}-format`);
-    if (runProps(x.runs) === null || JSON.stringify(runProps(x.runs)) !== JSON.stringify(runProps(y.runs))) out.push(`paragraph-${i}-run-properties`);
+    if (!op.format) {
+      if (JSON.stringify(x.format) !== JSON.stringify(y.format)) out.push(`paragraph-${i}-format`);
+      if (runProps(x.runs) === null || JSON.stringify(runProps(x.runs)) !== JSON.stringify(runProps(y.runs))) out.push(`paragraph-${i}-run-properties`);
+    }
     if (!Array.isArray(x.inline) || JSON.stringify(x.inline) !== JSON.stringify(y.inline)) out.push(`paragraph-${i}-inline-content`);
   });
   return out;
 }
 
 /** L2: the final part (section + kind + variant) holds exactly one paragraph with the text; the section count as declared. */
+// GH #317: hfNorm, not norm, in these reported names too -- same reason as the evidence above.
 function wholeTaskChecks(op, finalObservation) {
   const s = partState(finalObservation.primary, op);
-  if (paragraphMode(op)) return [{ name: `${op.id}: section ${op.sectionIndex}/${op.sectionCount} ${op.part} (${op.variant}) paragraph ${op.paragraphIndex}/${op.paragraphCount} = "${norm(op.text)}"`, ok: s.ok && s.done }];
-  return [{ name: `${op.id}: section ${op.sectionIndex}/${op.sectionCount} ${op.part} (${op.variant}) = exactly one paragraph "${norm(op.text)}"${op.pageNumber ? ' + a PAGE field' : ''}`, ok: s.ok && s.done }];
+  if (paragraphMode(op)) return [{ name: `${op.id}: section ${op.sectionIndex}/${op.sectionCount} ${op.part} (${op.variant}) paragraph ${op.paragraphIndex}/${op.paragraphCount} = "${hfNorm(op.text)}"`, ok: s.ok && s.done }];
+  if (linesMode(op)) return [{ name: `${op.id}: section ${op.sectionIndex}/${op.sectionCount} ${op.part} (${op.variant}) = exactly ${op.lines.length} paragraphs ${JSON.stringify(op.lines.map(hfNorm))}`, ok: s.ok && s.done }];
+  return [{ name: `${op.id}: section ${op.sectionIndex}/${op.sectionCount} ${op.part} (${op.variant}) = exactly one paragraph "${hfNorm(op.text)}"${op.pageNumber ? ' + a PAGE field' : ''}`, ok: s.ok && s.done }];
 }
 
 // refs: none -- the header/footer text is not a body text unit a later step can name
@@ -552,4 +822,4 @@ function producedText() {
   return null;
 }
 
-module.exports = { replacementLoss, paragraphGuard, targetPartChanges, plan, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation, wholeTaskChecks, producedText, partState, shapeGuard, otherParts, bodyKey, slotState, activationGuard, flagChanges, SUPPORTED_VARIANTS };
+module.exports = { replacementLoss, replacementLossLines, paragraphGuard, targetPartChanges, plan, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation, wholeTaskChecks, producedText, partState, shapeGuard, otherParts, bodyKey, slotState, activationGuard, flagChanges, SUPPORTED_VARIANTS, HF_FORMAT_KEYS, formatMatches, paragraphDescriptor, linesMode };

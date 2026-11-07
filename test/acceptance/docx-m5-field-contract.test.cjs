@@ -73,11 +73,15 @@ test('C2 task.constraints.section on a nonexistent heading -> enforced: refused 
   await refusedAtExecution({ id: 't', constraints: { section: 'Nonexistent heading' }, steps: [FMT] }, 'CONSTRAINT_SECTION_NOT_FOUND');
 });
 
-test('the source selector sectionHeading + paragraphOrdinal -> resolved (migrated); on intents not migrated still refused, named', async () => {
+test('the source selector sectionHeading + paragraphOrdinal -> resolved (migrated); on delete_paragraph migrated at THIS layer too, but always refused one layer further in, named', async () => {
   assert.equal(planOperations({ id: 't', steps: [{ ...FMT, selector: { sectionHeading: 'Intro heading', paragraphOrdinal: 1 } }] }).ok, true);
-  // M5 gate 3: migrated on insert_paragraph_before/_after too; delete stays refused, named
+  // M5 gate 3: migrated on insert_paragraph_before/_after too
   assert.equal(planOperations({ id: 't', steps: [{ intent: 'insert_paragraph_after', selector: { sectionHeading: 'Intro heading', paragraphOrdinal: 1 }, text: 'x' }] }).ok, true);
-  await refusedBeforeDispatch({ id: 't', steps: [{ intent: 'delete_paragraph', selector: { sectionHeading: 'Intro heading', paragraphOrdinal: 1 } }] }, /field-not-enforced-yet: .*selector\.sectionHeading/);
+  // GH #320: delete_paragraph's own selector field is migrated at THIS layer (no longer field-not-enforced-yet)
+  // -- but a delete changes its own section's paragraph count, so adapter.cjs's ordinalAfterStructuralStep
+  // always refuses it, named, one layer further in (insert_paragraph_* is the one count-changing intent
+  // exempted from that guard, delete_paragraph deliberately is not).
+  await refusedBeforeDispatch({ id: 't', steps: [{ intent: 'delete_paragraph', selector: { sectionHeading: 'Intro heading', paragraphOrdinal: 1 } }] }, /ordinal-selector-on-count-changing-step/);
 });
 
 test('the source reference syntax (targetRef / destinationRef / step.ref) -> refused, named', async () => {

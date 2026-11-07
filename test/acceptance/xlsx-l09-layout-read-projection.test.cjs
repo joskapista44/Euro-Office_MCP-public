@@ -86,14 +86,14 @@ test('layoutExtent: the driver reads from 1 to the range\'s last column / row, s
   assert.equal(layoutExtent('nonsense'), null);
 });
 
-test('TOOL SURFACE: read_layout is ACCEPTED (sheet + range), the request asks the driver for the layout, and the one remaining non-ACCEPTED xlsx op (NOT_MEASURED) still refuses', () => {
+test('TOOL SURFACE: read_layout is ACCEPTED (sheet + range), the request asks the driver for the layout, and an operation outside the catalogue still refuses', () => {
   assert.equal(rt.OPERATIONS.xlsx.read_layout.status, rt.STATUS.ACCEPTED);
   assert.ok(/L-09/.test(rt.OPERATIONS.xlsx.read_layout.evidence));
   assert.deepEqual(rt.xlsxRequest('read_layout', { sheet: 'S', range: 'B2:D5' }), { windows: [], layout: [{ sheet: 'S', maxCol: 4, maxRow: 5 }] });
   assert.equal(rt.validateReadRequest('xlsx', { fileId: '1', operation: 'read_layout', sheet: 'S', range: 'B2:D5' }).ok, true);
   assert.equal(rt.validateReadRequest('xlsx', { fileId: '1', operation: 'read_layout', sheet: 'S' }).ok, false, 'range is required');
   assert.equal(rt.validateReadRequest('xlsx', { fileId: '1', operation: 'read_layout', sheet: 'S', range: 'B2:D5', width: 5 }).ok, false, 'no unknown field');
-  // GH #140 U2: read_pivots moved PARTIAL -> ACCEPTED; xlsx has no PARTIAL operation left, so this
-  // negative control uses read_print_rendering (NOT_MEASURED, the only remaining non-ACCEPTED xlsx op).
-  assert.equal(rt.validateReadRequest('xlsx', { fileId: '1', operation: 'read_print_rendering' }).code, 'REFUSED_NOT_MEASURED');
+  // GH #140 U2: read_pivots moved PARTIAL -> ACCEPTED; GH #356/#357: read_print_rendering (the last NOT_MEASURED xlsx op)
+  // moved to ACCEPTED too, so this negative control uses an operation outside the catalogue.
+  assert.equal(rt.validateReadRequest('xlsx', { fileId: '1', operation: 'read_no_such_operation' }).code, 'REFUSED_UNKNOWN');
 });

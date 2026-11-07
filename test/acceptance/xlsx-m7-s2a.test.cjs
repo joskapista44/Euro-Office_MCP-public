@@ -28,8 +28,11 @@ const book = extra => {
   for (let c = 2; c <= 12; c += 1) cells[`${colName(c)}1`] = { v: `c${colName(c)}` };
   return [{ name: 'S', cells, ...extra }, { name: 'O', cells: { A1: { v: 'o' } } }];
 };
-const rowsStep = (intent, at, count = 1) => ({ intent, sheet: 'S', at, count, anchor: { column: 'A', value: `r${intent.startsWith('insert') ? at : at + count}` } });
-const colsStep = (intent, at, count = 1) => ({ intent, sheet: 'S', at, count, anchor: { row: 1, value: `c${colName((at.charCodeAt(0) - 64) + (intent.startsWith('insert') ? 0 : count))}` } });
+// owner decision B (2026-11-02): a delete also names its witness, the first REMOVED row / column (at `at`) -- same lane as the anchor
+const rowsStep = (intent, at, count = 1) => ({ intent, sheet: 'S', at, count, anchor: { column: 'A', value: `r${intent.startsWith('insert') ? at : at + count}` },
+  ...(intent.startsWith('delete') ? { witness: { column: 'A', value: `r${at}` } } : {}) });
+const colsStep = (intent, at, count = 1) => ({ intent, sheet: 'S', at, count, anchor: { row: 1, value: `c${colName((at.charCodeAt(0) - 64) + (intent.startsWith('insert') ? 0 : count))}` },
+  ...(intent.startsWith('delete') ? { witness: { row: 1, value: `c${at}` } } : {}) });
 const task = step => ({ id: 'm7s2a', steps: [step] });
 
 async function run(store, t, script = {}) {
@@ -47,9 +50,16 @@ async function applied(extra, step, script = {}) {
   const first = await run(store, task(step), script);
   assert.equal(first.result.ok, true, JSON.stringify([op0(first.result), first.result.execution.preservationVerification]));
   assert.equal(first.m.commands, 1);
+  const settled = JSON.stringify(store.durable);
   const again = await run(store, task(step), script);
   assert.equal(again.m.commands, 0);
-  assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
+  if (step.intent.startsWith('delete')) {
+    // owner decision B (2026-11-02): a delete has no SATISFIED path -- the already-deleted shape is refused, 0 writes
+    assert.equal(op0(again.result).status, OPERATION_STATUS.FAILED);
+    assert.equal(reason(again.result), 'xlsx-structure-delete-prior-execution-unprovable');
+    assert.equal(again.m.writes, 0);
+    assert.equal(JSON.stringify(store.durable), settled, 'the refused retry changed nothing');
+  } else assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
   return store;
 }
 async function refused(extra, step, want, script = {}) {
@@ -79,11 +89,15 @@ const FC1 = { pane: { row0: 0, col0: 1 } };
 
 const CASES = [
   ['filter A1:B5, insert_rows at 7 (BEFORE)', F15, rowsStep('insert_rows', 7), null],
-  ['filter A1:B5, insert_rows at 6 (BOUNDARY)', F15, rowsStep('insert_rows', 6), NOT_BEFORE],
-  ['filter A1:B5, insert_rows at 3 (INSIDE)', F15, rowsStep('insert_rows', 3), NOT_BEFORE],
-  ['filter A10:B14, insert_rows at 5 (AFTER)', F1014, rowsStep('insert_rows', 5), NOT_BEFORE],
+  // 'filter A1:B5, insert_rows at 3 (INSIDE)' used to live here as NOT_BEFORE -- fa7244ac/5 (Q4 MEASURED) moved it
+  // to its own block below ('fa7244ac/5: insert_rows within the data rows'), since it is no longer a refusal and
+  // its APPLY changes the AutoFilter's own range, which this table's generic `applied()` does not expect.
+  ['filter A1:B5, insert_rows at 1 (the header row itself -- fa7244ac/5 does not touch this)', F15, rowsStep('insert_rows', 1), NOT_BEFORE],
+  ['filter A1:B5, insert_rows at 6 (BOUNDARY, one row AFTER the last data row -- still NOT MEASURED)', F15, rowsStep('insert_rows', 6), NOT_BEFORE],
+  ['filter A10:B14, insert_rows at 5 (AFTER, the filter entirely below the cut)', F1014, rowsStep('insert_rows', 5), NOT_BEFORE],
   ['filter A1:B5, delete_rows 7 (BEFORE)', F15, rowsStep('delete_rows', 7), null],
   ['filter A1:B5, delete_rows 6 (BOUNDARY)', F15, rowsStep('delete_rows', 6), NOT_BEFORE],
+  ['filter A1:B5, delete_rows 3 (INSIDE -- fa7244ac/5 is insert_rows only, delete stays refused)', F15, rowsStep('delete_rows', 3), NOT_BEFORE],
   ['filter A1:B5, delete_columns D (BEFORE on columns)', F15, colsStep('delete_columns', 'D'), null],
   ['filter A1:B5, delete_columns C (BOUNDARY on columns)', F15, colsStep('delete_columns', 'C'), NOT_BEFORE],
   ['filter A1:B5, insert_columns B (INSIDE on columns)', F15, colsStep('insert_columns', 'B'), NOT_BEFORE],
@@ -170,6 +184,39 @@ for (const [fault, extra, axis, other] of [
     assert.match(JSON.stringify(result.execution.preservationVerification), new RegExp(`"axis":"${axis}"`));
   });
 }
+
+// ---- fa7244ac/5 (Q4 MEASURED, c19b1065 #ref): insert_rows within the data rows extends the AutoFilter's ref ----
+// (the exception to NOT_BEFORE above; the header-row cut, the AFTER-last-data-row cut and delete_rows inside the
+// same range all stay refused -- see the three CASES entries carrying this comment)
+test('APPLIED + reopened 0/0: filter A1:B5, insert_rows at 3 (INSIDE the data rows) -- the ref grows by count, the header and the criteria stay put', async () => {
+  const store = createStore(book(F15));
+  const step = rowsStep('insert_rows', 3);
+  const first = await run(store, task(step));
+  assert.equal(first.result.ok, true, JSON.stringify([op0(first.result), first.result.execution.preservationVerification]));
+  assert.equal(first.m.commands, 1);
+  const S = store.durable.find(x => x.name === 'S');
+  assert.deepEqual(S.autoFilter, { range: 'A1:B6', filters: [] }, 'the ref grew by the inserted count, same header, same (empty) criteria');
+  const again = await run(store, task(step));
+  assert.equal(again.m.commands, 0);
+  assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
+});
+
+test('APPLIED: a field already active on the filter stays active after an insert inside the data rows', async () => {
+  const extra = { autoFilter: { range: 'A1:B5', filters: [{ field: 1, on: true, operator: 'xlOr', criteria1: 'r2', criteria2: null }] } };
+  const store = createStore(book(extra));
+  const { result } = await run(store, task(rowsStep('insert_rows', 3)));
+  assert.equal(result.ok, true, JSON.stringify([op0(result), result.execution.preservationVerification]));
+  const S = store.durable.find(x => x.name === 'S');
+  assert.deepEqual(S.autoFilter, { range: 'A1:B6', filters: extra.autoFilter.filters }, 'the active criterion survived unchanged');
+});
+
+test('NEG. KONTROLL: L3 catches autofilter-no-extend (insert inside the data rows, but the engine leaves the ref alone)', async () => {
+  const store = createStore(book(F15));
+  const { result } = await run(store, task(rowsStep('insert_rows', 3)), { fault: 'autofilter-no-extend' });
+  assert.equal(result.ok, false);
+  assert.notEqual(op0(result).status, OPERATION_STATUS.APPLIED);
+  assert.match(JSON.stringify(result.execution.preservationVerification), /"axis":"autofilter"/);
+});
 
 // ---- the L3 comparison itself: identity + position, never a count ----
 test('layoutDiffs: same count, another break position -> a difference', () => {

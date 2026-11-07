@@ -23,7 +23,8 @@ const { xlsxAdapter } = require('../adapters/xlsx/adapter.cjs');
 // (owner decision, owner channel): + the XLSX WRITE tool `xlsx_execute_task`; `docx_execute_task` stays WITHHELD
 // (static exact-set guard: test/static/tool-exposure-exact-set-guard.test.cjs).
 // GH #228 (RELEASED, owner GO 2026-10-19): + `docx_execute_task`, served only while the DOCX half of the WRITE release gate holds.
-const EXPOSED_CAPABILITY_TOOLS = Object.freeze(['xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+// GH #305 (owner decision A, owner channel 2026-10-29: DocBuilder creates, co-editing edits; standing EURO-MCP release GO): + document_create.
+const EXPOSED_CAPABILITY_TOOLS = Object.freeze(['xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
 // The non-capability release preconditions (owner M10 points 10-11).
 //   REQUESTER_AUTHORIZATION: Nextcloud/DS/storage is the access authority, reached with the requester's own credential
 //     (owner decision 2026-10-09; M11.1b LIVE: cross-credential IMPOSSIBLE, spoof DENY) -> PASS.
@@ -130,6 +131,13 @@ const ACCEPTED_XLSX_WRITE_ALLOWLIST = Object.freeze(['write_range', 'insert_rows
   // GH #300 K2 (owner GO 2026-10-26, author rule A): + add_comment -- the author is the authenticated session user
   // (comments.cjs; LIVE design probe docs/evidence/gh300-k2-comment-identity-probe-20261026.json)
   'add_comment',
+  // GH #348 / #349: + edit_comment / delete_comment -- only the session user's own comment (comments.cjs; LIVE design probe
+  // docs/evidence/gh348-probe-live-20261030.json)
+  'edit_comment',
+  'delete_comment',
+  // GH #350 / #351: + reply_to_comment / set_comment_resolved (comments.cjs; LIVE design probe docs/evidence/gh350-gh351-probe-live-20261030.json)
+  'reply_to_comment',
+  'set_comment_resolved',
   // GH #302 G4: + set_shape_text (and insert_shape's optional text), verified by read_drawings' text
   'set_shape_text',
   // GH #302 G5: + set_chart_point_data_label, verified by read_charts' effectiveLabels
@@ -137,11 +145,39 @@ const ACCEPTED_XLSX_WRITE_ALLOWLIST = Object.freeze(['write_range', 'insert_rows
   // GH #302 G7: + set_shape_rotation, verified by read_drawings' rotation
   'set_shape_rotation',
   // GH #303 R1: + set_sheet_visibility, verified by read_sheet_state's visibility
-  'set_sheet_visibility']);
+  'set_sheet_visibility',
+  // GH #300 L2 (owner decision 2026-10-27, "2: A ... 3: A"): + set_hyperlink / remove_hyperlink -- single-cell,
+  // external, and (GH #352) internal by `location` (hyperlinks-write.cjs); verified by read_hyperlinks (L1, already released). LIVE-ACCEPTED:
+  // test/live/release-gh300-l2-hyperlink-write-product.live.cjs.
+  'set_hyperlink', 'remove_hyperlink',
+  // GH #298 D (owner decision 2026-10-27, "3: A"): + create_table -- PUBLIC FormatAsTable, verified by read_tables (Bridge /18).
+  // LIVE-ACCEPTED: test/live/release-gh298-d-create-table-product.live.cjs.
+  'create_table',
+  // GH #336 / #337: + insert_table_rows / delete_table_rows / insert_table_columns / delete_table_columns (table-structure.cjs; baseline
+  // docs/evidence/gh336-gh337-baseline-20261030.json)
+  'insert_table_rows', 'delete_table_rows', 'insert_table_columns', 'delete_table_columns',
+  // GH #332-#335: + set_table_style / set_table_flag / set_table_totals_row / rename_table / resize_table (table-props.cjs; Bridge /19 sheet.table.write/v1)
+  'set_table_style', 'set_table_flag', 'set_table_totals_row', 'rename_table', 'resize_table',
+  // GH #354/#355 (Bridge /21, owner conditional B; standing EURO-MCP GO): + the two print LAYOUT intents written only
+  // through sheet.printSettings.write/v2 (/21 only) and read back through read_page_setup's /21 layout fields
+  'set_header_footer_margin', 'set_page_order',
+  // GH #338-#342 (Bridge /22, standing EURO-MCP GO): + protect_sheet / unprotect_sheet / set_cell_protection (protection-write.cjs;
+  // sheet.protection.write/v1 + sheet.cellProtection.write/v1, /22 only), verified by the sheet.protection.read/v1 axes
+  'protect_sheet', 'unprotect_sheet', 'set_cell_protection',
+  // GH #338-#342 remainder (Bridge /24, standing EURO-MCP GO; design docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md
+  // "W3"): + protect_workbook / unprotect_workbook (workbook-protection-write.cjs; workbook.protection.write/v1, /24
+  // only), verified by read_protection's additive workbook field (workbook.protection.read/v1). unprotect_workbook on
+  // a currently locked workbook is refused credential-unobservable, unconditionally, until a future unit sources a
+  // real credential detector.
+  'protect_workbook', 'unprotect_workbook',
+  // fa7244ac/3 (internal tracker; e65eda2d LANDED + LIVE PASS on the adapter path): + set_autofilter_range /
+  // remove_autofilter -- filter.cjs's two AutoFilter-OBJECT shapes (the SAME bare SetAutoFilter() toggle, fa7244ac/2
+  // Q1/Q3 MEASURED), census-less same as the other out-of-census releases above.
+  'set_autofilter_range', 'remove_autofilter']);
 
 // GH #228 (owner GO 2026-10-19): the DOCX WRITE allowlist the handler enforces is EXACTLY this set. Before the owner's GO this
 // is the empty list (state "BEFORE" in docs/GH228-DOCX-WRITE-RELEASE-GATE-PROPOSAL.md); the released state names rewrite_paragraph only.
-const ACCEPTED_DOCX_WRITE_ALLOWLIST = Object.freeze(['rewrite_paragraph', 'insert_paragraph_before', 'insert_paragraph_after', 'delete_paragraph', 'move_paragraph_before', 'move_paragraph_after', 'apply_list', 'set_list_level', 'indent_list_item', 'outdent_list_item', 'remove_list', 'replace_table_cell', 'format_text', 'insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap']); // GH #229/#230/#231: + format_text (docs/GH229..GH231 decision docs); GH #233: + the two insert intents; GH #234: + delete_paragraph; GH #235: + the two move intents; GH #236: + apply_list, set_list_level (set_list_type WITHHELD: on a shared numbering it ends DISPATCHED_OUTCOME_UNKNOWN and the DS persists the unsaved edit -- LIVE g236v1 ROUND6 + guncprobe, 2026-10-19); GH #237: + indent_list_item, outdent_list_item, remove_list; GH #249: + replace_table_cell // RELEASE 3 TRIM (2026-10-19) withheld these eight pending their own LIVE PASS; all eight are since RE-ADDED, each on its own LIVE PASS: define_style (GH #264, g3tri gh264), modify_style (GH #265, g3tri gh265), set_numbering (GH #248, g3tri gh248), set_list_type (GH #236b, g3tri gh236b), add_footnote + add_endnote (GH #267 B, g267v2 incl. R6 through the released handler), add_link (GH #266, release 3, g266v2), add_bookmark (GH #266, release 4, g266v3 ROUND8/8B) -- the array above is current; nothing in it is withheld -- release 4: + resolve_comment, reply_comment, add_comment_on_match (GH #269c/#269d/#269e; handler LIVE PASS g269cv2 / g269dv1 / g269ev1)
+const ACCEPTED_DOCX_WRITE_ALLOWLIST = Object.freeze(['rewrite_paragraph', 'insert_paragraph_before', 'insert_paragraph_after', 'delete_paragraph', 'move_paragraph_before', 'move_paragraph_after', 'apply_list', 'set_list_level', 'indent_list_item', 'outdent_list_item', 'remove_list', 'replace_table_cell', 'format_text', 'insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap', 'insert_table', 'insert_section_break', 'insert_image', 'insert_paragraphs', 'insert_shape', 'insert_chart', 'delete_image', 'replace_image']); // GH #229/#230/#231: + format_text (docs/GH229..GH231 decision docs); GH #233: + the two insert intents; GH #234: + delete_paragraph; GH #235: + the two move intents; GH #236: + apply_list, set_list_level (set_list_type WITHHELD: on a shared numbering it ends DISPATCHED_OUTCOME_UNKNOWN and the DS persists the unsaved edit -- LIVE g236v1 ROUND6 + guncprobe, 2026-10-19); GH #237: + indent_list_item, outdent_list_item, remove_list; GH #249: + replace_table_cell // RELEASE 3 TRIM (2026-10-19) withheld these eight pending their own LIVE PASS; all eight are since RE-ADDED, each on its own LIVE PASS: define_style (GH #264, g3tri gh264), modify_style (GH #265, g3tri gh265), set_numbering (GH #248, g3tri gh248), set_list_type (GH #236b, g3tri gh236b), add_footnote + add_endnote (GH #267 B, g267v2 incl. R6 through the released handler), add_link (GH #266, release 3, g266v2), add_bookmark (GH #266, release 4, g266v3 ROUND8/8B) -- release 4: + resolve_comment, reply_comment, add_comment_on_match (GH #269c/#269d/#269e; handler LIVE PASS g269cv2 / g269dv1 / g269ev1) -- GH #308: + insert_table under the standing DOCX WRITE release GO; the RELEASE-ACCEPTANCE harness test/live/docx-gh308-insert-table-product.live.cjs has NOT yet been run by its author -- provisional on that run passing before landing -- GH #313: + insert_section_break under the same standing GO; the RELEASE-ACCEPTANCE harness test/live/docx-gh313-insert-section-break-product.live.cjs has NOT yet been run by its author -- provisional on that run passing before landing -- GH #306: + insert_image under the same standing GO -- its own RELEASE-ACCEPTANCE harness has SINCE run, LIVE PASS 5/5, LANDED (main 9094cb5c1, deployed 1.1.0-9094cb5c1a84) -- GH #322: + insert_paragraphs under the same standing GO (probe LIVE PASS, commit 48afe5074, routes A/B/C); the RELEASE-ACCEPTANCE harness has NOT yet been written/run -- provisional on that run passing before landing -- GH #309: + insert_shape under the same standing GO (probe rounds 1+2 LIVE PASS; its RELEASE-ACCEPTANCE harness docx-gh309-insert-shape-product.live.cjs LIVE PASS 6/6, gh271 insert_shape round PASS)
 
 /** writeReleaseGate(state?) -> { ok, violations }. `state` overrides are for the static NEG controls only.
  * `format` ('xlsx' | 'docx') narrows the allowlist check to that format's own list; absent = both (the product_status view). */
@@ -185,7 +221,9 @@ const XLSX_CANDIDATES = ['write_range', 'clear_range', 'format_range', 'layout_r
   'clear_print_titles', 'create_sheet', 'rename_sheet', 'delete_sheet', 'move_sheet', 'copy_sheet', 'set_chart', 'rename_chart',
   'set_chart_title', 'set_chart_legend', 'set_chart_axis_title', 'set_page_layout', 'set_print_fit', 'set_header_footer',
   'set_page_break', 'set_first_page_number', 'set_print_centering', 'set_print_scale', 'set_paper_size',
-  'set_header_footer_flag', 'create_pivot', 'refresh_pivot'];
+  'set_header_footer_flag', 'create_pivot', 'refresh_pivot',
+  // fa7244ac/3: set_autofilter_range / remove_autofilter
+  'set_autofilter_range', 'remove_autofilter'];
 
 /** The xlsx intents the adapter actually routes (planning only -- no editor, no dispatch). */
 function xlsxRoutedIntents() {
@@ -227,6 +265,7 @@ const TOOL_ROWS = Object.freeze([
   { TOOL: 'docx_read', SOURCE_MODULE: 'src/server/read-tools.cjs (M11.3a handler + schema) -> driver readLive + src/adapters/docx/inventory.cjs', FORMAT: 'DOCX', READ_WRITE: 'READ', AUTH_REQUIRED: 'REQUESTER_OWN_NC_CREDENTIAL (via broker)', CONFIG_REQUIRED: 'nextcloud.url, broker.url, playwright.path', CURRENT_ACCEPTANCE: 'M11.3a OFFLINE (test/acceptance/m11-3a-read-tools.test.cjs); accepted ops read_text, read_formatting, read_tables, read_headers_footers, read_page_setup, read_bookmarks; M11.3b.2 MCP release (offline acceptance test/acceptance/m11-3b2-read-mcp-release.test.cjs)', EXPOSE_IN_PRODUCT_MCP: 'YES', REASON: 'M11.3b.2 READ release: accepted read operations only, pre-dispatch refusal, requester-own broker route, one session per process' },
   { TOOL: 'xlsx_execute_task', SOURCE_MODULE: 'src/server/write-tools.cjs (M11.4a.1 handler + schema, M11.4a.2 canonical executor wiring) -> src/core/execution + src/adapters/xlsx', FORMAT: 'XLSX', READ_WRITE: 'WRITE', AUTH_REQUIRED: 'REQUESTER_OWN_NC_CREDENTIAL (via broker)', CONFIG_REQUIRED: 'nextcloud.url, broker.url, playwright.path', CURRENT_ACCEPTANCE: 'M11.4a.1 OFFLINE handler/schema (test/acceptance/m11-4a1-write-handler.test.cjs): allowlist write_range, insert_rows, delete_rows, rename_sheet, unmerge_range, set_chart_title; M11.4a.2 OFFLINE executor wiring (test/acceptance/m11-4a2-executor-wiring.test.cjs); M11.4a.3 LIVE pre-measurement (docs/M11-4A3-LIVE-PREMEASUREMENT.md); M11.4b.1 OFFLINE MCP release (test/acceptance/m11-4b1-write-mcp-release.test.cjs); installed LIVE acceptance: M11.4b.2', EXPOSE_IN_PRODUCT_MCP: 'YES', REASON: 'M11.4b.1 XLSX WRITE release: exactly the six accepted intents, pre-dispatch refusal, requester-own broker route (WRITE), canonical executor, FORCESAVE_CONFIRMED persistence, one session per process; exposed only while the WRITE release gate holds' },
   { TOOL: 'docx_execute_task', SOURCE_MODULE: 'src/core/execution + src/adapters/docx', FORMAT: 'DOCX', READ_WRITE: 'WRITE', AUTH_REQUIRED: 'REQUESTER_OWN_NC_CREDENTIAL (via broker)', CONFIG_REQUIRED: 'nextcloud.url, broker.url, playwright.path', CURRENT_ACCEPTANCE: 'GH #219 OFFLINE handler/contract (test/acceptance/m11-4b-docx-write-handler.test.cjs); GH #221 stored-content gate (test/acceptance/gh221-docx-stored-content-gate.test.cjs); GH #228 OFFLINE release (test/acceptance/gh228-docx-write-release.test.cjs); GH #229 OFFLINE release (test/acceptance/gh229-format-text-write-release.test.cjs); LIVE acceptance: test/live/docx-rewrite-paragraph-product.live.cjs, test/live/gh229-format-text-product.live.cjs', EXPOSE_IN_PRODUCT_MCP: 'YES', REASON: 'GH #228 DOCX WRITE release (owner GO 2026-10-19): exactly the accepted DOCX allowlist (rewrite_paragraph), the per-format WRITE release gate, pre-dispatch refusal of every other intent, requester-own broker route' },
+  { TOOL: 'document_create', SOURCE_MODULE: 'src/server/document-create-tool.cjs + document-create-seeds.cjs -> broker ds_job (DocBuilder) -> local file | broker nc_webdav create-only PUT', FORMAT: 'ANY', READ_WRITE: 'CREATE', AUTH_REQUIRED: 'REQUESTER_OWN_TOKEN (broker); the target decides the write', CONFIG_REQUIRED: 'broker.url', CURRENT_ACCEPTANCE: 'GH #305 OFFLINE (test/static/document-create-tool.test.cjs); LIVE: test/live/gh305-document-create-product.live.cjs', EXPOSE_IN_PRODUCT_MCP: 'YES', REASON: 'GH #305 (owner decision A): a NEW docx/xlsx/pptx from a minimal seed via DocBuilder; never replaces an existing file; the nextcloud target answers the fileId co-editing takes next' },
 ]);
 
 /**
@@ -237,7 +276,8 @@ const TOOL_ROWS = Object.freeze([
 function exposedTools({ writeGate } = {}) {
   const pre = Object.values(RELEASE_PRECONDITIONS).every(v => v === 'PASS');
   // GH #228: the WRITE gate is per format -- an xlsx tool never waits on the docx allowlist, nor the other way round
-  const releasable = r => r.READ_WRITE === 'READ' || (r.FORMAT === 'XLSX' && writeReleaseGate({ ...writeGate, format: 'xlsx' }).ok) || (r.FORMAT === 'DOCX' && writeReleaseGate({ ...writeGate, format: 'docx' }).ok);
+  // GH #305: a CREATE tool edits nothing that exists, so no WRITE allowlist applies to it
+  const releasable = r => r.READ_WRITE === 'READ' || r.READ_WRITE === 'CREATE' || (r.FORMAT === 'XLSX' && writeReleaseGate({ ...writeGate, format: 'xlsx' }).ok) || (r.FORMAT === 'DOCX' && writeReleaseGate({ ...writeGate, format: 'docx' }).ok);
   return TOOL_ROWS.filter(r => r.EXPOSE_IN_PRODUCT_MCP === 'YES' && (r.FORMAT === 'NONE' && r.READ_WRITE === 'READ' || pre && EXPOSED_CAPABILITY_TOOLS.includes(r.TOOL) && releasable(r))).map(r => r.TOOL);
 }
 

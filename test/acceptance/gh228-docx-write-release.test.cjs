@@ -96,9 +96,9 @@ test('SCHEMA: malformed values are refused pre-dispatch (empty / missing / non-s
 test('ALLOWLIST: every OTHER routed docx intent is REFUSED_NOT_ALLOWLISTED pre-dispatch, even next to a valid rewrite_paragraph (whole task refused, step index named)', () => {
   const others = D.docxRoutedIntents();
   for (const i of W.DOCX_WRITE_ALLOWLIST) others.delete(i); // GH #229-#231 / #233 / #234 / #235 / #236 / #237 / #249: format_text and the insert, delete, move, list and table-cell intents joined the allowlist
-  assert.equal(others.size, 0); // release 3 trim + GH #266/#269e/#268d: every previously-withheld intent (define_style, modify_style, set_numbering, set_list_type, add_footnote, add_endnote, add_link, add_bookmark, resolve_comment, reply_comment, add_comment_on_match, set_image_size, set_image_wrap) is now released -- the array is current, nothing withheld
+  assert.equal(others.size, 0); // GH #308: insert_table joined the allowlist too -- the array is current, nothing withheld
   for (const i of W.DOCX_WRITE_ALLOWLIST) others.delete(i); // GH #233 / #234 / #235 / #236: the insert, delete, move and list intents joined the allowlist
-  assert.equal(others.size, 0); // release 3 trim + GH #266/#269e/#268d: every previously-withheld intent (define_style, modify_style, set_numbering, set_list_type, add_footnote, add_endnote, add_link, add_bookmark, resolve_comment, reply_comment, add_comment_on_match, set_image_size, set_image_wrap) is now released -- the array is current, nothing withheld
+  assert.equal(others.size, 0); // GH #308: insert_table joined the allowlist too -- the array is current, nothing withheld
   for (const intent of others) {
     const v = D.validateDocxWriteRequest(req([step({ text: OLD }), { intent }]));
     assert.equal(v.code, 'REFUSED_NOT_ALLOWLISTED', `${intent}: ${v.code}`);
@@ -109,7 +109,7 @@ test('ALLOWLIST: every OTHER routed docx intent is REFUSED_NOT_ALLOWLISTED pre-d
 
 test('SCHEMA: the published inputSchema offers the rewrite_paragraph step first (GH #233 / #234 / #235 / #236 / #237 / #249 / #229 add the insert, delete, move, list, table-cell and format_text steps after it)', () => {
   const items = D.inputSchema().properties.task.properties.steps.items;
-  assert.equal(items.oneOf.length, 38); // release 3 trim + GH #266/#269e/#268d: 38 released intents
+  assert.equal(items.oneOf.length, 46); // release 3 trim + GH #266/#269e/#268d/#308/#313/#306/#322/#309/#323/#296: 46 released intents
   assert.equal(items.oneOf[0].properties.intent.const, 'rewrite_paragraph');
   assert.deepEqual(items.oneOf[0].required, ['intent', 'selector', 'text']);
   assert.deepEqual(items.oneOf.find(x => x.properties.intent.const === 'format_text').required, ['intent', 'selector', 'format']);
@@ -188,6 +188,106 @@ test('PRE-DISPATCH refusals never open a session: a refused task opens zero driv
   assert.equal(p.opens(), 0);
 });
 
+// ---- GH #307: emptyDocument -- a document with no addressable text (offline; LIVE is test/live/
+// docx-gh307-empty-document-rewrite-product.live.cjs, not run by the author) --------------------------
+
+function productWith(paragraphs) {
+  const store = createStore(paragraphs);
+  const drivers = [];
+  const createDriver = () => { const d = createFakeDocxDriver(store, { saveObserver: true }); drivers.push(d); return d; };
+  const runtime = { check: () => ({ ok: true }), load: () => ({ ok: false, detail: 'unused' }) };
+  const configSource = { kind: 'BROKER', async getEditorConfig() { return { document: { key: 'KEY-1' } }; } };
+  const tool = D.createDocxWriteTool({ configSource, gate: createSessionGate(), runtime, createDriver });
+  return { store, tool, writes: () => store.saves };
+}
+
+const EMPTY_DOC_NEW = 'GH307 NEW TEXT';
+const emptyStep = (text = EMPTY_DOC_NEW) => ({ intent: 'rewrite_paragraph', selector: { emptyDocument: true }, text });
+
+test('GH #307 emptyDocument: a document reduced to a single, empty paragraph is written -- APPLIED', async () => {
+  const p = productWith([{ text: '' }]);
+  const r = await p.tool.handler(req([emptyStep()]));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.operations.map(o => o.status), ['APPLIED']);
+  assert.equal(p.writes() >= 1, true);
+  assert.deepEqual(p.store.durable.map(x => x.text), [EMPTY_DOC_NEW]);
+});
+
+test('GH #307 emptyDocument: a paragraph whose only content is whitespace resolves as empty (normalized, not ===\'\')', async () => {
+  // measured live (GH #307 probe): the editor's own clearing leaves a paragraph the product read reports as " " (one
+  // space), not "" -- a literal === '' check would refuse the exact state this branch exists to accept.
+  const p = productWith([{ text: ' ' }]);
+  const r = await p.tool.handler(req([emptyStep()]));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.operations.map(o => o.status), ['APPLIED']);
+});
+
+test('GH #307 emptyDocument RETRY: the same task again is SATISFIED / noOp, zero new writes', async () => {
+  const p = productWith([{ text: '' }]);
+  const task = req([emptyStep()]);
+  const first = await p.tool.handler(task);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  const savesAfterFirst = p.writes();
+  const retry = await p.tool.handler(task);
+  assert.equal(retry.ok, true, JSON.stringify(retry));
+  assert.equal(retry.noOp, true);
+  assert.deepEqual(retry.operations.map(o => o.status), ['SATISFIED']);
+  assert.equal(p.writes(), savesAfterFirst, 'no write on the retry');
+});
+
+test('GH #307 emptyDocument RETRY in a FRESH process (no receipt): the document already holds the requested text -- SATISFIED, zero writes', async () => {
+  const p = productWith([{ text: EMPTY_DOC_NEW }]);
+  const r = await p.tool.handler(req([emptyStep()]));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.noOp, true);
+  assert.deepEqual(r.operations.map(o => o.status), ['SATISFIED']);
+  assert.equal(p.writes(), 0);
+});
+
+test('GH #307 emptyDocument RETRY where the single paragraph holds something ELSE: refused by name, zero writes (never the generic "insufficient selector")', async () => {
+  const p = productWith([{ text: 'Somebody else wrote this' }]);
+  const r = await p.tool.handler(req([emptyStep()]));
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(p.writes(), 0);
+});
+
+test('GH #307 emptyDocument: a NON-empty single paragraph is refused, zero writes, document unchanged', async () => {
+  const p = productWith([{ text: 'Not empty' }]);
+  const before = JSON.stringify(p.store.durable);
+  const r = await p.tool.handler(req([emptyStep()]));
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(JSON.stringify(p.store.durable), before);
+  assert.equal(p.writes(), 0);
+});
+
+test('GH #307 emptyDocument: more than one block (even if one of them is empty) is refused -- the DOCUMENT must be empty, not just one paragraph in it', async () => {
+  const p = productWith([{ text: '' }, { text: 'Other paragraph' }]);
+  const r = await p.tool.handler(req([emptyStep()]));
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(p.writes(), 0);
+});
+
+test('SCHEMA: emptyDocument is a valid rewrite_paragraph selector branch, and ONLY true is accepted', () => {
+  assert.equal(D.validateDocxWriteRequest(req([step({ emptyDocument: true })])).ok, true);
+  const v = D.validateDocxWriteRequest(req([step({ emptyDocument: false })]));
+  assert.equal(v.code, 'REFUSED_SHAPE', JSON.stringify(v));
+  assert.equal(v.dispatched, false);
+});
+
+test('FIELD-CONTRACT: emptyDocument is exclusive with every other selector key (would be ignored beside it)', () => {
+  const v = D.validateDocxWriteRequest(req([step({ emptyDocument: true, text: OLD })]));
+  assert.equal(v.code, 'REFUSED_SHAPE', JSON.stringify(v));
+  assert.equal(v.dispatched, false);
+  assert.match(v.reason, /emptyDocument/);
+});
+
+test('FIELD-CONTRACT: emptyDocument is scoped to rewrite_paragraph only -- format_text refuses it, named, pre-dispatch, zero writes', () => {
+  const v = D.validateDocxWriteRequest(req([{ intent: 'format_text', selector: { emptyDocument: true }, format: { bold: true } }]));
+  assert.equal(v.code, 'REFUSED_SHAPE', JSON.stringify(v));
+  assert.equal(v.dispatched, false);
+  assert.match(v.reason, /emptyDocument/);
+});
+
 // ---- the per-format release gate ----------------------------------------------------------------------------------------
 
 test('GATE: the proposed state passes both halves; the two halves are independent of each other', () => {
@@ -205,12 +305,24 @@ test('GATE: the proposed state passes both halves; the two halves are independen
 
 test('GATE: the BEFORE state (docx allowlist []) leaves xlsx_execute_task served and withholds ONLY docx_execute_task -- the xlsx release is unchanged', () => {
   const before = { xlsxAllowlist: [...T.ACCEPTED_XLSX_WRITE_ALLOWLIST], docxAllowlist: [] };
-  assert.deepEqual(T.exposedTools({ writeGate: before }), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task']);
-  assert.deepEqual(T.exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  // GH #305: document_create edits nothing that exists, so no WRITE allowlist withholds it
+  assert.deepEqual(T.exposedTools({ writeGate: before }), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'document_create']);
+  assert.deepEqual(T.exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
 });
 
 test('GATE: the product_status view carries the all-formats verdict (PASS in the proposed state)', () => {
   const g = T.exposureGate();
   assert.equal(g.writeReleaseGate, 'PASS');
-  assert.deepEqual(g.releasedCapabilityTools, ['xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(g.releasedCapabilityTools, ['xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
+});
+
+test('GH #307 emptyDocument: the preservation check is the document SHAPE, not a vacuous pass -- one paragraph with the task text passes; an extra block or other text fails', () => {
+  const text = require('../../src/adapters/docx/families/text.cjs');
+  const op = { intent: 'rewrite_paragraph', selector: { emptyDocument: true }, text: 'Hello' };
+  const obs = blocks => ({ primary: { blocks } });
+  assert.equal(text.verifyPreservation(op, null, obs([{ kind: 'paragraph', text: 'Hello' }])).ok, true);
+  assert.equal(text.verifyPreservation(op, null, obs([{ kind: 'paragraph', text: 'Hello' }, { kind: 'paragraph', text: '' }])).ok, false);
+  assert.equal(text.verifyPreservation(op, null, obs([{ kind: 'paragraph', text: 'Other' }])).ok, false);
+  assert.equal(text.verifyPreservation(op, null, obs([{ kind: 'heading', text: 'Hello' }])).ok, false);
+  assert.equal(text.verifyPreservation(op, null, obs([])).ok, false);
 });

@@ -1,5 +1,6 @@
 'use strict';
 
+const { EXACT_PARAGRAPH_LOOKUP } = require('./paragraph-lookup.cjs');
 const { norm, blockText, textUnits } = require('../inventory.cjs');
 const { resolveStableTarget } = require('../resolver.cjs');
 
@@ -140,7 +141,7 @@ function classifyInsert(primary, op, side) {
     if (produced.length > 1) return { state: 'FAIL_CLOSED', evidence: { reason: 'insert-produced-text-ambiguous', count: produced.length } };
     if (produced.length === 0) {
       const a = resolveKind(primary, contextFree(op.selector));
-      if (!a.ok) return { state: 'FAIL_CLOSED', evidence: { reason: `insert-anchor-${String(a.ambiguity).toLowerCase()}` } };
+      if (!a.ok) return { state: 'FAIL_CLOSED', evidence: { reason: `insert-anchor-${String(a.ambiguity).toLowerCase().replace(/_/g, '-')}` } };
       return { state: 'APPLY', evidence: { anchor: a.target.text, side, ordinal: op.selector.paragraphOrdinal } };
     }
     const t = ordinalTerminal(primary, op, side);
@@ -148,7 +149,7 @@ function classifyInsert(primary, op, side) {
     return { state: 'FAIL_CLOSED', evidence: { reason: t.preconditionHolds ? 'insert-produced-text-in-wrong-position' : 'insert-anchor-precondition-mismatch-at-terminal', side } };
   }
   const anchor = resolveKind(primary, subjectSelector(op, { positional: false }));
-  if (!anchor.ok) return { state: 'FAIL_CLOSED', evidence: { reason: `insert-anchor-${String(anchor.ambiguity).toLowerCase()}` } };
+  if (!anchor.ok) return { state: 'FAIL_CLOSED', evidence: { reason: `insert-anchor-${String(anchor.ambiguity).toLowerCase().replace(/_/g, '-')}` } };
   const produced = indexesOf(primary, op.text);
   if (produced.length > 1) return { state: 'FAIL_CLOSED', evidence: { reason: 'insert-produced-text-ambiguous', count: produced.length } };
   if (produced.length === 0) return { state: 'APPLY', evidence: { anchor: anchor.target.text, side } };
@@ -161,7 +162,20 @@ function classifyInsert(primary, op, side) {
 
 function classifyDelete(primary, op) {
   const r = resolveKind(primary, subjectSelector(op));
-  if (r.ok) return { state: 'APPLY', evidence: { text: r.target.text } };
+  if (r.ok) {
+    // GH #321: an empty `before` / `after` names the document EDGE. The resolver filters on a non-empty neighbour only, so the edge is
+    // proven here, BEFORE dispatch: a wrong '' is refused with 0 writes (it used to apply, save and only then report ok:false). Both
+    // sides empty would delete the document's only paragraph -- not released.
+    const sel = op.selector || {};
+    if (sel.before === '' || sel.after === '') {
+      if (sel.before === '' && sel.after === '') return { state: 'FAIL_CLOSED', evidence: { reason: 'delete-only-paragraph-not-released' } };
+      const blocks = blocksOf(primary);
+      const index = blocks.indexOf(r.target);
+      if (sel.before === '' && index !== 0) return { state: 'FAIL_CLOSED', evidence: { reason: 'delete-target-not-at-document-start' } };
+      if (sel.after === '' && index !== blocks.length - 1) return { state: 'FAIL_CLOSED', evidence: { reason: 'delete-target-not-at-document-end' } };
+    }
+    return { state: 'APPLY', evidence: { text: r.target.text } };
+  }
   if (r.ambiguity === 'AMBIGUOUS') return { state: 'FAIL_CLOSED', evidence: { reason: 'delete-target-ambiguous', candidates: r.candidates } };
   if (r.ambiguity !== 'NOT_FOUND') return { state: 'FAIL_CLOSED', evidence: { reason: `delete-target-${String(r.ambiguity).toLowerCase()}` } };
   // Absent. SATISFIED only if the task's own context proves the deletion: the neighbours it named are
@@ -245,11 +259,8 @@ function lower(op, target) {
 }
 
 // The three editor commands re-express coedit-docx-paragraph-operations.cjs:15-18 (same API calls).
-const exactParagraph = `
-  const exactParagraph = t => {
-    const rs = (doc.Search(t, { MatchCase: true }) || []).filter(r => String(r.GetText({ Numbering: false }) || '') === t);
-    return rs.length === 1 ? rs[0].GetParagraph(0) : null;
-  };`;
+const exactParagraph = `${EXACT_PARAGRAPH_LOOKUP}
+  const exactParagraph = t => exactParagraphOf(t);`;
 
 function insertBody(sourceText, side, text) {
   return `
@@ -354,10 +365,13 @@ function wholeTaskChecks(op, finalObservation) {
     ];
   }
   if (INSERT[op.intent]) {
-    const anchorSel = subjectSelector(op, { positional: false });
-    const anchorText = anchorSel && anchorSel.text;
+    // GH #320: resolve the anchor (ANY branch -- text, fingerprint, heading) and use the RESOLVED
+    // block's own text, not the selector's raw `text` field (which a fingerprint anchor never carries
+    // -- the same fix wholeTaskChecks's delete_paragraph branch above needed, and verifyInsert (L1)
+    // already does it this way).
+    const anchor = resolveKind(f, subjectSelector(op, { positional: false }));
     const n = uniqueIndex(f, op.text);
-    const a = typeof anchorText === 'string' ? uniqueIndex(f, anchorText) : { ok: false };
+    const a = anchor.ok ? uniqueIndex(f, anchor.target.text) : { ok: false };
     return [
       { name: `${op.id}: inserted text present once`, ok: n.ok },
       { name: `${op.id}: inserted ${INSERT[op.intent]} its anchor (directional adjacency)`, ok: n.ok && a.ok && adjacent(n.index, a.index, INSERT[op.intent]) },
@@ -366,7 +380,12 @@ function wholeTaskChecks(op, finalObservation) {
   if (op.intent === 'delete_paragraph') {
     const sel = subjectSelector(op);
     const text = sel && sel.text;
-    const checks = [{ name: `${op.id}: deleted text absent`, ok: typeof text === 'string' && indexesOf(f, text).length === 0 }];
+    // GH #320: a fingerprint selector carries no `text` -- the identity-absence check reads the
+    // RELEASED identity field (fingerprint has no retry/shift concern unlike an ordinal, which is
+    // refused long before this by adapter.cjs's ordinalAfterStructuralStep, so it never reaches here).
+    const checks = typeof text === 'string'
+      ? [{ name: `${op.id}: deleted text absent`, ok: indexesOf(f, text).length === 0 }]
+      : (sel && sel.fingerprint ? [{ name: `${op.id}: deleted fingerprint absent`, ok: !blocksOf(f).some(b => b.locator && b.locator.fingerprint === sel.fingerprint) }] : []);
     if (op.selector && typeof op.selector.before === 'string' && typeof op.selector.after === 'string') {
       checks.push({ name: `${op.id}: surviving context adjacent`, ok: classifyDelete(f, op).state === 'SATISFIED' });
     }

@@ -1,0 +1,131 @@
+"sheet.table.write/v1": function (args) {
+var FIELDS = ["sheet", "table", "property", "name", "flag", "value", "ref"];
+var ALLOWED = { style: ["sheet", "table", "property", "name"], flag: ["sheet", "table", "property", "flag", "value"], totalsRow: ["sheet", "table", "property", "value"], name: ["sheet", "table", "property", "name"], ref: ["sheet", "table", "property", "ref"] };
+var FLAGS = { rowStripes: { opt: "rowBanded", key: "rowStripes" }, columnStripes: { opt: "columnBanded", key: "columnStripes" }, firstColumn: { opt: "columnFirst", key: "firstColumn" }, lastColumn: { opt: "columnLast", key: "lastColumn" } };
+var CALLS = { style: "asc_changeAutoFilter", flag: "asc_changeFormatTableInfo", totalsRow: "asc_changeFormatTableInfo", name: "asc_changeDisplayNameTable", ref: "asc_changeTableRange" };
+var has = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+if (!args || typeof args !== "object" || typeof args.sheet !== "string" || args.sheet === "" || typeof args.table !== "string" || args.table === "" || typeof args.property !== "string") return { ok: false, reason: "bad-args" };
+if (!has(ALLOWED, args.property)) return { ok: false, reason: "unsupported-property" };
+var prop = args.property;
+for (var fi = 0; fi < FIELDS.length; fi += 1) { if (has(args, FIELDS[fi]) && ALLOWED[prop].indexOf(FIELDS[fi]) < 0) return { ok: false, reason: "unsupported-property" }; }
+var colNum = function (s) { var n = 0; for (var ci = 0; ci < s.length; ci += 1) n = n * 26 + (s.charCodeAt(ci) - 64); return n; };
+var parseRef = function (r) { var m = /^([A-Z]{1,3})([1-9][0-9]{0,6}):([A-Z]{1,3})([1-9][0-9]{0,6})$/.exec(r); return m ? { c1: colNum(m[1]), r1: Number(m[2]), c2: colNum(m[3]), r2: Number(m[4]) } : null; };
+var wantRef = null;
+if (prop === "style") {
+if (typeof args.name !== "string") return { ok: false, reason: "bad-args" };
+var sm = /^TableStyle(Light|Medium|Dark)([1-9][0-9]?)$/.exec(args.name);
+var smax = sm ? (sm[1] === "Light" ? 21 : (sm[1] === "Medium" ? 28 : 11)) : 0;
+if (!sm || Number(sm[2]) > smax) return { ok: false, reason: "style-unknown" };
+} else if (prop === "flag") {
+if (typeof args.flag !== "string" || typeof args.value !== "boolean") return { ok: false, reason: typeof args.flag !== "string" ? "bad-args" : "value-not-boolean" };
+if (!has(FLAGS, args.flag)) return { ok: false, reason: "flag-unknown" };
+} else if (prop === "totalsRow") {
+if (typeof args.value !== "boolean") return { ok: false, reason: "value-not-boolean" };
+if (args.value !== true) return { ok: false, reason: "totals-off-not-measured" };
+} else if (prop === "name") {
+if (typeof args.name !== "string") return { ok: false, reason: "bad-args" };
+if (args.name.length < 1 || args.name.length > 255 || !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(args.name) || /^[A-Za-z]{1,3}[0-9]+$/.test(args.name) || /^[RrCc]([0-9]*)$/.test(args.name)) return { ok: false, reason: "name-invalid" };
+} else {
+if (typeof args.ref !== "string") return { ok: false, reason: "bad-args" };
+wantRef = args.ref.replace(/\$/g, "").toUpperCase();
+if (!parseRef(wantRef)) return { ok: false, reason: "ref-unparsable" };
+}
+var e; try { e = Asc.editor; } catch (x) { e = undefined; }
+if (!e) return { ok: false, reason: "editor-missing" };
+var API = [CALLS[prop], "asc_getWorksheetsCount", "asc_getWorksheetName", "asc_showWorksheet", "asc_isProtectedWorkbook", "asc_registerCallback", "asc_unregisterCallback", "canEdit"];
+for (var ai = 0; ai < API.length; ai += 1) { if (typeof e[API[ai]] !== "function") return { ok: false, reason: API[ai] + "-missing" }; }
+var optConst = null;
+if (prop === "style") { var cf; try { cf = Asc.c_oAscChangeFilterOptions; } catch (x) { cf = undefined; } optConst = cf ? cf.style : undefined; if (typeof optConst !== "number") return { ok: false, reason: "c_oAscChangeFilterOptions-missing" }; }
+if (prop === "flag" || prop === "totalsRow") { var ct; try { ct = Asc.c_oAscChangeTableStyleInfo; } catch (x) { ct = undefined; } optConst = ct ? ct[prop === "flag" ? FLAGS[args.flag].opt : "rowTotal"] : undefined; if (typeof optConst !== "number") return { ok: false, reason: "c_oAscChangeTableStyleInfo-missing" }; }
+if (e.canEdit() !== true) return { ok: false, reason: "edit-not-allowed" };
+var ce = e.collaborativeEditing;
+if (ce && typeof ce.getGlobalLock === "function" && ce.getGlobalLock()) return { ok: false, reason: "workbook-locked" };
+if (e.asc_isProtectedWorkbook() !== false) return { ok: false, reason: "workbook-protected" };
+var sheetNames = function () { var n = e.asc_getWorksheetsCount(); var o = []; for (var q = 0; q < n; q += 1) o.push(e.asc_getWorksheetName(q)); return o; };
+var names = sheetNames();
+var idx = names.indexOf(args.sheet);
+if (idx < 0) return { ok: false, reason: "sheet-not-found" };
+if (names.indexOf(args.sheet, idx + 1) >= 0) return { ok: false, reason: "sheet-ambiguous" };
+var readTables = function (sheetName) { var r = EO_BRIDGE_CAPS["sheet.tables.read/v1"]({ sheet: sheetName }); if (!r || r.ok !== true) return { err: { ok: false, reason: "tables-read-failed:" + (r && r.reason ? r.reason : "unknown") } }; return { tables: r.value.tables }; };
+var rt = readTables(args.sheet);
+if (rt.err) return rt.err;
+var tbs = rt.tables;
+var ti = -1;
+for (var ti2 = 0; ti2 < tbs.length; ti2 += 1) { if (tbs[ti2].name === args.table) { if (ti >= 0) return { ok: false, reason: "table-ambiguous" }; ti = ti2; } }
+if (ti < 0) return { ok: false, reason: "table-not-found" };
+var t0 = tbs[ti];
+var callArgs;
+if (prop === "style") {
+if (t0.style && t0.style.name === args.name) return { ok: false, reason: "already-at-value" };
+callArgs = [args.table, optConst, args.name];
+} else if (prop === "flag") {
+if (!t0.style) return { ok: false, reason: "table-style-info-missing" };
+if (t0.style[FLAGS[args.flag].key] === args.value) return { ok: false, reason: "already-at-value" };
+callArgs = [args.table, optConst, args.value];
+} else if (prop === "totalsRow") {
+if (t0.headerRow !== true) return { ok: false, reason: "header-row-missing" };
+if (t0.totalsRow === true) return { ok: false, reason: "already-at-value" };
+callArgs = [args.table, optConst, true];
+} else if (prop === "name") {
+if (t0.name === args.name) return { ok: false, reason: "already-at-value" };
+var low = args.name.toLowerCase();
+for (var si = 0; si < names.length; si += 1) {
+var rs = readTables(names[si]);
+if (rs.err) return rs.err;
+for (var tj = 0; tj < rs.tables.length; tj += 1) { if (rs.tables[tj].name.toLowerCase() === low && !(names[si] === args.sheet && tj === ti)) return { ok: false, reason: "name-taken" }; }
+}
+callArgs = [args.table, args.name];
+} else {
+var cur = parseRef(t0.ref);
+var want = parseRef(wantRef);
+if (!cur) return { ok: false, reason: "range-unreadable" };
+if (t0.ref === wantRef) return { ok: false, reason: "already-at-value" };
+if (cur.c1 !== want.c1 || cur.r1 !== want.r1) return { ok: false, reason: "ref-moves-origin" };
+if (want.c2 < want.c1 || want.r2 < want.r1 || (t0.headerRow === true && want.r2 < want.r1 + 1)) return { ok: false, reason: "ref-too-small" };
+for (var oj = 0; oj < tbs.length; oj += 1) {
+if (oj === ti) continue;
+var oc = parseRef(tbs[oj].ref);
+if (oc && !(want.c2 < oc.c1 || oc.c2 < want.c1 || want.r2 < oc.r1 || oc.r2 < want.r1)) return { ok: false, reason: "ref-overlaps" };
+}
+callArgs = [args.table, wantRef];
+}
+var activeBefore = null;
+if (typeof e.asc_getActiveWorksheetIndex === "function") { try { activeBefore = e.asc_getActiveWorksheetIndex(); } catch (x) { activeBefore = null; } }
+var errors = [];
+var onError = function (id, level) { errors.push({ id: id, level: level }); };
+try { e.asc_registerCallback("asc_onError", onError); } catch (x) { errors.push({ id: "callback-not-registered" }); }
+var threw = null;
+try { e.asc_showWorksheet(idx); } catch (x) { threw = "show:" + String(x).slice(0, 200); }
+if (threw === null) { try { e[CALLS[prop]].apply(e, callArgs); } catch (x) { threw = String(x).slice(0, 200); } }
+try { e.asc_unregisterCallback("asc_onError", onError); } catch (x) { }
+if (typeof activeBefore === "number" && activeBefore !== idx) { try { e.asc_showWorksheet(activeBefore); } catch (x) { } }
+if (threw !== null) return { ok: false, reason: CALLS[prop] + "-threw", error: threw };
+if (errors.length) return { ok: false, reason: CALLS[prop] + "-error", errors: errors };
+var ra = readTables(args.sheet);
+if (ra.err) return ra.err;
+var tas = ra.tables;
+if (tas.length !== tbs.length) return { ok: false, reason: "table-count-changed", before: tbs.length, after: tas.length };
+for (var ki = 0; ki < tbs.length; ki += 1) { if (ki !== ti && JSON.stringify(tbs[ki]) !== JSON.stringify(tas[ki])) return { ok: false, reason: "other-table-changed", table: tbs[ki].name }; }
+var t1 = tas[ti];
+var observed;
+var hit = false;
+var same = false;
+if (prop === "style") { observed = t1.style ? t1.style.name : null; hit = observed === args.name; same = !!t0.style && observed === t0.style.name || (!t0.style && observed === null); }
+else if (prop === "flag") { observed = t1.style ? t1.style[FLAGS[args.flag].key] : null; hit = observed === args.value; same = observed === t0.style[FLAGS[args.flag].key]; }
+else if (prop === "totalsRow") { observed = t1.totalsRow; hit = observed === true; same = observed === t0.totalsRow; }
+else if (prop === "name") { observed = t1.name; hit = observed === args.name; same = observed === t0.name; }
+else { observed = t1.ref; hit = observed === wantRef; same = observed === t0.ref; }
+if (same && !hit) return { ok: false, reason: "no-effect", observed: observed };
+if (!hit) return { ok: false, reason: prop + "-unexpected", observed: observed };
+var strip = function (t) {
+var c = JSON.parse(JSON.stringify(t));
+if (prop === "style") { if (c.style) c.style.name = null; }
+else if (prop === "flag") { if (c.style) c.style[FLAGS[args.flag].key] = null; }
+else if (prop === "totalsRow") { c.totalsRow = null; c.ref = null; c.autoFilter = null; }
+else if (prop === "name") { c.name = null; }
+else { c.ref = null; c.columns = null; c.autoFilter = null; }
+return JSON.stringify(c);
+};
+if (strip(t0) !== strip(t1)) return { ok: false, reason: "target-collateral-change", before: t0, after: t1 };
+return { ok: true, value: { applied: [prop], table: t1.name, observed: observed } };
+},

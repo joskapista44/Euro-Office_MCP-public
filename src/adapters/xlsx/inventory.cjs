@@ -29,13 +29,20 @@ const deepFreeze = o => { if (o && typeof o === 'object' && !Object.isFrozen(o))
 const objectsOf = (payload, sheetNames) => withProvenPivots(payload.objects, payload.runtime && payload.runtime.identity, sheetNames);
 
 function deps(sheets, cells, payload, formulas) {
-  if (payload.dependents === undefined) return { dependencies: null, rules: null, definedNames: null };
+  if (payload.dependents === undefined) return { dependencies: null, rules: null, definedNames: null, hiddenDefinedNames: null };
   const d = payload.dependents;
-  const internal = typeof d === 'string' ? { names: d, validations: d } : (d || {});
+  const internal = typeof d === 'string' ? { names: d, validations: d, hiddenNames: d } : (d || {});
   // M7 S32 slice 2: a tiered read's cells are only the windows -- the analysis also sees every formula of the T3 index
   const all = formulas ? { ...Object.fromEntries(Object.entries(formulas).map(([k, f]) => [k, { f }])), ...cells } : cells;
   const r = analyze(sheets.map(s => s.name), all, { names: internal.names, validations: internal.validations, conditional: payload.conditional, objects: objectsOf(payload, sheets.map(s => s.name)) });
-  return deepFreeze({ dependencies: r.dependencies, rules: r.rules, definedNames: r.names });
+  // GH #362 2nd unit: the unfiltered hidden-name list, kept OUTSIDE analyze()'s dependency graph (it must not
+  // affect formula-reference resolution or read_defined_names) -- only the names family's write-side collision
+  // gate consumes it.
+  const hiddenRaw = internal.hiddenNames;
+  const hiddenDefinedNames = typeof hiddenRaw === 'string'
+    ? hiddenRaw
+    : (Array.isArray(hiddenRaw) ? hiddenRaw.map(e => ({ name: e.name, scopeSheet: e.scopeSheet })) : 'UNOBSERVABLE:hidden-names-reader-absent');
+  return deepFreeze({ dependencies: r.dependencies, rules: r.rules, definedNames: r.names, hiddenDefinedNames });
 }
 
 /** A cell-level bold/italic read (EO_INTERNAL_DEPENDENCY, build-gated in the driver): boolean passes
@@ -111,12 +118,22 @@ function normalizeInventory(payload) {
     active: typeof payload.active === 'string' ? payload.active : null,
     // the public range-level validation reads (wave 6), keyed '<sheet>!<range>'; null when none was asked
     cfReads: payload.cfReads && typeof payload.cfReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.cfReads))) : null,
+    // GH #363 2nd unit (read_effective_fill): the compiled-style reads, keyed '<sheet>!<range>' -> EITHER an
+    // array of per-cell raw entries OR the whole-axis degrade string (bridgeAxis's own 'UNOBSERVABLE:<reason>',
+    // e.g. CAPABILITY_MISSING on a pre-/28 runtime) -- the SAME per-key two-shape convention cfReads already
+    // carries (the outer object is never itself a bare string; each VALUE inside it can be one). null when
+    // none was asked.
+    compiledStyleReads: payload.compiledStyleReads && typeof payload.compiledStyleReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.compiledStyleReads))) : null,
     // X-F04 (format_run): the per-cell run-map reads, keyed '<sheet>!<cell>'; null when none was asked
     runReads: payload.runReads && typeof payload.runReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.runReads))) : null,
     // GH #301 D4 (write_array_formula): the per-cell raw GetFormulaArray reads, keyed '<sheet>!<cell>'; null when none was asked
     arrayReads: payload.arrayReads && typeof payload.arrayReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.arrayReads))) : null,
     // X-L10: every sheet's visibility (true | false | 'UNOBSERVABLE:<why>'), read only for a freeze step; null when not read
     visibility: payload.visibility && typeof payload.visibility === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.visibility))) : null,
+    // GH #365 option C U2 (read_sheet_state veryHidden): every sheet's veryHidden axis (true | false |
+    // 'UNOBSERVABLE:<why>'), read only on a /29+ runtime when a sheet.state step asked; null when not read.
+    // Same per-sheet two-shape convention `visibility` above already carries.
+    veryHiddenReads: payload.veryHiddenReads && typeof payload.veryHiddenReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.veryHiddenReads))) : null,
     validationReads: payload.validationReads && typeof payload.validationReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.validationReads))) : null,
     // the print-setting reads (wave 8, the model), keyed by sheet name; null when none was asked
     printReads: payload.printReads && typeof payload.printReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.printReads))) : null,
@@ -133,10 +150,21 @@ function normalizeInventory(payload) {
     // hidden } } keyed '<sheet>!<range>' through sheet.protection.read/v1 (B/17) -- read_range's own redaction
     // (read-tools.cjs) consumes it; null when not asked (or when the tier dropped it, same as cfReads/validationReads)
     protectionRangeReads: payload.protectionRangeReads && typeof payload.protectionRangeReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.protectionRangeReads))) : null,
+    // GH #338-#342 remainder (/24 only, W1/W3): the workbook-level structure lock, ONE value for the whole
+    // workbook (not a per-sheet keyed map, unlike protectionReads above) through workbook.protection.read/v1 --
+    // { lockStructure: boolean } on success, or the axis's own 'UNOBSERVABLE:<why>' string on failure (the SAME
+    // degrade-to-string convention protection-read.cjs's workbookProtectionField already consumes); null when
+    // the workbook-protection-write family did not ask for it (liveScope's own opt-in).
+    workbookProtectionRead: payload.workbookProtectionRead === undefined || payload.workbookProtectionRead === null ? null : (typeof payload.workbookProtectionRead === 'string' ? payload.workbookProtectionRead : deepFreeze(JSON.parse(JSON.stringify(payload.workbookProtectionRead)))),
     // the AutoFilter reads (wave 6), keyed by sheet name; null when none was asked
     filterReads: payload.filterReads && typeof payload.filterReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.filterReads))) : null,
     // the comment reads (GH #300 K1, read_comments), keyed by sheet name; null when none was asked
     commentReads: payload.commentReads && typeof payload.commentReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.commentReads))) : null,
+    // the Excel Table reads (GH #298 D, read_tables), keyed by sheet name through sheet.tables.read/v1 (B/18); null when none was asked
+    tableReads: payload.tableReads && typeof payload.tableReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.tableReads))) : null,
+    printPageReads: payload.printPageReads && typeof payload.printPageReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.printPageReads))) : null,
+    // the hyperlink reads (GH #300 L1, read_hyperlinks), keyed by sheet name through sheet.hyperlinks.read/v1 (B/18); null when none was asked
+    hyperlinkReads: payload.hyperlinkReads && typeof payload.hyperlinkReads === 'object' ? deepFreeze(JSON.parse(JSON.stringify(payload.hyperlinkReads))) : null,
     // GH #300 K2 (add_comment): the session's comment author { id, name } from the signed editor config, a NAMED
     // 'UNOBSERVABLE:<why>' when the session has none, null when not asked
     sessionUser: payload.sessionUser && typeof payload.sessionUser === 'object' ? Object.freeze({ id: String(payload.sessionUser.id), name: String(payload.sessionUser.name) }) : (typeof payload.sessionUser === 'string' ? payload.sessionUser : null),

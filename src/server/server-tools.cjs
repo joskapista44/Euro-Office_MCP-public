@@ -17,6 +17,7 @@ const { createSessionGate } = require('./session-gate.cjs');
 const { createSessionRegistry, sessionReuseConfig } = require('./session-registry.cjs');
 const { createWriteTool } = require('./write-tools.cjs');
 const { createDocxWriteTool } = require('./docx-write-tools.cjs');
+const { createDocumentCreateTool } = require('./document-create-tool.cjs');
 const os = require('node:os');
 
 /**
@@ -41,6 +42,11 @@ const DOCX_SESSION_REUSE_ENV = 'EURO_MCP_DOCX_SESSION_REUSE';
 function buildServerTools({ config, configIdentity, readTool = {}, writeTool = {}, log = null, env = process.env } = {}) {
   const b = (config && config.broker) || {};
   const configSource = createBrokerConfigSource({ brokerUrl: b.url, instance: b.instance, timeoutMs: b.timeoutMs });
+  // config.cjs validates timeouts.openMs/commandMs (positive integer) but, before this, nothing read them back:
+  // forwarded to the driver constructor as timeoutMs/commandTimeoutMs on a miss only -- undefined when the config
+  // does not set them, which is the driver's own default (unchanged behaviour for every config that omits this key).
+  const t = (config && config.timeouts) || {};
+  const driverTimeouts = { timeoutMs: t.openMs, commandTimeoutMs: t.commandMs };
   const gate = readTool.gate || createSessionGate();
   // GH #100 U2: the warm-session registry. OFF unless the switch AND its three limits are set; nothing holds or takes a session before U4.
   const sessions = createSessionRegistry(sessionReuseConfig(env), { log });
@@ -71,17 +77,17 @@ function buildServerTools({ config, configIdentity, readTool = {}, writeTool = {
     // GH #100 U4c: the SAME reuse object as xlsx_execute_task below -- the same key (principal +
     // configSignature), so a read and a write on the same file contend for the ONE held slot
     // instead of evicting each other (docs/GH100-U4C-READ-REUSE-DESIGN.md sec. 3).
-    xlsx_read: createReadTool('xlsx', { configSource, browsersPath, reuse, ...readTool, gate }),
+    xlsx_read: createReadTool('xlsx', { configSource, browsersPath, reuse, ...driverTimeouts, ...readTool, gate }),
     // GH #219 3: docx_read now ALSO carries a reuse object -- `docxReuse`, which is `null` unless
     // BOTH switches are on (see DOCX_SESSION_REUSE_ENV above). With either OFF (today's default),
     // `reuse: null` is byte-identical to this tool's shape before this unit: no take()/hold(), no
     // extra config fetch. docx_read and docx_execute_task share THIS SAME `docxReuse` object (the
     // SAME key), the GH #100 U4c read/write contention design, now extended to docx.
-    docx_read: createReadTool('docx', { configSource, browsersPath, reuse: docxReuse, ...readTool, gate }),
+    docx_read: createReadTool('docx', { configSource, browsersPath, reuse: docxReuse, ...driverTimeouts, ...readTool, gate }),
     // M11.4a.1 handler + schema, M11.4a.2 canonical executor wiring (the SAME session gate as the READ tools) -- built but
     // WITHHELD: not in exposedTools(), so neither listed nor callable. There is no DOCX WRITE handler (DOCX_WRITE_ACCEPTED is empty).
     // GH #76: each write's phase timings go to the per-UID log (numbers only), so a slow call can be broken down afterwards
-    xlsx_execute_task: createWriteTool('xlsx', { configSource, browsersPath, reuse, ...(log ? { onTiming: t => log.info('xlsx_execute_task timing', t) } : {}), ...writeTool, gate }),
+    xlsx_execute_task: createWriteTool('xlsx', { configSource, browsersPath, reuse, ...driverTimeouts, ...(log ? { onTiming: ti => log.info('xlsx_execute_task timing', ti) } : {}), ...writeTool, gate }),
     // GH #219 3: docx_execute_task BUILT here (the handler object exists, fully wired -- the SAME
     // session gate, broker configSource and now, if both switches are on, the SAME warm-session
     // registry as docx_read) but WITHHELD exactly the way xlsx_execute_task was before M11.4b.1:
@@ -89,7 +95,9 @@ function buildServerTools({ config, configIdentity, readTool = {}, writeTool = {
     // it, so `tools` (the exposed subset below) never includes it -- tools/list omits it, tools/call
     // answers "Unknown tool". Releasing it is `tools.cjs`'s own decision (test/static/
     // tool-exposure-exact-set-guard.test.cjs), NOT this unit's -- unchanged by this diff.
-    docx_execute_task: createDocxWriteTool({ configSource, browsersPath, reuse: docxReuse, ...writeTool, gate }),
+    docx_execute_task: createDocxWriteTool({ configSource, browsersPath, reuse: docxReuse, ...driverTimeouts, ...writeTool, gate }),
+    // GH #305: a NEW document via DocBuilder (broker ds_job) to a local or a Nextcloud target; no editor session, so no gate
+    document_create: createDocumentCreateTool({ brokerUrl: b.url, instance: b.instance, ...(b.timeoutMs ? { timeoutMs: b.timeoutMs } : {}) }),
   };
   const tools = Object.fromEntries(exposedTools().filter(n => registry[n]).map(n => [n, registry[n]]));
   return { registry, tools, gate, sessions };

@@ -1,0 +1,27 @@
+(function () {
+try {
+var X = typeof window !== "undefined" && window ? window.AscCommonExcel : null;
+var C = typeof window !== "undefined" && window ? window.AscCH : null;
+if (!X || !C || typeof X.UndoRedoRedoLayout !== "function") return;
+var P = X.UndoRedoRedoLayout.prototype;
+if (P.__eoLayoutV21 === true) return;
+var orig = P.UndoRedo;
+if (typeof orig !== "function") return;
+C.historyitem_Layout_HeaderMargin = 16;
+C.historyitem_Layout_FooterMargin = 17;
+C.historyitem_Layout_PageOrder = 18;
+P.UndoRedo = function (Type, Data, nSheetId, bUndo) {
+if (Type !== 16 && Type !== 17 && Type !== 18) return orig.call(this, Type, Data, nSheetId, bUndo);
+var ws = this.wb.getWorksheetById(nSheetId);
+if (!ws) return;
+var po = ws.PagePrintOptions;
+var v = bUndo ? Data.from : Data.to;
+if (Type === 18) po.asc_getPageSetup().pageOrder = v;
+else if (Type === 16) po.asc_getPageMargins().asc_setHeader(v);
+else po.asc_getPageMargins().asc_setFooter(v);
+if (this.wb.oApi && typeof this.wb.oApi._onUpdateLayoutMenu === "function") this.wb.oApi._onUpdateLayoutMenu(nSheetId);
+};
+P.__eoLayoutV21 = true;
+} catch (e) {
+}
+})(),

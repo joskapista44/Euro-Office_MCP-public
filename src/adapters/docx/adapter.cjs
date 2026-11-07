@@ -36,6 +36,17 @@ const image = require('./families/image.cjs');
 // GH #269c: a new family, placed after style-definition for the same merge-collision reason.
 const comments = require('./families/comments.cjs');
 const commentWrite = require('./families/comment-write.cjs'); // GH #269d
+// GH #308: a new family, placed after comment-write for the same merge-collision reason.
+const tableInsert = require('./families/table-insert.cjs');
+// GH #313: a new family, placed after table-insert for the same merge-collision reason.
+const sectionBreakInsert = require('./families/section-break-insert.cjs');
+// GH #306: a new family, placed after section-break-insert for the same merge-collision reason.
+const imageInsert = require('./families/image-insert.cjs');
+const paragraphsInsert = require('./families/paragraphs-insert.cjs');
+// GH #309: a new family, placed after image-insert for the same merge-collision reason.
+const shapeInsert = require('./families/shape-insert.cjs');
+// GH #323: a new family, placed after shape-insert for the same merge-collision reason.
+const chartInsert = require('./families/chart-insert.cjs');
 const fieldContract = require('./field-contract.cjs');
 const constraints = require('./constraints.cjs');
 
@@ -53,11 +64,12 @@ const constraints = require('./constraints.cjs');
  * Wave 3 `rich-inline` (add_bookmark, add_link) and `notes` (add_footnote, add_endnote), in Wave 4a
  * `table-cell` (replace_table_cell), in Wave 4b `table-row` (insert before/after, delete), in Wave 4c
  * `table-column` (insert before/after, delete), in Wave 4d `table-merge-split` (merge, split), in Wave 5 `header-footer` (edit_header, edit_footer). GH #268c adds
- * `image` (set_image_size, set_image_wrap), a NEW_CAPABILITY family (no source intent, like page-setup/table-format/style-definition above it). Every other
- * registered intent is refused at PLANNING with an explicit reason, before any dispatch.
+ * `image` (set_image_size, set_image_wrap), a NEW_CAPABILITY family (no source intent, like page-setup/table-format/style-definition above it). GH #308 adds
+ * `table-insert` (insert_table), the same NEW_CAPABILITY class -- the table families above only edit an EXISTING table; this one creates a new one. Every
+ * other registered intent is refused at PLANNING with an explicit reason, before any dispatch.
  */
 
-const FAMILIES = Object.freeze({ text, formatting, 'paragraph-structure': paragraph, list, numbering, 'rich-inline': rich, notes, 'table-cell': table, 'table-row': tableRow, 'table-column': tableColumn, 'table-merge-split': tableMergeSplit, 'header-footer': headerFooter, 'page-setup': pageSetup, 'table-format': tableFormat, 'style-definition': styleDefinition, image, comments, 'comment-write': commentWrite });
+const FAMILIES = Object.freeze({ text, formatting, 'paragraph-structure': paragraph, list, numbering, 'rich-inline': rich, notes, 'table-cell': table, 'table-row': tableRow, 'table-column': tableColumn, 'table-merge-split': tableMergeSplit, 'header-footer': headerFooter, 'page-setup': pageSetup, 'table-format': tableFormat, 'style-definition': styleDefinition, image, comments, 'comment-write': commentWrite, 'table-insert': tableInsert, 'section-break-insert': sectionBreakInsert, 'image-insert': imageInsert, 'paragraphs-insert': paragraphsInsert, 'shape-insert': shapeInsert, 'chart-insert': chartInsert });
 // Merged from the 28/28 migration inventory AND the disjoint new-capability list -- see the
 // comment above the capabilities.cjs import. duplicates: [] is asserted by
 // test/static/docx-new-capabilities.test.cjs (the two lists are disjoint by construction and by gate).
@@ -100,8 +112,15 @@ function recoveryIds(task, operations) {
  * Agent task -> common M3 operations. Declares, per operation: dependencies/refs (none in the
  * slice), preservation placement, and batch independence -- which is ALWAYS left unproven here
  * (no batchSafeGroup): M4 does not optimize for batching (brief point 11).
+ *
+ * GH #359 (v2): `anchorAlternates` ('earlier' default, or 'all') controls which sibling
+ * operations attachAnchorAlternates may draw a neighbour's produced text from -- see that
+ * function's own comment. Every execution-time caller (classifyOperation via the sequential
+ * executor, classifyIdempotency) keeps the default: at that point only earlier operations have
+ * actually run against the live document. verifyWholeTask runs after every operation has
+ * completed, so it passes 'all'.
  */
-function planOperations(task) {
+function planOperations(task, { anchorAlternates = 'earlier' } = {}) {
   const steps = (task && task.steps) || [];
   if (!Array.isArray(steps) || steps.length === 0) return { ok: false, operations: [], detail: 'task has no steps' };
   // M5 fail-closed field contract: a field the target does not read and enforce refuses the WHOLE
@@ -147,9 +166,10 @@ function planOperations(task) {
   if (!recovery.ok) return { ok: false, operations: [], detail: recovery.detail };
   const withRefs = attachRefText(operations);
   if (!withRefs.ok) return { ok: false, operations: [], detail: withRefs.detail };
+  const withAnchorAlternates = attachAnchorAlternates(withRefs.operations, { includeLater: anchorAlternates === 'all' });
   // A family may annotate its operations with task-level facts (list: the projected terminal state
   // per target, the continuation of consecutive apply_list). Pure; the operation ids never change.
-  let annotated = withRefs.operations;
+  let annotated = withAnchorAlternates;
   for (const family of new Set(annotated.map(familyFor))) if (family.annotateTask) annotated = family.annotateTask(annotated);
   annotated = attachSuccessors(annotated);
   const marked = annotated.map(op => (recovery.ids.has(op.id) ? { ...op, recovery: text.UNRESOLVED } : op));
@@ -182,6 +202,53 @@ function attachRefText(operations) {
 }
 
 /**
+ * GH #359: a `before`/`after` anchor is captured from the task's PRE-task observation (the caller's
+ * own read_text), but an EARLIER operation of this SAME task may already have rewritten the
+ * neighbouring block by the time a LATER operation is classified against a fresh re-observation --
+ * the live context then holds that neighbour's NEW text, and resolveStableTarget's anchor filter
+ * (resolver.cjs) rejects an otherwise-correct hit because the selector still names the old one.
+ * This pass records, for each text-anchored operation, the text some OTHER operation of this task
+ * is itself producing wherever that other operation's own (pre-task) target text equals this
+ * operation's `before`/`after` value -- so the resolver can accept either anchor. Pure planner
+ * metadata, a function of this task's own already-planned operations only: classifyOperation still
+ * resolves against a single fresh observation, nothing stored or remembered across tasks or sessions.
+ *
+ * GH #359 (v2): `includeLater` decides which "other" operations count. At CLASSIFY time (the
+ * sequential executor dispatches one operation at a time) only EARLIER operations have actually
+ * run against the live document -- a later one's text is not there yet, so offering it as an
+ * alternate would accept a context the document does not hold. At WHOLE-TASK VERIFY time (L2,
+ * planOperations' caller re-plans against the task's FINAL observation, every operation already
+ * applied) a neighbour rewritten by a LATER step is exactly as real as one rewritten by an earlier
+ * one -- both its own anchor (unaffected, rejected) and the live one must be accepted, so the
+ * default stays earlier-only and verifyWholeTask opts into 'all' through planOperations.
+ */
+function attachAnchorAlternates(operations, { includeLater = false } = {}) {
+  const originalTextOf = op => {
+    if (typeof (op.selector && op.selector.text) === 'string') return op.selector.text;
+    return typeof op.refText === 'string' ? op.refText : null;
+  };
+  return operations.map((op, i) => {
+    const sel = op.selector;
+    const wantsBefore = typeof (sel && sel.before) === 'string' && sel.before !== '';
+    const wantsAfter = typeof (sel && sel.after) === 'string' && sel.after !== '';
+    if (!wantsBefore && !wantsAfter) return op;
+    let beforeAlt;
+    let afterAlt;
+    const others = includeLater ? operations.filter((_, j) => j !== i) : operations.slice(0, i);
+    for (const other of others) {
+      const produced = familyFor(other).producedText ? familyFor(other).producedText(other) : null;
+      if (typeof produced !== 'string') continue;
+      const otherOriginal = originalTextOf(other);
+      if (otherOriginal === null) continue;
+      if (wantsBefore && beforeAlt === undefined && norm(otherOriginal) === norm(sel.before)) beforeAlt = produced;
+      if (wantsAfter && afterAlt === undefined && norm(otherOriginal) === norm(sel.after)) afterAlt = produced;
+    }
+    if (beforeAlt === undefined && afterAlt === undefined) return op;
+    return { ...op, selector: { ...sel, ...(beforeAlt !== undefined ? { beforeAlt } : {}), ...(afterAlt !== undefined ? { afterAlt } : {}) } };
+  });
+}
+
+/**
  * W2.1 successor-aware final verification (owner brief W2.1 point 3). The planner records, for an
  * operation A, the LATER operations of this task that DECLAREDLY transform the representation of
  * A's semantic result (a family with `transformsRepresentation`, today: list -- paragraph -> list
@@ -203,7 +270,7 @@ function attachSuccessors(operations) {
 // W04 (table-format, read while studying this registration path, not previously named in v1/v2 of
 // the design): 'table-format' writes a table by construction, so a task's doNotTouchTables
 // constraint must refuse it too -- the same reason the other 4 table families are here.
-const TABLE_FAMILIES = Object.freeze(['table-cell', 'table-row', 'table-column', 'table-merge-split', 'table-format']);
+const TABLE_FAMILIES = Object.freeze(['table-cell', 'table-row', 'table-column', 'table-merge-split', 'table-format', 'table-insert']);
 // The steps that change how many paragraph blocks a section holds (or which ones). An ordinal names a
 // position counted on the state it is resolved against; with such a step ANYWHERE in the same task the
 // count differs between the first run and a reopened retry (a LATER step has already run then), so the
@@ -334,7 +401,10 @@ const docxAdapter = {
   },
 
   async verifyWholeTask(_handle, task, finalObservation) {
-    const planned = planOperations(task);
+    // GH #359 (v2): every operation has already run by the time L2 checks the final document --
+    // a neighbour rewritten by a LATER step is as real as one rewritten earlier (see
+    // attachAnchorAlternates' own comment).
+    const planned = planOperations(task, { anchorAlternates: 'all' });
     if (!planned.ok) return { ok: false, checks: [{ name: 'task plans', ok: false, detail: planned.detail }] };
     const checks = planned.operations.flatMap(op => familyFor(op).wholeTaskChecks(op, finalObservation));
     const c = planned.operations[0] && planned.operations[0].constraints;

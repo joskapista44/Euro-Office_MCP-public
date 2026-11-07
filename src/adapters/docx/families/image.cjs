@@ -40,30 +40,81 @@ const { norm, textUnits, tablesContent } = require('../inventory.cjs');
  *                     inline) are NOT measured -- refused at plan time (schema) and, defensively,
  *                     refused again inside the callCommand (the `before !== 'inline'` guard) rather
  *                     than assumed. No position-setting (research doc section 7 point 3).
+ *
+ * GH #296: delete_image and replace_image, on the SAME two selector shapes plus an optional
+ * `selector.part` assertion ('body' | 'header:<s>:<default|title|even>' | 'footer:...', the
+ * read_images row's own GH #306b `part` label -- `index` counts header/footer images too, so a caller
+ * that wants to be sure which part it hits names it; a mismatch is FAIL_CLOSED, never re-targeted).
+ * LIVE-measured (test/live/docx-gh296-image-replace-delete-probe.live.cjs, run p296-r1, 6/6 PASS, and
+ * the body rounds of docx-images-probe.live.cjs R5/R6):
+ *   delete_image    ApiDrawing.Delete() -- header default + even (inline) and a body floating image:
+ *                   the drawing leaves the stored part, the part's own text stays, every other image
+ *                   and the body are unchanged.
+ *   replace_image   doc.ReplaceDrawing(old, Api.CreateImage(source, w, h), true) -- footer default
+ *                   (PNG -> JPEG, old size), header title (new size), body inline and body floating
+ *                   (the anchor/square placement kept): the stored media bytes sha256-match the new
+ *                   input, the position, placement and every other image unchanged. `source` is a
+ *                   data:image/png|jpeg base64 URI (insert_image's own contract); widthEmu/heightEmu
+ *                   are both given or both omitted (omitted = the image keeps its current size).
+ * Both re-check the image inside the sandbox (paragraph text, extent, drawingType -- the fingerprint the
+ * fresh resolve just read) and return a RECEIPT ({ ok: true } only when every guard passed AND the
+ * engine call returned true; the driver's `publicReceipt` rule). VERIFY LIMIT, named: the in-session
+ * read carries no image bytes, so L1 for replace_image proves position, placement and size plus the
+ * receipt -- the bytes themselves are proven by the LIVE harness from the stored file. A retry is never
+ * SATISFIED: a landed delete_image retried is FAIL_CLOSED (the image is gone, the selector misses), a
+ * landed replace_image retried replaces again with the same bytes (same end state).
  */
 
-const INTENTS = Object.freeze(['set_image_size', 'set_image_wrap']);
+const INTENTS = Object.freeze(['set_image_size', 'set_image_wrap', 'delete_image', 'replace_image']);
+const EDIT_INTENTS = Object.freeze(['delete_image', 'replace_image']);
 const SUPPORTED_WRAP = Object.freeze(['square']);
+// the SAME source contract as image-insert.cjs (that module requires this one, so the literal is repeated, not imported)
+const SOURCE_RE = /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/;
+const PART_RE = /^(body|(header|footer):\d+:(default|title|even))$/;
+
+/** The selector shape every image intent shares -> { selector } or { detail }. */
+function planSelector(step, index) {
+  const sel = step.selector;
+  if (!sel || typeof sel !== 'object') return { detail: `step ${index}: ${step.intent} requires a selector` };
+  if ((sel.index !== undefined) === (sel.paragraph !== undefined)) return { detail: `step ${index}: ${step.intent} selector must name exactly one of index or paragraph` };
+  const located = sel.index !== undefined ? planIndexSelector(sel, step, index) : planParagraphSelector(sel, step, index);
+  if (located.detail || sel.part === undefined) return located;
+  // GH #296: the part assertion (header comment)
+  if (!EDIT_INTENTS.includes(step.intent)) return { detail: `step ${index}: ${step.intent} selector.part is only valid with ${EDIT_INTENTS.join(' / ')}` };
+  if (typeof sel.part !== 'string' || !PART_RE.test(sel.part)) return { detail: `step ${index}: ${step.intent} selector.part must be 'body' or '<header|footer>:<section>:<default|title|even>' (the read_images row's own part label)` };
+  return { selector: Object.freeze({ ...located.selector, part: sel.part }) };
+}
+
+function planIndexSelector(sel, step, index) {
+  if (sel.ordinal !== undefined) return { detail: `step ${index}: ${step.intent} selector.ordinal is only valid with paragraph, not index` };
+  if (!Number.isInteger(sel.index) || sel.index < 0) return { detail: `step ${index}: ${step.intent} selector.index must be a non-negative integer` };
+  return { selector: Object.freeze({ index: sel.index }) };
+}
+
+function planParagraphSelector(sel, step, index) {
+  if (typeof sel.paragraph !== 'string' || !norm(sel.paragraph)) return { detail: `step ${index}: ${step.intent} selector.paragraph must be a non-empty string` };
+  const ordinal = sel.ordinal === undefined ? 1 : sel.ordinal;
+  if (!Number.isInteger(ordinal) || ordinal < 1) return { detail: `step ${index}: ${step.intent} selector.ordinal must be a positive integer` };
+  return { selector: Object.freeze({ paragraph: sel.paragraph, ordinal }) };
+}
+
+/** GH #296: replace_image's own fields on top of the shared base. */
+function planReplace(step, index, base) {
+  if (typeof step.source !== 'string' || !SOURCE_RE.test(step.source)) return { ok: false, detail: `step ${index}: replace_image source must be a data:image/png;base64,... or data:image/jpeg;base64,... URI -- an external URL is never accepted` };
+  const hasW = step.widthEmu !== undefined;
+  if (hasW !== (step.heightEmu !== undefined)) return { ok: false, detail: `step ${index}: replace_image takes widthEmu and heightEmu together, or neither (neither = keep the current size)` };
+  const positive = v => Number.isInteger(v) && v >= 1;
+  if (hasW && !(positive(step.widthEmu) && positive(step.heightEmu))) return { ok: false, detail: `step ${index}: replace_image widthEmu / heightEmu must be positive integers` };
+  return { ok: true, operation: { ...base, source: step.source, ...(hasW ? { widthEmu: step.widthEmu, heightEmu: step.heightEmu } : {}) } };
+}
 
 function plan(step, index) {
   if (!INTENTS.includes(step.intent)) return { ok: false, detail: `step ${index}: ${step.intent} is not an image intent` };
-  const sel = step.selector;
-  if (!sel || typeof sel !== 'object') return { ok: false, detail: `step ${index}: ${step.intent} requires a selector` };
-  const hasIndex = sel.index !== undefined;
-  const hasParagraph = sel.paragraph !== undefined;
-  if (hasIndex === hasParagraph) return { ok: false, detail: `step ${index}: ${step.intent} selector must name exactly one of index or paragraph` };
-  let selector;
-  if (hasIndex) {
-    if (sel.ordinal !== undefined) return { ok: false, detail: `step ${index}: ${step.intent} selector.ordinal is only valid with paragraph, not index` };
-    if (!Number.isInteger(sel.index) || sel.index < 0) return { ok: false, detail: `step ${index}: ${step.intent} selector.index must be a non-negative integer` };
-    selector = Object.freeze({ index: sel.index });
-  } else {
-    if (typeof sel.paragraph !== 'string' || !norm(sel.paragraph)) return { ok: false, detail: `step ${index}: ${step.intent} selector.paragraph must be a non-empty string` };
-    const ordinal = sel.ordinal === undefined ? 1 : sel.ordinal;
-    if (!Number.isInteger(ordinal) || ordinal < 1) return { ok: false, detail: `step ${index}: ${step.intent} selector.ordinal must be a positive integer` };
-    selector = Object.freeze({ paragraph: sel.paragraph, ordinal });
-  }
-  const base = { id: step.id || `s${index}`, intent: step.intent, selector, preservationMode: 'PRIMITIVE_INTEGRAL', ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) };
+  const sel = planSelector(step, index);
+  if (sel.detail) return { ok: false, detail: sel.detail };
+  const base = { id: step.id || `s${index}`, intent: step.intent, selector: sel.selector, preservationMode: 'PRIMITIVE_INTEGRAL', ...(Array.isArray(step.dependsOn) ? { dependsOn: step.dependsOn } : {}) };
+  if (step.intent === 'delete_image') return { ok: true, operation: base };
+  if (step.intent === 'replace_image') return planReplace(step, index, base);
   if (step.intent === 'set_image_size') {
     if (!Number.isInteger(step.widthEmu) || step.widthEmu < 1) return { ok: false, detail: `step ${index}: set_image_size requires a positive integer widthEmu` };
     if (!Number.isInteger(step.heightEmu) || step.heightEmu < 1) return { ok: false, detail: `step ${index}: set_image_size requires a positive integer heightEmu` };
@@ -91,22 +142,34 @@ function targetRow(primary, op) {
     const d = primary && primary.document;
     return { ok: false, reason: typeof (d && d.images) === 'string' ? d.images : 'images-unreadable' };
   }
+  let found;
   if (op.selector.index !== undefined) {
     const row = rows.find(r => r.index === op.selector.index);
-    return row ? { ok: true, row, rows } : { ok: false, reason: 'image-index-not-found', rows };
+    found = row ? { ok: true, row, rows } : { ok: false, reason: 'image-index-not-found', rows };
+  } else {
+    const want = norm(op.selector.paragraph);
+    const matches = rows.filter(r => fieldReadable(r.paragraph) && norm(r.paragraph) === want);
+    const row = matches[op.selector.ordinal - 1];
+    found = row ? { ok: true, row, rows } : { ok: false, reason: 'image-paragraph-ordinal-not-found', matchCount: matches.length, rows };
   }
-  const want = norm(op.selector.paragraph);
-  const matches = rows.filter(r => fieldReadable(r.paragraph) && norm(r.paragraph) === want);
-  const row = matches[op.selector.ordinal - 1];
-  return row ? { ok: true, row, rows } : { ok: false, reason: 'image-paragraph-ordinal-not-found', matchCount: matches.length, rows };
+  // GH #296: selector.part is an assertion on the row the selector found, never a re-targeting
+  if (found.ok && op.selector.part !== undefined && found.row.part !== op.selector.part) return { ok: false, reason: 'image-part-mismatch', rows };
+  return found;
 }
 
 // ---- classify / resolve -------------------------------------------------------------------------
+
+/** GH #296: the fingerprint the sandbox re-checks must be readable; a retry is never SATISFIED (header comment). */
+function classifyEdit(row) {
+  const readable = [row.paragraph, row.widthEmu, row.heightEmu, row.placement, row.part].every(fieldReadable) && (row.placement === 'inline' || row.placement === 'floating');
+  return readable ? { state: 'APPLY', evidence: { index: row.index, part: row.part } } : { state: 'FAIL_CLOSED', evidence: { reason: 'image-fingerprint-unreadable', index: row.index } };
+}
 
 function classify(primary, op) {
   const t = targetRow(primary, op);
   if (!t.ok) return { state: 'FAIL_CLOSED', evidence: { reason: t.reason, ...(t.matchCount !== undefined ? { matchCount: t.matchCount } : {}) } };
   const row = t.row;
+  if (EDIT_INTENTS.includes(op.intent)) return classifyEdit(row);
   if (op.intent === 'set_image_size') {
     if (!fieldReadable(row.widthEmu) || !fieldReadable(row.heightEmu)) return { state: 'FAIL_CLOSED', evidence: { reason: 'image-size-unreadable', index: row.index } };
     if (row.widthEmu === op.widthEmu && row.heightEmu === op.heightEmu) return { state: 'SATISFIED', evidence: { index: row.index, widthEmu: row.widthEmu, heightEmu: row.heightEmu } };
@@ -125,6 +188,10 @@ function resolve(primary, selector, ctx = {}) {
   const c = classify(primary, op);
   if (c.state === 'FAIL_CLOSED') return { ok: false, target: null, selector, ambiguity: up(c.evidence.reason) };
   const t = targetRow(primary, op);
+  if (EDIT_INTENTS.includes(op.intent)) {
+    const r = t.row;
+    return { ok: true, target: { kind: 'image', imageIndex: r.index, expectedParagraph: r.paragraph, expectedWidthEmu: r.widthEmu, expectedHeightEmu: r.heightEmu, expectedDrawingType: r.placement === 'inline' ? 'inline' : 'anchor' }, selector, ambiguity: null };
+  }
   return { ok: true, target: { kind: 'image', imageIndex: t.row.index, expectedParagraph: op.selector.paragraph !== undefined ? (fieldReadable(t.row.paragraph) ? t.row.paragraph : null) : null }, selector, ambiguity: null };
 }
 
@@ -142,6 +209,15 @@ function preDispatchCheck(op, target) {
  * calling SetWrappingStyle. Any guard miss returns unchanged.
  */
 function lower(op, target) {
+  if (EDIT_INTENTS.includes(op.intent)) {
+    const meta = Object.freeze({
+      family: 'image', action: op.intent === 'delete_image' ? 'imageDelete' : 'imageReplace', publicReceipt: true,
+      imageIndex: target.imageIndex, expectedParagraph: target.expectedParagraph,
+      expectedWidthEmu: target.expectedWidthEmu, expectedHeightEmu: target.expectedHeightEmu, expectedDrawingType: target.expectedDrawingType,
+      ...(op.intent === 'replace_image' ? { source: op.source, widthEmu: op.widthEmu === undefined ? target.expectedWidthEmu : op.widthEmu, heightEmu: op.heightEmu === undefined ? target.expectedHeightEmu : op.heightEmu } : {}),
+    });
+    return { kind: 'callCommand', body: editCommandBody(meta), meta };
+  }
   const meta = Object.freeze({
     family: 'image', action: op.intent === 'set_image_size' ? 'imageSetSize' : 'imageSetWrap',
     imageIndex: target.imageIndex, expectedParagraph: target.expectedParagraph,
@@ -178,6 +254,42 @@ try {
 `;
 }
 
+/**
+ * GH #296: delete / replace. The same index re-location as above, then the WHOLE fingerprint the fresh
+ * resolve read (paragraph text, extent, drawingType) re-checked in the sandbox -- an empty-text header
+ * image has no paragraph text to tell it apart. The body RETURNS a receipt: { ok: true } only when every
+ * guard passed and the engine call returned true (the driver's publicReceipt rule); anything else is a
+ * failed write the core re-reads.
+ */
+function editCommandBody(meta) {
+  return `
+try {
+  const m = ${JSON.stringify(meta)};
+  const doc = Api.GetDocument();
+  const imgs = doc.GetAllImages() || [];
+  const im = imgs[m.imageIndex];
+  if (!im) return { ok: false, reason: 'image-index-gone' };
+  let pText = null;
+  try {
+    const p = im.GetParentParagraph();
+    if (p) { const t = String(p.GetText({ Numbering: false })); let n = t.length; while (n > 0 && (t.charCodeAt(n - 1) === 10 || t.charCodeAt(n - 1) === 13)) n -= 1; pText = t.slice(0, n); }
+  } catch (e) {}
+  if (pText !== m.expectedParagraph) return { ok: false, reason: 'paragraph-mismatch' };
+  let j = null;
+  try { j = JSON.parse(im.ToJSON(false, false)); } catch (e) {}
+  const ex = j && j.extent ? j.extent : null;
+  if (!j || j.drawingType !== m.expectedDrawingType || !ex || ex.cx !== m.expectedWidthEmu || ex.cy !== m.expectedHeightEmu) return { ok: false, reason: 'fingerprint-mismatch' };
+  if (m.action === 'imageDelete') {
+    return im.Delete() === true ? { ok: true } : { ok: false, reason: 'delete-returned-false' };
+  }
+  if (typeof Api.CreateImage !== 'function') return { ok: false, reason: 'no-create-image' };
+  const img = Api.CreateImage(m.source, m.widthEmu, m.heightEmu);
+  if (!img) return { ok: false, reason: 'create-image-null' };
+  return doc.ReplaceDrawing(im, img, true) === true ? { ok: true } : { ok: false, reason: 'replace-returned-false' };
+} catch (e) { return { ok: false, reason: 'threw' }; }
+`;
+}
+
 // ---- verify -------------------------------------------------------------------------------------
 
 /** Every image field the written intent does not itself control, as a comparable key. */
@@ -197,7 +309,51 @@ function bodyKey(primary) {
   return JSON.stringify({ units: textUnits(primary).map(u => [u.kind, norm(u.text)]), tables: tablesContent(d.tables), footnotes: d.footnotes || null, endnotes: d.endnotes || null, bookmarks: d.bookmarks || null, inMainBody: d.inMainBody === undefined ? null : d.inMainBody });
 }
 
+/** GH #296: every image field the read sees, INCLUDING its part and paragraph index -- the multiset key for delete / replace. */
+function placedImageKey(r) {
+  return JSON.stringify([r.part, r.paragraphIndex, r.alt, r.title, r.placement, r.wrap, r.widthEmu, r.heightEmu, r.paragraph]);
+}
+
+/** before minus the target (one occurrence) vs after minus the replacement (when one is expected) -- equal multisets? */
+function imagesAccountedFor(beforeRows, afterRows, removedKey, addedMatch) {
+  const pool = beforeRows.map(placedImageKey);
+  const i = pool.indexOf(removedKey);
+  if (i < 0) return { ok: false, reason: 'before-target-key-absent' };
+  pool.splice(i, 1);
+  const rest = afterRows.map(placedImageKey);
+  if (addedMatch) {
+    const k = afterRows.findIndex(addedMatch);
+    if (k < 0) return { ok: false, reason: 'replacement-not-found' };
+    rest.splice(k, 1);
+  }
+  const a = [...pool].sort();
+  const b = [...rest].sort();
+  return { ok: a.length === b.length && a.every((x, n) => x === b[n]), reason: null, unexplained: b.filter(x => !a.includes(x)), missing: a.filter(x => !b.includes(x)) };
+}
+
+/** replace_image: the image at the target's own part + paragraph index, same placement/wrap/paragraph, at the expected size (±1 EMU, the measured DS rounding). */
+function replacementMatcher(op, targetRowBefore) {
+  const w = op.widthEmu === undefined ? targetRowBefore.widthEmu : op.widthEmu;
+  const h = op.heightEmu === undefined ? targetRowBefore.heightEmu : op.heightEmu;
+  return r => r.part === targetRowBefore.part && r.paragraphIndex === targetRowBefore.paragraphIndex && r.placement === targetRowBefore.placement
+    && r.wrap === targetRowBefore.wrap && r.paragraph === targetRowBefore.paragraph && fieldReadable(r.widthEmu) && fieldReadable(r.heightEmu)
+    && Math.abs(r.widthEmu - w) <= 1 && Math.abs(r.heightEmu - h) <= 1;
+}
+
+function verifyEdit(op, before, after) {
+  const b = targetRow(before && before.primary, op);
+  if (!b.ok) return { ok: false, evidence: { reason: `before-${b.reason}` } };
+  const bRows = imageRows(before.primary) || [];
+  const aRows = imageRows(after && after.primary);
+  if (!aRows) return { ok: false, evidence: { reason: 'after-images-unreadable' } };
+  const isDelete = op.intent === 'delete_image';
+  const countOk = aRows.length === bRows.length - (isDelete ? 1 : 0);
+  const acc = imagesAccountedFor(bRows, aRows, placedImageKey(b.row), isDelete ? null : replacementMatcher(op, b.row));
+  return { ok: countOk && acc.ok, evidence: { index: b.row.index, part: b.row.part, imageCountBefore: bRows.length, imageCountAfter: aRows.length, ...(acc.reason ? { reason: acc.reason } : { unexplained: acc.unexplained, missing: acc.missing }) } };
+}
+
 function verifyPrimitive(op, before, after) {
+  if (EDIT_INTENTS.includes(op.intent)) return verifyEdit(op, before, after);
   const b = targetRow(before && before.primary, op);
   const a = targetRow(after && after.primary, op);
   if (!b.ok) return { ok: false, evidence: { reason: `before-${b.reason}` } };
@@ -213,6 +369,12 @@ function verifyPrimitive(op, before, after) {
 
 /** PRIMITIVE_INTEGRAL: every OTHER image, and the rest of the body, unchanged; the image count unchanged. */
 function verifyPreservation(op, before, after) {
+  if (EDIT_INTENTS.includes(op.intent)) {
+    // every other image is already accounted for one by one in L1 (verifyEdit); here the body itself
+    const e = verifyEdit(op, before, after);
+    const sameBody = bodyKey(before && before.primary) === bodyKey(after && after.primary);
+    return { ok: e.ok && sameBody, evidence: { ...e.evidence, bodyUnchanged: sameBody } };
+  }
   const b = targetRow(before && before.primary, op);
   const a = targetRow(after && after.primary, op);
   if (!b.ok || !a.ok) return { ok: false, evidence: { reason: !b.ok ? `before-${b.reason}` : `after-${a.reason}` } };
@@ -229,6 +391,11 @@ function verifyPreservation(op, before, after) {
 }
 
 function wholeTaskChecks(op, finalObservation) {
+  if (EDIT_INTENTS.includes(op.intent)) {
+    // the per-operation L1 is the proof (a deleted image leaves no row to name; a replacement has no byte identity in the read)
+    const rows = imageRows(finalObservation && finalObservation.primary);
+    return [{ name: `${op.id}: ${op.intent} -- images readable after the task`, ok: Array.isArray(rows) }];
+  }
   const t = targetRow(finalObservation.primary, op);
   if (op.intent === 'set_image_size') {
     return [{ name: `${op.id}: image ${t.ok ? t.row.index : '?'} size = ${op.widthEmu}x${op.heightEmu} EMU`, ok: t.ok && t.row.widthEmu === op.widthEmu && t.row.heightEmu === op.heightEmu }];
@@ -241,4 +408,4 @@ function producedText() {
   return null;
 }
 
-module.exports = { plan, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation, wholeTaskChecks, producedText, targetRow, imageRows, otherImages, bodyKey, SUPPORTED_WRAP, INTENTS };
+module.exports = { plan, classify, resolve, preDispatchCheck, lower, commandBody, editCommandBody, verifyPrimitive, verifyPreservation, wholeTaskChecks, producedText, targetRow, imageRows, otherImages, bodyKey, placedImageKey, SUPPORTED_WRAP, INTENTS, EDIT_INTENTS };

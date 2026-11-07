@@ -1,7 +1,7 @@
 'use strict';
 
 const { colName } = require('../a1.cjs');
-const { PAPER } = require('./print.cjs');
+const { PAPER, PAGE_ORDERS } = require('./print.cjs');
 
 /**
  * L-10 (b): the PROJECTION behind the `read_page_setup` read tool -- a pure field-select over TWO of the driver's own in-session reads, `inv.pageReads[sheet]` (the PUBLIC page getters,
@@ -68,7 +68,21 @@ function printHalf(r) {
   out.rowBreaks = manualAts(r.rowBreaks, 'row');
   out.columnBreaks = manualAts(r.colBreaks, 'column');
   out.automaticBreaks = { rows: autoCount(r.rowBreaks), columns: autoCount(r.colBreaks) };
+  if (r.layout !== undefined) Object.assign(out, layoutOf(r.layout, list));
   return list.length ? { ...out, unrepresentable: list } : out;
+}
+
+/**
+ * GH #354/#355: the print LAYOUT fields (sheet.printSettings.read/v2, /21 only) in the set_header_footer_margin /
+ * set_page_order words: headerMargin / footerMargin (mm, null = the model's own unset state), pageOrder. A runtime
+ * without the capability gaps ONLY these three, as one named reason (`layoutReason`); the rest of the print half stands.
+ */
+function layoutOf(x, list) {
+  if (typeof x === 'string' || !x || typeof x !== 'object') return { headerMargin: null, footerMargin: null, pageOrder: null, layoutReason: typeof x === 'string' ? x : 'UNOBSERVABLE:unexpected-shape' };
+  const out = {};
+  for (const k of ['headerMargin', 'footerMargin']) { if (x[k] === null || (Number.isFinite(x[k]) && x[k] >= 0)) out[k] = x[k]; else { out[k] = null; list.push(bad(k, x[k], 'not millimetres >= 0 or null')); } }
+  if (x.pageOrder === null || PAGE_ORDERS.includes(x.pageOrder)) out.pageOrder = x.pageOrder; else { out.pageOrder = null; list.push(bad('pageOrder', x.pageOrder, `not one of ${PAGE_ORDERS.join(', ')}`)); }
+  return out;
 }
 
 /** inv.pageReads + inv.printReads -> the tool result. Each half is independent; a string is a whole-half gap, never guessed as "defaults". */

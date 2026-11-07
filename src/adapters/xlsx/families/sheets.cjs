@@ -502,11 +502,15 @@ function wholeTaskChecks(op, finalObservation) {
 
 /** No cell window: the used ranges the driver always reads are the whole proof. */
 const windowsOf = () => [];
-/** copy_sheet reads the source and the copy with format and objects. */
+/** copy_sheet reads the source and the copy with format and objects. GH #338-#342 remainder (W2,
+ * docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md): all five of this family's intents also carry the
+ * additive `workbookProtection` liveExtras opt-in -- `INTENTS` here is byte-identical to the gate's own
+ * `WORKBOOK_STRUCTURE_INTENTS`, so `primary.workbookProtectionRead` is populated for exactly the ops the new
+ * gate branch needs it for, the same per-family opt-in convention every other liveScope axis already uses. */
 const liveExtras = op => {
-  if (op.intent === 'copy_sheet') return { formatSheets: [op.selector.sheet, op.selector.name], objectSheets: [op.selector.sheet, op.selector.name], dependents: true, drawingSheets: ['*'] };
-  if (op.intent === 'delete_sheet' || op.intent === 'rename_sheet') return { dependents: true, drawingSheets: ['*'] };
-  return { drawingSheets: ['*'] };
+  if (op.intent === 'copy_sheet') return { formatSheets: [op.selector.sheet, op.selector.name], objectSheets: [op.selector.sheet, op.selector.name], dependents: true, drawingSheets: ['*'], workbookProtection: true };
+  if (op.intent === 'delete_sheet' || op.intent === 'rename_sheet') return { dependents: true, drawingSheets: ['*'], workbookProtection: true };
+  return { drawingSheets: ['*'], workbookProtection: true };
 };
 
 module.exports = { INTENTS, B03_BRIDGE_WRITE_RUNTIMES, liveExtras, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, nameProblem, referencesTo };

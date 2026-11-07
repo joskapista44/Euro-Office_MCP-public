@@ -1,0 +1,1 @@
+1==ws.bHidden?(ws.bEoVeryHidden===!0?this.memory.WriteByte(EVisibleType.visibleVeryHidden):this.memory.WriteByte(EVisibleType.visibleHidden)):this.memory.WriteByte(EVisibleType.visibleVisible)

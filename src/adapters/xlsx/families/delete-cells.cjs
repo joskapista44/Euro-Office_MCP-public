@@ -30,9 +30,15 @@ const { moveIndex, mapRefs } = require('../shift.cjs');
  * (M6 wave 5, insert_rows/delete_rows/insert_columns/delete_columns) rather than inventing a new one: the caller
  * names a content ANCHOR -- a value that lives in a column (shift 'up') or row (shift 'left') WITHIN the block's
  * own band -- and classify() reads it FRESH, from the SAME session the write itself uses. If the anchor is already
- * at its TERMINAL position (where the shift would put it), the step is SATISFIED with zero writes -- the exact
- * shape a retry needs. If it is at its pre-shift ("now") position, the step APPLIES. Anything else is a named,
- * pre-dispatch refusal (`xlsx-delete-cells-anchor-state-conflict`) -- never a guess.
+ * at its pre-shift ("now") position, the step APPLIES. Anything else is a named, pre-dispatch refusal
+ * (`xlsx-delete-cells-anchor-state-conflict`) -- never a guess.
+ * Owner decision A (2026-11-02, owner channel; the extension of the structure family's decision B, see
+ * docs/DELETE-ROWS-COLUMNS-SECOND-WITNESS.md): the anchor alone read SATISFIED whenever it already sat at the block's
+ * first row (column) -- also when the caller gave the FIRST REMOVED cell's value, 0 cells deleted, reported as success.
+ * A second, required WITNESS now names the first REMOVED cell (in a lane within the band, at the block's first row for
+ * 'up' / first column for 'left'); APPLY needs both where the step says. The after-shape (anchor at its terminal, the
+ * witness gone) is refused as unprovable (`xlsx-delete-cells-prior-execution-unprovable`), never SATISFIED: matching
+ * data proves nothing about who produced it. An identical retry still never deletes twice.
  *
  * Scope the probe did NOT measure, refused named, PRE_DISPATCH, blanket (not the `structure` family's fine
  * per-cut allowances -- those are each their OWN LIVE measurement this family has none of yet): any defined name,
@@ -46,7 +52,7 @@ const { moveIndex, mapRefs } = require('../shift.cjs');
  */
 
 const INTENTS = Object.freeze(['delete_cells']);
-const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range', 'shift', 'anchor']);
+const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'range', 'shift', 'anchor', 'witness']);
 const MAX_CELLS = 200;
 
 function plan(step, index) {
@@ -68,6 +74,8 @@ function plan(step, index) {
   if (lane === null) return { ok: false, detail: `${at}: anchor.${along} must be ${rows ? 'a column letter' : 'a row number'}` };
   if (rows ? (lane < g.c1 || lane > g.c2) : (lane < g.r1 || lane > g.r2)) return { ok: false, detail: `${at}: anchor.${along} must be within the block's own ${along} band (${rows ? `${colName(g.c1)}-${colName(g.c2)}` : `${g.r1}-${g.r2}`})` };
   if (!((typeof a.value === 'string' && a.value !== '') || Number.isFinite(a.value))) return { ok: false, detail: `${at}: anchor.value must be a non-empty text or a number` };
+  const w = witnessOf(step, at, rows, g, lane);
+  if (w.detail) return { ok: false, detail: w.detail };
   const height = g.r2 - g.r1 + 1;
   const width = g.c2 - g.c1 + 1;
   return {
@@ -81,21 +89,38 @@ function plan(step, index) {
       shift: Object.freeze({ sheet: step.sheet, axis: rows ? 'rows' : 'cols', at: rows ? g.r1 : g.c1, count: -(rows ? height : width) }),
       band: Object.freeze(rows ? { lo: g.c1, hi: g.c2 } : { lo: g.r1, hi: g.r2 }),
       anchor: Object.freeze({ lane, value: String(a.value), now: (rows ? g.r2 : g.c2) + 1, terminal: rows ? g.r1 : g.c1 }),
+      witness: w.witness,
       cells: Object.freeze([]),
       preservationMode: 'PRIMITIVE_INTEGRAL',
     },
   };
 }
 
+/** Owner decision A: the second witness -- the value of the FIRST REMOVED cell (block's first row / column), in a lane within the band. */
+function witnessOf(step, at, rows, g, anchorLane) {
+  const w = step.witness;
+  const along = rows ? 'column' : 'row';
+  const other = rows ? 'row' : 'column';
+  const first = rows ? `row ${g.r1}` : `column ${colName(g.c1)}`;
+  if (!w || typeof w !== 'object' || Array.isArray(w) || Object.keys(w).some(k => ![along, 'value'].includes(k))) return { detail: `${at}: witness must be { ${along}, value } -- the value of the FIRST cell the delete removes (the block's ${first}) NOW, in a ${along} within the block; required: with the anchor (the first SURVIVING cell) it brackets the block${w && typeof w === 'object' && w[other] !== undefined ? ` (witness.${other} is not used for shift '${step.shift}')` : ''}` };
+  const lane = rows ? (typeof w.column === 'string' && /^[A-Z]{1,3}$/.test(w.column) ? colNum(w.column) : null) : (Number.isInteger(w.row) && w.row >= 1 ? w.row : null);
+  if (lane === null) return { detail: `${at}: witness.${along} must be ${rows ? 'a column letter' : 'a row number'}` };
+  if (rows ? (lane < g.c1 || lane > g.c2) : (lane < g.r1 || lane > g.r2)) return { detail: `${at}: witness.${along} must be within the block's own ${along} band (${rows ? `${colName(g.c1)}-${colName(g.c2)}` : `${g.r1}-${g.r2}`})` };
+  if (!((typeof w.value === 'string' && w.value !== '') || Number.isFinite(w.value))) return { detail: `${at}: witness.value must be a non-empty text or a number` };
+  if (lane === anchorLane && String(w.value) === String(step.anchor.value)) return { detail: `${at}: the witness and the anchor name the same value in the same ${along} -- the witness is the first REMOVED cell, the anchor the first SURVIVING one` };
+  return { witness: Object.freeze({ lane, value: String(w.value), now: rows ? g.r1 : g.c1 }) };
+}
+
 const rowOf = a => Number(/\d+$/.exec(a)[0]);
 const colOf = a => colNum(/^[A-Z]+/.exec(a)[0]);
 const cellsOfSheet = (p, sheet) => Object.entries(p.cells).filter(([k]) => k.startsWith(key(sheet, ''))).map(([k, c]) => [k.slice(key(sheet, '').length), c]);
 
-/** Where the anchor value is now: every literal cell in the anchor's column (shift 'up') / row ('left'). */
-function anchorHits(p, op) {
+/** Where a mark's value (the anchor, the witness) is now: every literal cell in its column (shift 'up') / row ('left'). */
+function laneHits(p, op, mark) {
   const rows = op.shift.axis === 'rows';
-  return cellsOfSheet(p, op.shift.sheet).filter(([a, c]) => c.f === '' && String(c.v) === op.anchor.value && (rows ? colOf(a) === op.anchor.lane : rowOf(a) === op.anchor.lane)).map(([a]) => (rows ? rowOf(a) : colOf(a)));
+  return cellsOfSheet(p, op.shift.sheet).filter(([a, c]) => c.f === '' && String(c.v) === mark.value && (rows ? colOf(a) === mark.lane : rowOf(a) === mark.lane)).map(([a]) => (rows ? rowOf(a) : colOf(a)));
 }
+const anchorHits = (p, op) => laneHits(p, op, op.anchor);
 
 function gate(p, op) {
   if (!p || p.format !== 'xlsx') return { ok: false, reason: 'xlsx-observation-missing' };
@@ -104,7 +129,10 @@ function gate(p, op) {
   if (s.length !== 1) return { ok: false, reason: s.length > 1 ? 'xlsx-sheet-ambiguous' : 'xlsx-sheet-not-found', available: p.sheets.map(x => x.name) };
   const hits = anchorHits(p, op);
   if (hits.length !== 1) return { ok: false, reason: hits.length ? 'xlsx-delete-cells-anchor-not-unique' : 'xlsx-delete-cells-anchor-not-found', anchor: op.anchor.value, at: hits.slice(0, 20) };
-  return { ok: true, pos: hits[0] };
+  // the witness: present once (before the delete) or gone (after it) -- twice is no witness at all
+  const witnessAt = laneHits(p, op, op.witness);
+  if (witnessAt.length > 1) return { ok: false, reason: 'xlsx-delete-cells-witness-not-unique', witness: op.witness.value, at: witnessAt.slice(0, 20) };
+  return { ok: true, pos: hits[0], witnessAt };
 }
 
 /** Does `area` (a merge range) overlap `block` at all? */
@@ -213,9 +241,17 @@ function formulaShapeGuard(p, op) {
 function classify(p, op) {
   const g = gate(p, op);
   if (!g.ok) return { state: 'FAIL_CLOSED', evidence: g };
-  const where = { sheet: op.shift.sheet, axis: op.shift.axis, at: op.shift.at, count: op.shift.count, anchorAt: g.pos };
-  if (g.pos === op.anchor.terminal) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-anchor-at-its-terminal-position' } };
-  if (g.pos !== op.anchor.now) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-delete-cells-anchor-state-conflict', ...where, expectedNow: op.anchor.now, expectedAfter: op.anchor.terminal } };
+  const where = { sheet: op.shift.sheet, axis: op.shift.axis, at: op.shift.at, count: op.shift.count, anchorAt: g.pos, witnessAt: g.witnessAt };
+  const anchorNow = g.pos === op.anchor.now;
+  const anchorAfter = g.pos === op.anchor.terminal;
+  if (!anchorNow && !anchorAfter) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-delete-cells-anchor-state-conflict', ...where, expectedNow: op.anchor.now, expectedAfter: op.anchor.terminal } };
+  if (anchorAfter && g.witnessAt.length === 0) {
+    return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-delete-cells-prior-execution-unprovable', ...where, readsAsAlreadyApplied: true, written: 0,
+      detail: 'the sheet reads as if this delete had already run (the anchor at the block start, the witness gone), but no read can prove THIS delete produced it -- a wrong anchor or witness reads the same; nothing was written. Re-read the sheet; re-plan with the witnesses as they are now if cells still need deleting.' } };
+  }
+  if (!(anchorNow && g.witnessAt.length === 1 && g.witnessAt[0] === op.witness.now)) {
+    return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-delete-cells-witnesses-disagree', ...where, expectedNow: { anchor: op.anchor.now, witness: op.witness.now }, detail: 'the anchor (first SURVIVING cell, just past the block) and the witness (first REMOVED cell, the block start) do not both stand where the step says -- the block the step names is not the block on the sheet; nothing was written' } };
+  }
   const bad = mergeGuard(p, op) || dependentGuard(p, op) || formulaShapeGuard(p, op);
   if (bad) return { state: 'FAIL_CLOSED', evidence: bad };
   return { state: 'APPLY', evidence: where };
@@ -335,7 +371,9 @@ function verifyPrimitive(op, before, after) {
   }
   const hits = anchorHits(af, op);
   const anchorOk = hits.length === 1 && hits[0] === op.anchor.terminal;
-  return { ok: wrong.length === 0 && anchorOk, evidence: { sheet, axis: op.shift.axis, at: op.shift.at, count: op.shift.count, wrong: wrong.slice(0, 20), wrongCount: wrong.length, anchorAt: hits, proof: 'fresh-live-every-band-cell-at-its-shifted-position' } };
+  // owner decision A: the witness (unique before, inside the removed block) is gone after the delete
+  const witnessGone = laneHits(af, op, op.witness).length === 0;
+  return { ok: wrong.length === 0 && anchorOk && witnessGone, evidence: { sheet, axis: op.shift.axis, at: op.shift.at, count: op.shift.count, wrong: wrong.slice(0, 20), wrongCount: wrong.length, anchorAt: hits, witnessGone, proof: 'fresh-live-every-band-cell-at-its-shifted-position' } };
 }
 
 /** L3: every cell OUTSIDE the band on this sheet (LITERAL cells only -- a formula there is covered by
@@ -372,8 +410,9 @@ function verifyPreservation(op, before, after) {
 function wholeTaskChecks(op, finalObservation) {
   const p = finalObservation && finalObservation.primary;
   const hits = p ? anchorHits(p, op) : [];
-  const ok = hits.length === 1 && hits[0] === op.anchor.terminal;
-  return [{ name: `${op.shift.sheet}: the anchor '${op.anchor.value}' at ${op.shift.axis === 'rows' ? 'row' : 'column'} ${op.shift.axis === 'rows' ? op.anchor.terminal : colName(op.anchor.terminal)}`, ok, detail: ok ? null : { anchorAt: hits } }];
+  const witnessAt = p ? laneHits(p, op, op.witness) : [];
+  const ok = hits.length === 1 && hits[0] === op.anchor.terminal && witnessAt.length === 0;
+  return [{ name: `${op.shift.sheet}: the anchor '${op.anchor.value}' at ${op.shift.axis === 'rows' ? 'row' : 'column'} ${op.shift.axis === 'rows' ? op.anchor.terminal : colName(op.anchor.terminal)}, the witness '${op.witness.value}' gone`, ok, detail: ok ? null : { anchorAt: hits, witnessAt } }];
 }
 
 const windowsOf = () => [];

@@ -74,9 +74,9 @@ test('both capability ids are declared in ds-bridge.cjs (readable by the driver)
   assert.equal(BRIDGE_CAPABILITIES.LINE_STYLE_READ.valueType, 'object');
 });
 
-test('runtime-identity: the accepted list (DS9346 collapsed it to the single 9.3.5.0/16 entry -- the historical /15, /16 9.3.4.60 chain this test used to name is retired; GH #326/#327 widens again to /16 + /17)', () => {
+test('runtime-identity: the accepted list (DS9346 collapsed it to the single 9.3.5.0/16 entry -- the historical /15, /16 9.3.4.60 chain this test used to name is retired; GH #326/#327 widens again to /16 + /17; GH #300 L1 / #298 D widens once more to /16 + /17 + /18)', () => {
   const ids = core.XLSX_RUNTIME_IDS;
-  assert.deepEqual([...ids], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17']);
+  assert.deepEqual([...ids], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17', '9.3.5|euro-office-bridge-v1/9.3.5.0/18', '9.3.5|euro-office-bridge-v1/9.3.5.0/19', '9.3.5|euro-office-bridge-v1/9.3.5.0/21', '9.3.5|euro-office-bridge-v1/9.3.5.0/22', '9.3.5|euro-office-bridge-v1/9.3.5.0/23', '9.3.5|euro-office-bridge-v1/9.3.5.0/24', '9.3.5|euro-office-bridge-v1/9.3.5.0/25', '9.3.5|euro-office-bridge-v1/9.3.5.0/26', '9.3.5|euro-office-bridge-v1/9.3.5.0/27', '9.3.5|euro-office-bridge-v1/9.3.5.0/28', '9.3.5|euro-office-bridge-v1/9.3.5.0/29']);
 });
 
 test('rev16-candidate exists and carries both NEW handlers; rev15 and earlier carry NEITHER (never guessed as already-served)', () => {

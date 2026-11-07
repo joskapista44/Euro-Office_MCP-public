@@ -186,12 +186,14 @@ function drawingDiffs(b, a, { mapSheet = n => n, dropSheet = () => false, skipAf
 /**
  * M7 D-B1 / D-B2 (owner GO 2026-10-03, owner channel point 2; M7-DB-PROBE.md): the LAST cell a drawing occupies,
  * 0-based, from the build-gated internal anchor read (raw.anchor = { type, to: { col, colOff, row, rowOff } }). Only the
- * MEASURED mode: Type 1 (oneCell -- every public creation). `to` is taken as occupied whatever its offset (an offset 0
+ * MEASURED modes: Type 1 (oneCell -- every public creation) and Type 2 (twoCell -- a user file's anchor, editAs twoCell
+ * or oneCell alike; LIVE: test/live/xlsx-twocell-before-cut.live.cjs, a twoCell picture before the cut keeps from / to
+ * through insert rows, delete rows and a reopen). Type 0 (absolute) stays unmeasured. `to` is taken as occupied whatever its offset (an offset 0
  * is not treated as "ends before it": conservative). Also required, else the geometry is incomplete: a usable record
  * (normalize: no gap), an OBSERVED size (not the 0 x 0 SIZE_UNOBSERVED), rotation 0 (a rotated extent is not measured),
  * and `to` not before the drawing's own from-cell. Returns { lastCol, lastRow } or { why }.
  */
-const MEASURED_ANCHOR_TYPES = Object.freeze([1]);
+const MEASURED_ANCHOR_TYPES = Object.freeze([1, 2]);
 
 const anchorTo = a => (a && typeof a === 'object' ? a.to : null);
 const toComplete = to => !!to && typeof to === 'object' && ['col', 'row'].every(k => nonNegInt(to[k])) && ['colOff', 'rowOff'].every(k => Number.isFinite(to[k]) && to[k] >= 0);

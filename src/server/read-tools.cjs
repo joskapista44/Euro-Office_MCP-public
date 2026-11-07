@@ -34,6 +34,12 @@ const { projectPrintAreaRead } = require('../adapters/xlsx/families/print-area-r
 const { projectDefinedNamesRead } = require('../adapters/xlsx/families/defined-names-read.cjs');
 const { projectFilterRead } = require('../adapters/xlsx/families/filter-read.cjs');
 const { projectCommentsRead } = require('../adapters/xlsx/families/comments-read.cjs');
+const { projectTablesRead } = require('../adapters/xlsx/families/tables-read.cjs');
+const { projectPrintRenderingRead } = require('../adapters/xlsx/families/print-rendering-read.cjs');
+const { projectProtectionRead } = require('../adapters/xlsx/families/protection-read.cjs');
+const { projectHyperlinksRead } = require('../adapters/xlsx/families/hyperlinks-read.cjs');
+const { projectArrayFormulasRead, readRequest: arrayFormulasRequest } = require('../adapters/xlsx/families/array-formula-read.cjs');
+const { projectEffectiveFillRead } = require('../adapters/xlsx/families/effective-fill-read.cjs');
 const docxInventory = require('../adapters/docx/inventory.cjs');
 const { parseRange, cellsOf } = require('../adapters/xlsx/a1.cjs');
 const { reAnchoredFormula, rangeFirstCellAddr } = require('../adapters/xlsx/families/validation.cjs');
@@ -46,9 +52,9 @@ const { decideReuse } = require('./session-reuse-rule.cjs');
 const STATUS = Object.freeze({ ACCEPTED: 'ACCEPTED', PARTIAL: 'PARTIAL', NOT_MEASURED: 'NOT_MEASURED', INTERNAL: 'INTERNAL' });
 
 const SHEET = Object.freeze({ type: 'string', minLength: 1, maxLength: 31, description: 'worksheet name' });
-const RANGE = Object.freeze({ type: 'string', pattern: '^\\$?[A-Za-z]{1,3}\\$?[1-9][0-9]{0,6}(:\\$?[A-Za-z]{1,3}\\$?[1-9][0-9]{0,6})?$', description: 'A1 range on that sheet, no sheet prefix' });
+const RANGE = Object.freeze({ type: 'string', pattern: '^[$]?[A-Za-z]{1,3}[$]?[1-9][0-9]{0,6}(:[$]?[A-Za-z]{1,3}[$]?[1-9][0-9]{0,6})?$', description: 'A1 range on that sheet, no sheet prefix' });
 // GH #137 U1: a single A1 cell (no colon alternative -- unlike RANGE, a run-map is keyed by one cell, never a range)
-const CELL = Object.freeze({ type: 'string', pattern: '^\\$?[A-Za-z]{1,3}\\$?[1-9][0-9]{0,6}$', description: 'a single A1 cell on that sheet, no sheet prefix, not a range' });
+const CELL = Object.freeze({ type: 'string', pattern: '^[$]?[A-Za-z]{1,3}[$]?[1-9][0-9]{0,6}$', description: 'a single A1 cell on that sheet, no sheet prefix, not a range' });
 const FLAG = Object.freeze({ type: 'boolean' });
 // GH #224b (docs/GH224B-READ-STYLES-BY-NAME-DECISION.md): `names` for read_styles -- 1..32 distinct style names (1..128 printable characters each), read through the driver's name-targeted
 // style query (doc.GetStyle(name), the SAME read the write family's own L1 uses). It exists because doc.GetAllStyles() is blind to a style created with CreateStyle (CUSTOM_STYLE_LISTED=false).
@@ -66,7 +72,7 @@ const OPERATIONS = Object.freeze({
       evidence: 'v/f/count/merge: M6-W0 F2-F6; nf/fill: M6-W1B, X-F08/F10; style: M6 matrix W4 26/26, X-F02/F05/F07a; bold/italic/align/border/readingOrder/indent/shrink via DS Bridge B01/B02/B04/B05: DS-BRIDGE-INTERNAL-MIGRATION parity + cutover' },
     read_validations: { status: STATUS.ACCEPTED, args: { sheet: SHEET, range: RANGE }, evidence: 'range-level validation reader: M6 W6 (set/clear_validation)' },
     read_charts: { status: STATUS.ACCEPTED, args: { sheet: SHEET }, optional: ['sheet'],
-      evidence: 'name/type/title/series/legend/axis-titles/dataLabels(chart-level): W7, X-O04; effectiveLabels (per-point, point->series->chart precedence) via chart.dataLabels.effective.read/v1: X-O05/4, status flip conditional on this round\'s LIVE acceptance (test/live/xlsx-xo05-4-chart-effective-labels-read.live.cjs) -- revert to PARTIAL if that run does not PASS; series[].markerStyle (scatter+lineNormal only) + chart-level gridlinesColor via chart.series.markerStyle.read/v1 / chart.axis.majorGridlinesColor.read/v1: X-O04/10, served only on bridge patchVersion /11 (a /5-/10 runtime degrades each to its own \'UNOBSERVABLE:CAPABILITY_MISSING\', never FAIL); series[].order via chart.series.order.read/v1: X-O05/1 LIVE WORKS_PERSISTED_READABLE, served only on bridge patchVersion /12 (a /5-/11 runtime degrades to \'UNOBSERVABLE:CAPABILITY_MISSING\'); chart-level gapOverlap (bar-typed charts only, named reason on every other type) via chart.bar.gapOverlap.read/v1: X-O05/2, LIVE re-measured internal-field read-after-reopen, served only on bridge patchVersion /12; series[].markerSymbol+size (scatter+lineNormal only, named reason \'chart-type-not-in-scope:<type>\' on every other type) via chart.series.markerSymbol.read/v1, and series[].lineStyle dash+smooth (bar+lineNormal only, same named-scope convention) via chart.series.lineStyle.read/v1: GH #139 B /16, LIVE write+session+reopen round trip + a named-fail-closed mechanism-probe fix (a series with no marker object at all now fails closed as \'UNOBSERVABLE:no-marker-object\' rather than a null-shaped ok:true), served only on bridge patchVersion /16 (a /5-/15 runtime degrades each to its own \'UNOBSERVABLE:CAPABILITY_MISSING\')' },
+      evidence: 'name/type/title/series/legend/axis-titles/dataLabels(chart-level): W7, X-O04; effectiveLabels (per-point, point->series->chart precedence) via chart.dataLabels.effective.read/v1: X-O05/4, status flip conditional on this round\'s LIVE acceptance (test/live/xlsx-xo05-4-chart-effective-labels-read.live.cjs) -- revert to PARTIAL if that run does not PASS; series[].markerStyle (scatter+lineNormal only) + chart-level gridlinesColor via chart.series.markerStyle.read/v1 / chart.axis.majorGridlinesColor.read/v1: X-O04/10, served only on bridge patchVersion /11 (a /5-/10 runtime degrades each to its own \'UNOBSERVABLE:CAPABILITY_MISSING\', never FAIL); series[].order via chart.series.order.read/v1: X-O05/1 LIVE WORKS_PERSISTED_READABLE, served only on bridge patchVersion /12 (a /5-/11 runtime degrades to \'UNOBSERVABLE:CAPABILITY_MISSING\'); chart-level gapOverlap (bar-typed charts only, named reason on every other type) via chart.bar.gapOverlap.read/v1: X-O05/2, LIVE re-measured internal-field read-after-reopen, served only on bridge patchVersion /12; series[].markerSymbol+size (scatter+lineNormal only, named reason \'chart-type-not-in-scope:<type>\' on every other type) via chart.series.markerSymbol.read/v1, and series[].lineStyle dash+smooth (bar+lineNormal only, same named-scope convention) via chart.series.lineStyle.read/v1: GH #139 B /16, LIVE write+session+reopen round trip + a named-fail-closed mechanism-probe fix (a series with no marker object at all now fails closed as \'UNOBSERVABLE:no-marker-object\' rather than a null-shaped ok:true), served only on bridge patchVersion /16 (a /5-/15 runtime degrades each to its own \'UNOBSERVABLE:CAPABILITY_MISSING\'); GH #347 (CH02): the chart-level dataLabels is the chart-type group setting only (the own c:dLbls of a series overrides it, LIVE r2) -- dataLabelsScope names it and dataLabelsEffective summarises ONLY the per-point effectiveLabels (one four-flag state | mixed | UNOBSERVABLE:<reason>), never derived from dataLabels; GH #346: chart/plotArea/title/legend per chart, and series[].style + pointStyles (fill/outline/outlineWidthEmu) per series, via chart.series.style.read/v1, served only on bridge patchVersion /21+ (a /5-/20 runtime degrades the whole styles axis and series[].style to their own named \'UNOBSERVABLE:CAPABILITY_MISSING\', never guessed); pointStyles lists only the points holding their OWN dPt (a point without one inherits the series style and is not listed). On patchVersion /27+ (GH #346 AUTO-REPAIR, documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev27-candidate) a dPt idx stored more than once answers effective:{brush,pen} (the renderer\'s own first-document-order-match-wins entry) plus duplicated:{count,order}, replacing the pre-/27 refusal; on patchVersion /20-/26 that same duplicate shape is still the named gap \'UNOBSERVABLE:BRIDGE:datapoint-ambiguous\', never a guessed value' },
     // GH #140 U2 (#141 roadmap GO): PARTIAL -> ACCEPTED -- its own dedicated projection (name-decision
     // docs/GH140-PIVOT-CONTRACT.md, internal tracker decision: a SEPARATE
     // operation, NOT a read_charts.pivots[] widening, so no existing client's string-list shape changes).
@@ -88,21 +94,45 @@ const OPERATIONS = Object.freeze({
       evidence: 'parent/kind/name/pos/width/height/rotation/flip: M7 S2b LIVE-measured PUBLIC getters, a stable workbook-wide identity + L3 preservation multiset (docs/evidence/M7-S2B-DRAWING-PROBE.md); a shape\'s stroke width PUBLIC-readable session+reopen (X-O08-7); a shape\'s text via drawing.text.read/v1 (B14/B16); a shape\'s fill/line colour via drawing.fillLineColor.read/v1 (X-O08, bridge /14) -- degrades to its own named \'UNOBSERVABLE:CAPABILITY_MISSING\' on bridge /5-/13, never guessed. PARTIAL -> ACCEPTED: the X-O09 evidence this status previously carried alone is a single, NARROW, non-cumulative 1-EMU image-height normalization on the first product re-save (docs/evidence/xlsx-xo09-product-preservation-20261012.json) -- a preservation nuance scoped to the image height field specifically, unrelated to parent/kind/name/pos/fill/line (same precedent as read_pivots\'s own M7-H note). GH #302/#325 (G1): a chart or shape whose public size getters read an exact 0 x 0 after a reopen (the stored anchor is right, docs/GH302-PIVOT-CHART-DRAWING-LIVE-MATRIX-20261025.md rows C-03/D-02) now degrades width/height to \'UNOBSERVABLE:size-zero-after-reopen\' on this projection -- never the unproven 0.' },
     read_conditional_formats: { status: STATUS.ACCEPTED, args: { sheet: SHEET, range: RANGE },
       evidence: 'range-level CF reader, the MIRROR of the add_conditional_format rule schema: L-08 unit 1 LIVE l08-r1 (driver and public getters read all 56 writable rows, in-session and after reopen); a rule type / value the writer cannot create is NAMED (type unsupported, unrepresentable), never returned as a value; "No Fill" normalized to null in one place; rendered effect X-O02 NOT_MEASURED' },
+    // GH #363 2nd unit (docs/GH363-CF-EFFECTIVE-READBACK-MEASUREMENT-20261105.md "2. egyseg", LIVE
+    // measured): answers what read_conditional_formats explicitly cannot -- the per-cell CF-EVALUATED
+    // fill, not the rule. Bounded to 200 cells (checkEffectiveFillBound, STRICTER than read_range's
+    // general MAX_READ_CELLS), since each cell costs its own engine call inside the Bridge handler.
+    read_effective_fill: { status: STATUS.ACCEPTED, args: { sheet: SHEET, range: RANGE },
+      evidence: 'per-cell CF-evaluated fill (hex), through the DS Bridge candidate sheet.cells.compiledStyle.read/v1 (documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev28-table-autofilter-criteria-candidate/, NOT installed anywhere) -- getCompiledStyle(row, col) -> getFill() -> getColor()/getSolidFill(), LIVE measured: a firing cell reads the rule\'s own fill (16711680 == #FF0000), a non-firing cell reads null (docs/evidence/gh363-cf-effective-readback-live-20261105/internal-route-probe-v2-measured.json); a pre-/28 runtime degrades the whole axis to its own named \'UNOBSERVABLE:CAPABILITY_MISSING\', never a guessed value; ONLY the fill is read -- every other compiled-style field (font, border, number format, ...) is NOT_MEASURED by this capability; one measured pair, one rule type (cellValue greater, solid fill) -- other CF kinds (colour scale, data bar, icon set, font colour) are untested' },
     read_layout: { status: STATUS.ACCEPTED, args: { sheet: SHEET, range: RANGE },
       evidence: 'column width / row height / hidden, the MIRROR of the layout_range write schema: L-09 unit 1 (the driver reads them through the public GetEntireColumn / GetEntireRow getters, W4b LIVE; a hidden column / row, an unset row height and any out-of-schema value are NAMED, never a number)' },
     read_freeze_panes: { status: STATUS.ACCEPTED, args: { sheet: SHEET },
       evidence: 'frozen rows / columns of the sheet, the MIRROR of freeze_panes: L-10 (the sheet\'s OWN pane through the DS Bridge sheet.freezeState.read/v1, W4b2 + B06); a split / unknown pane or a bridge gap is NAMED, never "not frozen"' },
     // GH #133: every sheet's visibility and the workbook's active sheet. No new driver reader: the sheetVisibility axis (the public ApiWorksheet.GetVisible(), boolean) and the active-sheet name
     // (the public Api.GetActiveSheet().GetName(), carried by the panes block) already exist and ride the tiered path. The getter is boolean: visible | hidden, a very-hidden sheet is not told apart (not measured).
+    // GH #365 2nd unit: the veryHidden/hidden distinction is NOT
+    // recoverable at all -- not even from the saved file's own bytes, since the engine itself demotes a veryHidden sheet's stored state to
+    // plain hidden on the FIRST save after loading (GetVisible() already reads false for both BEFORE that save too). Every 'hidden' entry
+    // therefore carries a named `visibilityDetail` limit (sheet-state-read.cjs's own HIDDEN_VS_VERYHIDDEN_DETAIL) -- 'visibility' itself stays
+    // 'hidden', unchanged, so the common case is byte-identical; a 'visible' entry gets no new field.
     read_sheet_state: { status: STATUS.ACCEPTED, args: {},
-      evidence: 'sheet visibility (visible | hidden, public ApiWorksheet.GetVisible()) + the active sheet (public Api.GetActiveSheet().GetName()), a field-select over the existing X-L10 sheetVisibility axis and the panes block: GH #133; a gap is NAMED per sheet / for the active sheet, never "visible"; no WRITE intent changes either (a hidden sheet refuses a freeze, X-L10)' },
+      evidence: 'sheet visibility (visible | hidden, public ApiWorksheet.GetVisible()) + the active sheet (public Api.GetActiveSheet().GetName()), a field-select over the existing X-L10 sheetVisibility axis and the panes block: GH #133; a gap is NAMED per sheet / for the active sheet, never "visible"; no WRITE intent changes either (a hidden sheet refuses a freeze, X-L10). GH #365: a "hidden" sheet may actually be Excel\'s veryHidden -- GetVisible() cannot tell them apart, and the distinction is NOT recoverable even from the saved file (the engine demotes veryHidden to hidden on the first save after loading); every "hidden" entry carries visibilityDetail: "UNOBSERVABLE:hidden-vs-veryhidden-not-distinguished" naming this limit' },
     read_page_setup: { status: STATUS.ACCEPTED, args: { sheet: SHEET },
       evidence: 'page layout (orientation, gridlines, headings, margins mm) + print settings (fit, scale, paper, header / footer codes, manual page breaks, first page number, centering), the MIRROR of set_page_layout and the set_print_* intents: L-10b LIVE on a PRE-SEEDED fixture (the sheet is set up in the OOXML, not by the product writers, which are not released); the page half (public getters) and the print half (sheet.printSettings.read/v1) fail independently; print area / titles are defined names and NOT in this read' },
     read_filter: { status: STATUS.ACCEPTED, args: { sheet: SHEET },
-      evidence: 'AutoFilter range + per-field criteria, the MIRROR of filter_range (value | values | and): L-10b LIVE on a PRE-SEEDED fixture (public AutoFilter getters + sheet.autoFilter.fieldIdentity.read/v1); criteria the writer cannot create are NAMED (NO_WRITE_PATH), hidden rows are not read' },
+      evidence: 'AutoFilter range + per-field criteria, the MIRROR of filter_range (value | values | and): L-10b LIVE on a PRE-SEEDED fixture (public AutoFilter getters + sheet.autoFilter.fieldIdentity.read/v1); criteria the writer cannot create are NAMED (NO_WRITE_PATH); GH #344/#345 (LIVE r2): a colour filter is named by kind with colour null (COLOR_NOT_PUBLIC), an empty value list is the ambiguous state (AMBIGUOUS_EMPTY_LIST); hidden rows are not read; GH #361 (LIVE, docs/evidence/gh361-table-autofilter-live-20261104/): this reader is SHEET-LEVEL ONLY and never sees a Table\'s own AutoFilter at all (range stays null even when read_tables.autoFilter is true) -- a Table\'s own filter criteria have no reader anywhere in this product today (read_tables.autoFilterCriteria names that gap)' },
     // GH #300 K1: the cell comments of one sheet, the READ half of the #300 comment family (K2 add_comment is its write).
     read_comments: { status: STATUS.ACCEPTED, args: { sheet: SHEET },
       evidence: 'every comment of the sheet through the PUBLIC ApiComment getters (text / author / userId / timeUtc / resolved + replies), the anchor cell found by a bounded per-cell GetComment scan (ApiComment has no address getter; the used range does not reach a comment-only cell) reconciled against ws.GetComments() -- an unreconciled scan names the sheet, never a partial list; no id (GetId is not stable across a reopen); K1 LIVE probes on DS 9.3.5: editor-made comments session + reopen, and a PRE-SEEDED Excel-shaped workbook (legacy notes, threaded comments with persons / dT / a reply / done) -- docs/evidence/gh300-k1-comments-probe-20261026.json, docs/GH300-K1-XLSX-READ-COMMENTS-DECISION.md' },
+    // GH #298 D (owner decision, path A, order A: read_tables before read_hyperlinks): every Excel Table of one
+    // sheet through the DS Bridge sheet.tables.read/v1 (B/18) -- served only on patchVersion /18; a /16 or /17
+    // runtime correctly degrades the axis to CAPABILITY_MISSING, never a guessed value.
+    read_tables: { status: STATUS.ACCEPTED, args: { sheet: SHEET },
+      evidence: 'name/ref($-stripped)/headerRow/totalsRow/columns/style/autoFilter(presence-only) through sheet.tables.read/v1, document order: documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev18-candidate (GH #300 L1 / #298 D, an offline-tested candidate, docs/DS-9.3.5-BRIDGE18-HYPERLINKS-TABLES-READ.md), NOT installed anywhere; a /16 or /17 runtime degrades the whole axis to its own named CAPABILITY_MISSING, never a guessed value; no range/filter detail of autoFilter is read (out of this capability\'s scope) -- GH #361: when autoFilter is true this is named explicitly as `autoFilterCriteria: \'UNOBSERVABLE:table-autofilter-criteria-not-read\'` (tables-read.cjs projectTablesRead), not left for the caller to assume the presence flag is the whole story' },
+    // GH #300 L1 (owner decision, path A, order A: after read_tables): every hyperlink of one sheet through the
+    // DS Bridge sheet.hyperlinks.read/v1 (B/18) -- the same candidate and the same runtime-gating as read_tables.
+    read_hyperlinks: { status: STATUS.ACCEPTED, args: { sheet: SHEET },
+      evidence: 'ref($-stripped)/address/location/tooltip/kind(external|internal|unknown:<n>) through sheet.hyperlinks.read/v1, row-then-column order: documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev18-candidate (GH #300 L1 / #298 D, an offline-tested candidate, docs/DS-9.3.5-BRIDGE18-HYPERLINKS-TABLES-READ.md), NOT installed anywhere; a /16 or /17 runtime degrades the whole axis to its own named CAPABILITY_MISSING, never a guessed value; the displayed cell text is NOT part of this read (read_range covers that)' },
+    // GH #338-#342: the protection of one sheet (and, with a range, the locked / hidden state of its non-empty cells) through the DS Bridge
+    // sheet.protection.read/v1 (/17+, the #326 guard's own read) -- the READ mirror of protect_sheet / unprotect_sheet / set_cell_protection.
+    read_protection: { status: STATUS.ACCEPTED, args: { sheet: SHEET, range: RANGE }, optional: ['range'],
+      evidence: 'protected / the 15 forbids flags / cells.unlocked + cells.hidden over the non-empty cells of a range, through sheet.protection.read/v1 (docs/DS-9.3.5-BRIDGE17-PROTECTION-READ.md, LIVE production 2026-10-25); no credential field is ever read; the write mirror is LIVE-proven on Bridge /22 (docs/DS-9.3.5-BRIDGE22-SHEET-PROTECTION-WRITE-DESIGN.md, gate G1)' },
     read_print_area: { status: STATUS.ACCEPTED, args: { sheet: SHEET },
       evidence: 'the sheet-level Print_Area, the MIRROR of set_print_area / clear_print_area (names.cjs): GH #134 P1, a field-select over the driver\'s defined-names read (DS Bridge workbook.definedNames.read/v1, the same read set_print_area is verified with); one rectangle -> range, two or more -> areas in the stored order; no print area -> set false; a shape the writer has no word for (a whole column / row, a part on another sheet) or a names gap is NAMED, never a value' },
     read_defined_names: { status: STATUS.ACCEPTED, args: {},
@@ -111,14 +141,24 @@ const OPERATIONS = Object.freeze({
     // (src/adapters/xlsx/families/format-run.cjs), released BEFORE format_run's own WRITE (#137's own stated order).
     // The family's own run-map build: GetCharacters(i,1).GetFont() per character, merging consecutive identical
     // font-tuples (bold/italic/name/size/color -- color the public GetRGB() integer, the SAME convention the
-    // read_range font.color field already uses). Bounded by the family's RUN_MAP_CHAR_CEILING (256 chars,
-    // TEMPORARY) -- a longer text is named 'UNOBSERVABLE:text-too-long', never a guessed/truncated run list; an
+    // read_range font.color field already uses). Bounded by the family's RUN_MAP_CHAR_CEILING (1024 chars,
+    // GH #364 LIVE timing measurement raised this from the prior TEMPORARY 256) -- a longer text is named
+    // 'UNOBSERVABLE:text-too-long', never a guessed/truncated run list; an
     // empty cell is named 'UNOBSERVABLE:empty-cell'; a missing sheet 'UNOBSERVABLE:sheet-missing'. A non-text
     // (e.g. number) cell is NOT a gap -- the driver reads its stringified value like any other text, one run
     // covering the whole string.
     read_runs: { status: STATUS.ACCEPTED, args: { sheet: SHEET, cell: CELL },
       evidence: 'per-run (character start/length) font reader inside one cell, the MIRROR of format_run: X-F04 (format-run.cjs design doc docs/XF04-RUN-FONT-DESIGN-20261007.md, OWNER-APPROVED); the SAME run-map xlsx-driver.cjs readQuery already builds for format_run\'s own L1/L3 (runCells -> runReads, sheet!cell keyed) -- no new driver code, only a new product-surface consumer of an existing reader' },
-    read_print_rendering: { status: STATUS.NOT_MEASURED, evidence: 'X-P15, X-P04' },
+    // GH #343 (F01): the array formulas of one range, the READ mirror of write_array_formula: anchor / ref / formula / type 'array'.
+    // PUBLIC GetFormulaArray + GetFormula per cell (the LIVE-measured membership rule, array-formula.cjs) over the range PLUS a
+    // one-cell ring; the extent is proven only when the block's ring holds no member of its formula -- an array crossing the
+    // requested range is a NAMED state (extent 'crosses-the-requested-range', no ref invented), not a guess.
+    read_array_formulas: { status: STATUS.ACCEPTED, args: { sheet: SHEET, range: RANGE },
+      evidence: 'anchor/ref/formula/type over the requested range + a one-cell ring through the public GetFormulaArray + GetFormula (membership and extent rule LIVE-measured: docs/evidence/gh301-d4-array-formula-probe-20261025.json and -live-): GH #343, families/array-formula-read.cjs' },
+    // GH #356/#357: the rendered print page count of one sheet (docs/GH357-READ-PRINT-RENDERING-CONTRACT-DESIGN-20261031.md) through
+    // the Bridge /23 sheet.printPageCount.read/v1 (/16../22: UNOBSERVABLE:CAPABILITY_MISSING, never a number).
+    read_print_rendering: { status: STATUS.ACCEPTED, args: { sheet: SHEET },
+      evidence: 'the editor\'s own calcPagesPrint count of one sheet under its stored print settings, the live model never written (clone + History off): Bridge /23 gate G1 LIVE PASS on the disposable DS (FIT 1, NOFIT 9, EMPTY 0, HIDDEN named sheet-hidden, 0 History points, the fit scale and the stored pageSetup unchanged; docs/evidence/gh356-gh357-bridge23-live-20261101/g1-r1.json); parity with the editor\'s File > Print count LIVE (fit 1 = 1, no-fit 9 = 9, defined print area 1 = 1: docs/evidence/gh356-gh357-file-print-parity-live-7-20261103.json); defined print area + the engine page cap (capped above 1500 pages) LIVE (docs/evidence/gh356-gh357-print-area-cap-live-3-20261103.json); a hidden sheet is a named refusal (pages null + UNOBSERVABLE:BRIDGE:sheet-hidden), never 0, by owner decision (GH #356/#357)' },
   }),
   docx: Object.freeze({
     read_text: { status: STATUS.ACCEPTED, args: {}, evidence: 'blocks (heading/paragraph/list/table text) + locator: M4-WAVE1 (M8 124/124), M10 matrix W-08/W-09-3' },
@@ -135,7 +175,7 @@ const OPERATIONS = Object.freeze({
     // verification). No new driver code; a gap is per-item and named (unread | inconsistent |
     // UNOBSERVABLE:<field>-not-set), never guessed. DIRECT_INTERNAL_FALLBACK=0 (docx-driver.cjs:232-239,
     // the W-B1920-C1 cutover). SHARED_NUMID_OBSERVABLE=YES: every item's own numId is the grouping key.
-    read_numbering: { status: STATUS.ACCEPTED, args: {}, evidence: 'present/type/numId/level/levelFormats: B19 bridge parity 8/8 (docx.numbering.levelFormat.read/v1); format fields (numFmt/lvlText/suff/lvlJc/start): W07-1a..1d/W07-3/W07-7 LIVE (families/numbering.cjs write-side verification, the SAME ToJSON path); DIRECT_INTERNAL_FALLBACK=0 (docx-driver.cjs:232-239); GH #225, docs/GH225-NUMBERING-READ-DECISION.md' },
+    read_numbering: { status: STATUS.ACCEPTED, args: {}, evidence: 'present/type/numId/level/levelFormats: B19 bridge parity 8/8 (docx.numbering.levelFormat.read/v1); format fields (numFmt/lvlText/suff/lvlJc/start): W07-1a..1d/W07-3/W07-7 LIVE (families/numbering.cjs write-side verification, the SAME ToJSON path); color/font (GH #319, gh319-bulletcolorfont-probe-20261028): the glyph own rPr, same ToJSON path, additive; DIRECT_INTERNAL_FALLBACK=0 (docx-driver.cjs:232-239); GH #225, docs/GH225-NUMBERING-READ-DECISION.md' },
     // GH #224 (docs/GH224-STYLE-DEFINITIONS-READ-DECISION.md): a DEDICATED operation -- the style DEFINITIONS the
     // canonical inventory already carries (inventory.cjs `document.styles`, keyed by NAME): identity {name, basedOn,
     // styleType} + text {bold, size, color} + paragraph {align, indentLeft, spacingAfter}, each a measured value, the
@@ -152,7 +192,17 @@ const OPERATIONS = Object.freeze({
     // getter's own name with the measured fact of WHICH getter is called and WHAT remains unread.
     read_notes: { status: STATUS.ACCEPTED, args: {}, evidence: 'the FULL text of every footnote/endnote: per note the paragraph list through the public GetNext() chain of its first paragraph (docx-driver.cjs); GH #226 LIVE on DS 9.3.5 (gh226chain-live-1792394096767-10bc02): GetNext() === null at every note end (3 footnotes + 3 endnotes of 1-3 paragraphs), every note FULL, fresh and reopen, no write -- docs/GH226-NOTES-READ-DECISION.md. A chain that does not end by null is NAMED incomplete (unobservable), never a guessed text' },
     // GH #268b (docs/GH268B-DOCX-READ-IMAGES-PRODUCT-DECISION.md): RELEASED (PARTIAL -> ACCEPTED) after the g268v1 LIVE probe's SEED_OK was green.
-    read_images: { status: STATUS.ACCEPTED, args: {}, evidence: 'doc.GetAllImages() + the page-side projection of the PUBLIC ApiDrawing.ToJSON() (docPr id/name/descr/title, extent EMU, drawingType, wrapType, the paragraph text); the image BYTES never leave the editor; scope: main document content (header / footer / content-control pictures not listed); GH #268 g268v1 SEED_OK + docx-images-read.live.cjs -- docs/GH268B-DOCX-READ-IMAGES-PRODUCT-DECISION.md' },
+    // GH #306b: the old scope text ("header / footer ... not listed") was measured FALSE (LIVE PASS,
+    // docx-gh306b-header-image-probe.live.cjs) -- doc.GetAllImages() lists them, just unlabeled.
+    // A `part` field exists (docx-images-read.cjs), joined via ToJSON's own docPr.id -- identity
+    // (===) was LIVE-measured FALSE against this exact product path first (2026-10-28: 0/3 matched,
+    // even within one synchronous execution -- the fourth wrapper-identity-never-matches instance);
+    // docPr.id was then LIVE-measured readable+unique on both enumerations with matching id-sets
+    // (docx-gh306b-image-docpr-id-probe.live.cjs, LIVE PASS, 2026-10-28), valid only within one
+    // callCommand (the id is a runtime-generated value, never the stored XML docPr id, never
+    // persisted). The code re-checks readability/uniqueness/set-match on every read and fails
+    // closed (a named gap) on every row if any of the three does not hold.
+    read_images: { status: STATUS.ACCEPTED, args: {}, evidence: 'doc.GetAllImages() + the page-side projection of the PUBLIC ApiDrawing.ToJSON() (docPr id/name/descr/title, extent EMU, drawingType, wrapType, the paragraph text); the image BYTES never leave the editor; scope: main document content, table cells, and every section\'s header/footer part+variant (LIVE PASS, doc.GetAllImages() lists all of them); a part field labels which (body | header:<section>:<variant> | footer:<section>:<variant>) and paragraphIndex the paragraph inside that part (null in a table cell), joined back to doc.GetAllImages() by ToJSON\'s own docPr.id (LIVE PASS, 2026-10-28: readable+unique on both enumerations, matching id-sets, valid only within one callCommand -- identity (===) was LIVE-measured FALSE on the real DS first); if any image\'s id is unreadable, duplicated on either side, or the two id-sets do not match, part is UNOBSERVABLE:part-docpr-id-unreadable / -duplicate / -set-mismatch on every row, never a guess; content-control pictures still not listed; GH #268 g268v1 SEED_OK + docx-images-read.live.cjs + GH #306b LIVE (docx-gh306b-header-image-probe / ...-part-discriminator / ...-part-enumeration / ...-image-docpr-id-probe) -- docs/GH268B-DOCX-READ-IMAGES-PRODUCT-DECISION.md' },
     // GH #269b (docs/GH269b-DOCX-READ-COMMENTS-DECISION.md): RELEASED (NOT_MEASURED -> ACCEPTED) after the g269bv2 LIVE PASS on DS 9.3.5 (read_comments through the product path: two rows, the author / userId / quote / resolved / reply fields, UTC-ms time, ids stable after a reopen, the anchor a named gap).
     read_comments: { status: STATUS.ACCEPTED, args: {}, evidence: 'GH #269b: the main document\'s comments through the public doc.GetAllComments() (opt-in includeComments; id/text/author/userId/timeUtc/quote/resolved + replies; the range anchor has NO public getter and is a NAMED gap) -- LIVE PASS g269bv2 on DS 9.3.5 (two rows, fields, UTC-ms time, ids stable after a reopen; docs/GH269b-DOCX-READ-COMMENTS-DECISION.md)' },
     // GH #227 (docs/GH227-SECTION-FLAGS-READ-DECISION.md): INTERNAL -> ACCEPTED. The stale evidence this
@@ -242,6 +292,17 @@ function checkCell(cell) {
   return null;
 }
 
+// GH #363 2nd unit: read_effective_fill's own, STRICTER bound -- each cell costs its own engine call
+// inside the Bridge handler (checkRange's general MAX_READ_CELLS=45000 would be far too permissive here).
+// Only applies to this one operation; checkRange has already refused an unparseable range by this point.
+const EFFECTIVE_FILL_MAX_CELLS = 200;
+function checkEffectiveFillBound(args) {
+  if (args.operation !== 'read_effective_fill' || args.range === undefined) return null;
+  const g = parseRange(args.range);
+  if (!g) return null;
+  return g.count > EFFECTIVE_FILL_MAX_CELLS ? refuse('LIMIT', `read_effective_fill range larger than ${EFFECTIVE_FILL_MAX_CELLS} cells (got ${g.count})`) : null;
+}
+
 /**
  * validateReadRequest(format, args) -> { ok:true, fileId, operation, args } | refusal (never throws).
  * Refusal codes: INVALID_ARGS | CREDENTIAL_FIELD | REQUESTER_OVERRIDE | UNKNOWN_FIELD | REFUSED_PARTIAL |
@@ -253,7 +314,7 @@ function validateReadRequest(format, args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return refuse('INVALID_ARGS', 'arguments must be an object');
   const op = ops[args.operation];
   const stages = [() => checkNames(args), () => checkTarget(args), () => checkOperation(ops, args.operation),
-    () => checkFields(op, args.operation, args), () => checkRange(args.range), () => checkCell(args.cell)];
+    () => checkFields(op, args.operation, args), () => checkRange(args.range), () => checkEffectiveFillBound(args), () => checkCell(args.cell)];
   for (const stage of stages) { const refusal = stage(); if (refusal) return refusal; }
   const out = Object.fromEntries(Object.keys(op.args).filter(k => args[k] !== undefined).map(k => [k, args[k]]));
   if (out.range !== undefined) out.range = out.range.replace(/\$/g, '').toUpperCase();
@@ -272,18 +333,28 @@ function xlsxRequest(operation, a) {
   if (operation === 'read_range') return { tiered: true, readOnly: true, windowStyle: a.style === true, windows: [{ sheet: a.sheet, range: a.range, format: a.format === true, style: a.style === true }], protectionRanges: [{ sheet: a.sheet, range: a.range }] };
   if (operation === 'read_validations') return { windows: [], validationRanges: [{ sheet: a.sheet, range: a.range }] };
   if (operation === 'read_conditional_formats') return { windows: [], cfRanges: [{ sheet: a.sheet, range: a.range }] };
+  // GH #363 2nd unit: the request carries the EXPANDED cell list (cellsOf, already bounded to
+  // <=200 by checkEffectiveFillBound) -- the Bridge handler iterates the given A1 list directly,
+  // no range-walk inside the patched editor.
+  if (operation === 'read_effective_fill') return { windows: [], compiledStyleRanges: [{ sheet: a.sheet, range: a.range, cells: cellsOf(parseRange(a.range)) }] };
   if (operation === 'read_layout') return { windows: [], layout: [{ sheet: a.sheet, ...layoutExtent(a.range) }] };
   if (operation === 'read_freeze_panes') return { windows: [], panes: true };
   // GH #133: every sheet's visibility (the sheetVisibility axis) and the active sheet's name (carried by the panes block); both existing axes.
   if (operation === 'read_sheet_state') return { windows: [], panes: true, sheetVisibility: true };
   if (operation === 'read_print_area') return { windows: [], dependents: true };
   if (operation === 'read_defined_names') return { windows: [], dependents: true };
-  if (operation === 'read_page_setup') return { windows: [], pageSheets: [a.sheet], printSheets: [a.sheet] };
-  if (operation === 'read_filter') return { windows: [], filterSheets: [a.sheet] };
+  if (operation === 'read_page_setup') return { windows: [], pageSheets: [a.sheet], printSheets: [a.sheet], printLayout: true };
+  if (operation === 'read_filter') return { windows: [], filterSheets: [a.sheet], filterColor: true };
   if (operation === 'read_comments') return { windows: [], commentSheets: [a.sheet] };
+  if (operation === 'read_tables') return { windows: [], tableSheets: [a.sheet] };
+  if (operation === 'read_print_rendering') return { windows: [], printPageSheets: [a.sheet] };
+  // GH #338-#342 (/24 only, W1): the SAME request also asks the workbook-level structure lock, task-wide --
+  // one value, not per-sheet, additive to the existing per-sheet/per-range axis below.
+  if (operation === 'read_protection') return typeof a.range === 'string' ? { windows: [], protectionRanges: [{ sheet: a.sheet, range: a.range }], workbookProtection: true } : { windows: [], protectionSheets: [a.sheet], workbookProtection: true };
+  if (operation === 'read_hyperlinks') return { windows: [], hyperlinkSheets: [a.sheet] };
   // X-O05/4: an omitted `sheet` reads every sheet's charts (the driver's own '*' convention, chartAsked.includes('*')) --
   // matching workbook_overview's all-sheets default, not a required argument like read_range/read_validations.
-  if (operation === 'read_charts') return { windows: [], chartSheets: [a.sheet || '*'] };
+  if (operation === 'read_charts') return { windows: [], chartSheets: [a.sheet || '*'], chartStyle: true };
   // GH #140 U2: the SAME all-sheets '*' convention, requesting the driver's objectSheets axis --
   // the one create_pivot/refresh_pivot's own liveExtras() already requests on the WRITE side
   // (adapter.cjs objectSheets), no new driver reader.
@@ -294,6 +365,8 @@ function xlsxRequest(operation, a) {
   // GH #137 U1: the SAME runCells key format-run.cjs's own liveExtras() already builds for the WRITE
   // side (`{ sheet, cell }`), driving the SAME xlsx-driver.cjs readQuery runCells axis -- no new reader.
   if (operation === 'read_runs') return { windows: [], runCells: [{ sheet: a.sheet, cell: a.cell }] };
+  // GH #343: the SAME arrayCells axis write_array_formula's liveExtras() asks (xlsx-driver.cjs readQuery), over the range + its ring.
+  if (operation === 'read_array_formulas') return arrayFormulasRequest(a);
   return { windows: [] };
 }
 
@@ -340,10 +413,47 @@ function readRange(inv, a) {
   return { sheet: a.sheet, range: a.range, cells: redactHiddenFormulas(cells, prot) };
 }
 
+const LABEL_FLAGS = Object.freeze(['showSerName', 'showCatName', 'showVal', 'showPercent']);
+/**
+ * GH #347 (CH02): the chart-level `dataLabels` is the chart-type element's own c:dLbls, which a series' (or point's) own
+ * c:dLbls overrides -- after a chart-level SetShowDataLabels the flags read true while no point shows anything (LIVE r2,
+ * docs/evidence/gh347-chart-labels-probe-live-r2-20261031.json). The old field stays (backward compatible) with its scope NAMED, and
+ * `dataLabelsEffective` is summarised ONLY from the per-point effectiveLabels: the one four-flag state when every point agrees,
+ * 'mixed' when they differ, a named 'UNOBSERVABLE:<reason>' when any of it is unreadable -- never derived from dataLabels.
+ */
+function effectiveLabelsSummary(eff) {
+  if (eff === undefined) return 'UNOBSERVABLE:not-read';
+  if (typeof eff === 'string') return eff;
+  if (eff === null || typeof eff !== 'object') return 'UNOBSERVABLE:not-read';
+  const points = Object.values(eff);
+  if (points.length === 0) return 'UNOBSERVABLE:no-points';
+  const unreadable = points.find(p => typeof p === 'string');
+  if (unreadable !== undefined) return unreadable;
+  if (!points.every(p => p !== null && typeof p === 'object' && LABEL_FLAGS.every(k => typeof p[k] === 'boolean'))) return 'UNOBSERVABLE:point-flags-incomplete';
+  const first = points[0];
+  return points.every(p => LABEL_FLAGS.every(k => p[k] === first[k])) ? Object.fromEntries(LABEL_FLAGS.map(k => [k, first[k]])) : 'mixed';
+}
+const withEffectiveLabelsSummary = c => (c !== null && typeof c === 'object' ? { ...c, dataLabelsScope: 'chart-group-setting', dataLabelsEffective: effectiveLabelsSummary(c.effectiveLabels), ...(c.pointStyles !== undefined ? { pointStyles: pointStylesOf(c.pointStyles) } : {}) } : c);
+/**
+ * GH #346: the data-point styles as the set_chart_style dataPoint target's mirror -- only the points that HOLD their own dPt (element present)
+ * and every named gap (a string); a point without its own dPt inherits the series style and is not listed. A whole-axis gap (a string) passes
+ * through. This filter never special-cases individual fields: it keeps the WHOLE value object whenever element !== 'absent', so on bridge
+ * patchVersion /27+ (GH #346 AUTO-REPAIR, documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev27-candidate) a dPt idx stored MORE THAN ONCE
+ * rides straight through with its effective:{brush,pen} (the renderer's own first-document-order-match-wins entry, mirroring sdk-all.js's own
+ * tie-break) and, only then, duplicated:{count,order} (every stored entry, in document order, fill/line read independently off its OWN spPr).
+ * On patchVersion /20-/26 the SAME duplicate idx is still the old named gap, e.g. 'UNOBSERVABLE:BRIDGE:datapoint-ambiguous' (a string, caught
+ * by the typeof check above, unchanged by the /27 fix).
+ */
+function pointStylesOf(p) {
+  if (!p || typeof p !== 'object') return p;
+  return Object.fromEntries(Object.entries(p).filter(([, v]) => typeof v === 'string' || (v && v.element !== 'absent')));
+}
+
 const XLSX_PROJECTIONS = Object.freeze({
   workbook_overview: inv => ({ sheets: inv.sheets.map(s => ({ name: s.name, index: s.index, used: s.used })) }),
   read_range: readRange,
   read_conditional_formats: projectCfRead,
+  read_effective_fill: projectEffectiveFillRead,
   read_layout: projectLayoutRead,
   read_freeze_panes: projectPanesRead,
   read_sheet_state: projectSheetStateRead,
@@ -352,6 +462,11 @@ const XLSX_PROJECTIONS = Object.freeze({
   read_defined_names: projectDefinedNamesRead,
   read_filter: projectFilterRead,
   read_comments: projectCommentsRead,
+  read_tables: projectTablesRead,
+  read_print_rendering: projectPrintRenderingRead,
+  read_protection: projectProtectionRead,
+  read_hyperlinks: projectHyperlinksRead,
+  read_array_formulas: projectArrayFormulasRead,
   read_validations: (inv, a) => {
     const v = inv.validationReads ? inv.validationReads[`${a.sheet}!${a.range}`] : undefined;
     if (v === undefined) return { sheet: a.sheet, range: a.range, validation: 'UNOBSERVABLE:not-read' };
@@ -388,7 +503,7 @@ const XLSX_PROJECTIONS = Object.freeze({
     return { sheets: names.map(name => {
       const r = reads[name];
       // a whole-sheet gap (sheet-missing, or any future whole-axis UNOBSERVABLE) is a string, never guessed as empty
-      return typeof r === 'string' ? { sheet: name, charts: null, pivots: null, reason: r } : { sheet: name, charts: r.charts, pivots: r.pivots };
+      return typeof r === 'string' ? { sheet: name, charts: null, pivots: null, reason: r } : { sheet: name, charts: Array.isArray(r.charts) ? r.charts.map(withEffectiveLabelsSummary) : r.charts, pivots: r.pivots };
     }) };
   },
   // GH #140 U2 (#141 roadmap GO): a plain field-select over inv.objects -- the SAME content-proven
@@ -486,8 +601,8 @@ const cellOf = c => ({ text: c.text, simple: c.simple, format: c.format, paraFor
  *     levelFormats      the 9-slot internal per-level format array (EO_INTERNAL_DEPENDENCY gate,
  *                       inventory.cjs:170), or null when that ONE gate did not verify -- independent
  *                       of `format` below (a DIFFERENT gate; one failing never hides the other)
- *     format            each of numFmt/lvlText/suff/lvlJc/start individually: the measured ToJSON
- *                       value, or 'UNOBSERVABLE:<field>-not-set' when that ONE key was absent
+ *     format            each of numFmt/lvlText/suff/lvlJc/start/color/font individually: the measured
+ *                       ToJSON value, or 'UNOBSERVABLE:<field>-not-set' when that ONE key was absent
  *                       (inventory.cjs:175-181 already strips anything not independently re-validated
  *                       -- this projection invents nothing beyond what that layer already decided was
  *                       safe to keep). `start` in practice is almost always present: the driver's own
@@ -495,7 +610,9 @@ const cellOf = c => ({ text: c.text, simple: c.simple, format: c.format, paraFor
  *                       it in whenever the key was omitted FOR THAT reason -- `format` itself is only
  *                       `'UNOBSERVABLE:numbering-format-not-read'` (the WHOLE object, not per field)
  *                       when the ToJSON read did not run on this paragraph at all (a bridge/runtime
- *                       gap distinct from the per-field case).
+ *                       gap distinct from the per-field case). `color`/`font` (GH #319): the bullet
+ *                       glyph's OWN rPr, '#RRGGBB' | 'auto' | font-family string -- absent (named)
+ *                       on a level whose glyph was never explicitly set, never guessed from a style.
  *
  * Shared-numId semantics (SHARED_NUMID_OBSERVABLE): every item's own `numId` IS the observable
  * relationship -- a caller verifying a #248 numbering-definition write groups this operation's own
@@ -520,7 +637,11 @@ function numberingTypeOf(block, n) {
 function numberingFormatFieldsOf(fmt) {
   if (!fmt || typeof fmt !== 'object') return 'UNOBSERVABLE:numbering-format-not-read';
   const field = k => (Object.prototype.hasOwnProperty.call(fmt, k) ? fmt[k] : `UNOBSERVABLE:${k}-not-set`);
-  return { numFmt: field('numFmt'), lvlText: field('lvlText'), suff: field('suff'), lvlJc: field('lvlJc'), start: field('start') };
+  // GH #319: `color`/`font` -- the bullet glyph's OWN rPr (colour/typeface), the SAME
+  // per-field-named-UNOBSERVABLE discipline as every other key here; absent on a level whose
+  // glyph was never explicitly coloured/fonted (the DS still renders a default, this just never
+  // claimed one).
+  return { numFmt: field('numFmt'), lvlText: field('lvlText'), suff: field('suff'), lvlJc: field('lvlJc'), start: field('start'), color: field('color'), font: field('font') };
 }
 function numberingOfUnit(kind, block, n) {
   if (!n) return { kind, numbering: null, numberingGap: 'unread' };
@@ -553,7 +674,7 @@ function numberingUnitsOf(blocks) {
  *   { styles: [{ name, identity, text, paragraph }] }   -- in the inventory's own (GetAllStyles) order
  *     identity   { name, basedOn, next, link, styleType, basedOnName, nextName, linkName } or null when the style's ToJSON was unreadable (then text/paragraph
  *                carry 'UNOBSERVABLE:no-readable-ToJSON' per field -- the driver's own value, passed through)
- *     text       { bold, size (pt), color (hex | 'auto') }
+ *     text       { bold, size (pt), color (hex | 'auto'), italic, underline, strike, fontFamily, language (GH #324: rPr.lang.val, BCP-47-ish tag) }
  *     paragraph  { align, indentLeft (pt), spacingAfter (pt) }
  *     each field: a measured value | 'inherited' (NOT set on this definition -- the base-style chain is NOT
  *                 resolved here, so it is NOT a value) | 'UNOBSERVABLE:<reason>'
@@ -636,13 +757,17 @@ function notesOfDocument(document) {
 }
 
 /**
- * GH #268b: read_images. A plain field-select over inventory.cjs's own document.images (the driver's page-side projection of ApiDrawing.ToJSON, docx-images-read.cjs): per image { index, alt,
- * title, placement: 'inline' | 'floating', wrap, widthEmu, heightEmu, paragraph }, each a read value, null (genuinely absent) or a named 'UNOBSERVABLE:<reason>'. A wholly unread list is `images: null` with the
- * reason in `gap`. SCOPE: the images doc.GetAllImages() enumerates in the MAIN document content -- header / footer images and content-control pictures are NOT listed and no completeness is claimed for
- * them. The image BYTES are never part of the result (the projection drops them page-side).
+ * GH #268b: read_images. A plain field-select over inventory.cjs's own document.images (the driver's page-side projection of ApiDrawing.ToJSON, docx-images-read.cjs): per image { index, part, alt,
+ * title, placement: 'inline' | 'floating', wrap, widthEmu, heightEmu, paragraph, paragraphIndex }, each a read value, null (genuinely absent) or a named 'UNOBSERVABLE:<reason>'. `paragraphIndex` (GH #317 follow-up) is
+ * the paragraph's index inside its own part (the same docPr.id part-join; null inside a table cell) -- `paragraph` is GetText(), which drops a real tab. A wholly unread list is `images: null` with the
+ * reason in `gap`. SCOPE (GH #306b, LIVE-measured -- the old "header / footer not listed" claim was FALSE): doc.GetAllImages() lists EVERY image in the main document content, table cells, AND every
+ * section's header/footer part+variant. `part` names which, joined back to GetAllImages() by ToJSON's own docPr.id -- identity (===) was LIVE-measured FALSE on the real DS first (0/3 matched even
+ * within one synchronous execution -- the fourth wrapper-identity-never-matches instance); docPr.id was then LIVE-measured readable+unique on both enumerations with matching id-sets, valid only
+ * within one callCommand (never the stored XML docPr id, never persisted). Every read re-checks readability/uniqueness/set-match and fails closed (a named gap, never a guess) on EVERY row if any
+ * of the three does not hold. Content-control pictures are still not listed. The image BYTES are never part of the result (the projection drops them page-side).
  */
 function imagesOfDocument(document) {
-  const scope = 'doc.GetAllImages() of the main document content (header / footer images and content-control pictures are not listed); alt / title / placement / wrap / size from the public ApiDrawing.ToJSON() projected page-side; the image bytes never leave the editor; the docPr id / name are NOT part of the row (g268v1 LIVE: session-local random values that differ from the saved docPr id / name) -- index is the only key, valid within ONE read';
+  const scope = 'doc.GetAllImages() of the main document content, table cells, and every section\'s header/footer part+variant (LIVE PASS); a part field labels which, joined back to GetAllImages() by ToJSON\'s own docPr.id (LIVE PASS: readable+unique on both enumerations, matching id-sets, valid only within one callCommand -- identity (===) was LIVE-measured FALSE on the real DS first); if any id is unreadable, duplicated on either side, or the two id-sets do not match, part is UNOBSERVABLE:part-docpr-id-unreadable / -duplicate / -set-mismatch on every row, never a guess; content-control pictures still not listed; alt / title / placement / wrap / size from the public ApiDrawing.ToJSON() projected page-side; the image bytes never leave the editor; the docPr id / name are NOT part of the row (g268v1 LIVE: session-local random values that differ from the saved docPr id / name, read internally only as the part-join key, never exposed) -- index is the only key, valid within ONE read';
   const imgs = document ? document.images : undefined;
   if (Array.isArray(imgs)) return { images: imgs.map(r => ({ ...r })), scope };
   return { images: null, gap: typeof imgs === 'string' ? imgs : 'UNOBSERVABLE:unread', scope };
@@ -701,10 +826,14 @@ const DOCX_PROJECTIONS = Object.freeze({
 });
 
 
-/** The ONE product-side driver constructor: configSource only (the M11.2 broker source), never url/user/pass. */
-function productDriver(format, { configSource, loadPlaywright }) {
+/** The ONE product-side driver constructor: configSource only (the M11.2 broker source), never url/user/pass.
+ * `timeoutMs`/`commandTimeoutMs` are the config file's own `timeouts.openMs`/`timeouts.commandMs` (config.cjs),
+ * forwarded verbatim -- `undefined` when the config does not set them, which is the driver's own default. */
+function productDriver(format, { configSource, loadPlaywright, timeoutMs, commandTimeoutMs }) {
   if (!configSource || configSource.kind !== 'BROKER') throw new TypeError('a product READ driver needs the broker configSource');
-  return format === 'xlsx' ? createEuroOfficeXlsxDriver({ configSource, loadPlaywright }) : createEuroOfficeDocxDriver({ configSource, loadPlaywright });
+  return format === 'xlsx'
+    ? createEuroOfficeXlsxDriver({ configSource, loadPlaywright, timeoutMs, commandTimeoutMs })
+    : createEuroOfficeDocxDriver({ configSource, loadPlaywright, timeoutMs, commandTimeoutMs });
 }
 
 const opsOf = (format, status) => Object.entries(OPERATIONS[format]).filter(([, o]) => o.status === status).map(([k]) => k);
@@ -840,8 +969,11 @@ function readWarmSession(reuse, configSource, fileId, lease) {
  *      any other exit closes it, exactly as before reuse existed -> lease released.
  * `gate`: the product passes ONE gate shared by every tool of the process. `runtime` / `loadPlaywright` / `createDriver`
  * are test seams; the product default is the configured browser runtime and productDriver (broker configSource only).
+ * `timeoutMs` / `commandTimeoutMs`: the config file's `timeouts.openMs` / `timeouts.commandMs` (server-tools.cjs),
+ * forwarded to the driver constructor on a miss only -- a held warm session (`taken`) already has its own driver,
+ * built at ITS OWN open() time, so these have no effect on a reused session.
  */
-function createReadTool(format, { configSource, browsersPath, gate = createSessionGate(), runtime = null, loadPlaywright = null, createDriver = productDriver, reuse = null } = {}) {
+function createReadTool(format, { configSource, browsersPath, gate = createSessionGate(), runtime = null, loadPlaywright = null, createDriver = productDriver, reuse = null, timeoutMs, commandTimeoutMs } = {}) {
   const f = FORMATS[format];
   const rt = runtime || (loadPlaywright ? { check: () => ({ ok: true }), load: loadPlaywright } : createBrowserRuntime({ browsersPath }));
   return {
@@ -862,7 +994,7 @@ function createReadTool(format, { configSource, browsersPath, gate = createSessi
           driver = taken.driver;
           session = { openedAt: taken.openedAt, calls: taken.calls + 1, opened: taken.opened };
         } else {
-          driver = createDriver(format, { configSource, loadPlaywright: rt.load });
+          driver = createDriver(format, { configSource, loadPlaywright: rt.load, timeoutMs, commandTimeoutMs });
           lease.track(driver);
           const opened = (await driver.open({ fileId: v.fileId, operation: 'READ' })) || {};
           if (!opened.ok) return { ok: false, stage: 'OPEN', code: opened.code || 'OPEN_FAILED', reason: opened.detail || 'open failed', dispatched: false };
@@ -887,4 +1019,4 @@ function createReadTool(format, { configSource, browsersPath, gate = createSessi
 // readOnce/FORMATS: GH #76, the optional product-side verifyStoredContent (write-tools.cjs) opens its own
 // targeted read on an independently-opened driver -- exported so it calls the SAME read path this tool
 // uses, not a second one.
-module.exports = { OPERATIONS, STATUS, validateReadRequest, inputSchema, createReadTool, productDriver, xlsxRequest, writeIntents, CREDENTIAL_FIELDS, REQUESTER_FIELDS, readOnce, FORMATS, readRange };
+module.exports = { OPERATIONS, STATUS, validateReadRequest, inputSchema, createReadTool, productDriver, xlsxRequest, writeIntents, CREDENTIAL_FIELDS, REQUESTER_FIELDS, readOnce, FORMATS, readRange, XLSX_PROJECTIONS };

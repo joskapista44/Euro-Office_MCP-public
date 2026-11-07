@@ -1,7 +1,7 @@
 'use strict';
 
-const { BRIDGE_CAPABILITIES, BRIDGE_CLIENT_SRC, BRIDGE_HYDRATIONS, BRIDGE_HYDRATE_CLIENT_SRC, BRIDGE_WRITES, BRIDGE_WRITE_CLIENT_SRC, BRIDGE_SERIES_STYLE_WRITE_CLIENT_SRC, BRIDGE_COPY_WRITE_CLIENT_SRC, BRIDGE_CHART_DELETE_WRITE_CLIENT_SRC } = require('./ds-bridge.cjs');
-const { ACCEPTED_RUNTIMES, XLSX_RUNTIME_IDS, XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS, cacheKeyOf, HANDSHAKE_BODY, classifyHandshake } = require('../../core/runtime-identity.cjs');
+const { BRIDGE_CAPABILITIES, BRIDGE_CLIENT_SRC, BRIDGE_HYDRATIONS, BRIDGE_HYDRATE_CLIENT_SRC, BRIDGE_WRITES, BRIDGE_WRITE_CLIENT_SRC, BRIDGE_SERIES_STYLE_WRITE_CLIENT_SRC, BRIDGE_COPY_WRITE_CLIENT_SRC, BRIDGE_CHART_DELETE_WRITE_CLIENT_SRC, BRIDGE_DATA_POINT_STYLE_WRITE_CLIENT_SRC, BRIDGE_TABLE_WRITE_CLIENT_SRC, BRIDGE_PROTECTION_WRITE_CLIENT_SRC, BRIDGE_WORKBOOK_PROTECTION_WRITE_CLIENT_SRC } = require('./ds-bridge.cjs');
+const { ACCEPTED_RUNTIMES, XLSX_RUNTIME_IDS, XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B25_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B25_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B26_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B26_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B27_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B27_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B28_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B28_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B29_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B29_BRIDGE_WRITE_RUNTIME_IDS, cacheKeyOf, HANDSHAKE_BODY, classifyHandshake } = require('../../core/runtime-identity.cjs');
 
 const { startConfigHost, readDsOpenState, openWaitFailureDetail } = require('./config-host.cjs');
 const { observePage, settleSaveAck, dsIdentity, confirmForceSave, closeResult } = require('./save-ack.cjs');
@@ -32,6 +32,12 @@ const MAX_READ_CELLS = 45000;
 // GH #300 K1: the read_comments anchor scan (per-cell GetComment, no public address getter) and the comment count it covers
 const MAX_COMMENT_SCAN_CELLS = 20000;
 const MAX_COMMENTS = 1000;
+
+// The driver's OWN literal detail string for a wait that saw NEITHER __ready NOR __error NOR any onWarning/onInfo
+// (config-host.cjs openWaitFailureDetail) -- anchored at the START so it matches only that unwrapped detail, never
+// a mention of the phrase inside a DIFFERENT wrapped message (e.g. the model-ready loop's own "live spreadsheet
+// model not ready (no-ds-event: ...)").
+const NO_DS_EVENT_PATTERN = /^no-ds-event:/;
 
 /**
  * M7 S32 slice 1 (owner GO 2026-10-03, owner channel; contract docs/evidence/M7-S32-TIERED-CONTRACT.md): above
@@ -69,7 +75,15 @@ const MAX_FORMULA_INDEX = 5000;
 // serve -- a separate, still-open question, unaffected by this entry. *** `layout_range` needs `layout` in its
 // OWN bounded request too (not just its full one): without it, not even its own write can be proven under
 // BOUNDED (layout.cjs's gate()/verifyPrimitive() read the op's own target through `primary.layout[sheet]`).
-const TIERED_EXTRAS = Object.freeze(['dependents', 'filterSheets', 'formatSheets', 'runCells', 'panes', 'sheetVisibility', 'cfRanges', 'validationRanges', 'layout', 'protectionRanges', 'protectionSheets', 'commentSheets', 'sessionUser']);
+// GH #298 D: tableSheets joins the (a)-group too -- the bridge handler's own table walk is capped (tables-over-
+// cap:1000, columns-over-cap:16384), and per-sheet it never touches a cell, so its cost is bounded by the task's
+// own sheet count, the same justification as protectionSheets/commentSheets above.
+// GH #300 L1: hyperlinkSheets joins too, the same justification -- the bridge handler's own link walk is capped
+// (links-over-cap:10000) and never touches a cell directly.
+// GH #363 2nd unit: compiledStyleRanges joins the (a)-group too -- its cost is bounded by the REQUEST's own
+// cell list, capped at 200 by read-tools.cjs's own pre-dispatch check (checkEffectiveFillBound), never the
+// workbook's used-cell count.
+const TIERED_EXTRAS = Object.freeze(['dependents', 'filterSheets', 'formatSheets', 'runCells', 'panes', 'sheetVisibility', 'cfRanges', 'validationRanges', 'layout', 'protectionRanges', 'protectionSheets', 'commentSheets', 'tableSheets', 'hyperlinkSheets', 'sessionUser', 'workbookProtection', 'compiledStyleRanges']);
 
 /**
  * The live read: the sheet list with used ranges, every cell of every used range, plus the requested
@@ -150,6 +164,12 @@ const EO_PAGE_LAYOUT_PER_SHEET_RUNTIMES = XLSX_RUNTIME_IDS;
  */
 const B10_BRIDGE_WRITE_RUNTIMES = XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS;
 /**
+ * GH #354/#355: the print LAYOUT settings (header/footer margin, page order) through sheet.printSettings.write/v2 -- a
+ * print command carrying meta.bridgePrintLayoutWrite is refused WITHOUT touching the editor on any runtime but /21
+ * (the capability does not exist on /16../19). The adapter's print.B26_BRIDGE_WRITE_RUNTIMES is the first line.
+ */
+const B26_BRIDGE_WRITE_RUNTIMES = XLSX_B26_BRIDGE_WRITE_RUNTIME_IDS;
+/**
  * B05-WRITE through the DS Bridge (M11.5a.4, owner GO owner channel, internal tracker): the driver's second line
  * behind the adapter's format.B05_BRIDGE_WRITE_RUNTIMES (the same /6-only list) -- a format command that carries a B05
  * Bridge WRITE (meta.bridgeAlignExtWrite) is refused WITHOUT touching the editor on any other runtime.
@@ -217,6 +237,20 @@ function b10BridgeWritePrelude() {
 }
 
 /**
+ * The in-editor B26 client (GH #354/#355), prepended ONLY to a print LAYOUT command -- the B10 client's shape on
+ * sheet.printSettings.write/v2, gated on the /21-only list; the failure report reads sheet.printSettings.read/v2.
+ */
+function b26BridgeWritePrelude() {
+  const W = BRIDGE_WRITES.PRINT_SETTINGS_WRITE_V2; const R = BRIDGE_CAPABILITIES.PRINT_SETTINGS_READ_V2;
+  return `${BRIDGE_CLIENT_SRC}${BRIDGE_WRITE_CLIENT_SRC}
+  let __b26 = null;
+  const __eoB26Gate = sheet => { const g = __eoBridgeWriteGate(${JSON.stringify(W.id)}, ${W.version}, ${JSON.stringify(XLSX_B26_BRIDGE_WRITE_RUNTIME_ENTRIES)}); if (!g.ok) return { ok: false, stage: 'bridge-write-gate', reason: g.reason, mutation: 'NONE' }; __b26 = { bridge: g.bridge, sheet }; return { ok: true }; };
+  const __eoB26Write = (args, requested) => __eoBridgeWrite(__b26.bridge, ${JSON.stringify(W.id)}, Object.assign({ sheet: __b26.sheet }, args), requested);
+  const __eoB26Fail = w => { const r = __eoBridgeRead(${JSON.stringify(R.id)}, ${R.version}, ${JSON.stringify(XLSX_B26_BRIDGE_WRITE_RUNTIME_ENTRIES)}, { sheet: __b26.sheet }, ${JSON.stringify(R.valueType)}); return { ok: false, stage: 'bridge-write', reason: w.reason, uncertain: w.uncertain === true, partial: w.partial === true, applied: w.applied || [], observed: r.ok ? { headerMargin: r.value.headerMargin, footerMargin: r.value.footerMargin, pageOrder: r.value.pageOrder } : 'UNOBSERVABLE:' + r.reason }; };
+`;
+}
+
+/**
  * The dispatch result of a B05 command, from the editor result: ok ONLY when the command completed AND its own body
  * returned { ok: true } (every Bridge WRITE accepted). A partial receipt -> partiallyApplied (the core records it
  * uncertain); any other failure -> not ok. Never APPLIED on the receipt alone: L1 still runs on the fresh READ.
@@ -231,6 +265,25 @@ function b05DispatchResult(r, tag = 'b05') {
 const b10DispatchResult = r => b05DispatchResult(r, 'b10');
 /** The same rule for a chart-style gapOverlap/seriesOrder WRITE command. */
 const chartStyleDispatchResult = r => b05DispatchResult(r, 'chartStyle');
+
+/**
+ * GH #367 3rd unit v6: the
+ * plain dispatch result for every command NOT wrapped by a Bridge-write-specific *DispatchResult
+ * above -- comments.cjs and every other family's lower() body that returns its own shaped
+ * `{ ok: boolean, stage, ... }` (36 families at last count; `grep -rl 'ok: false, stage:'
+ * src/adapters/xlsx/families/`). Before this, the plain branch reported ONLY the transport-level
+ * `r.ok` (did callCommand complete without throwing/timing out) and never looked at `r.result` --
+ * a script's own controlled, named failure (e.g. comments.cjs's `add-returned-null`) was silently
+ * reported as a successful dispatch, leaving the later observeFresh/verify read to (fail to) prove
+ * what actually happened -- the DISPATCHED_OUTCOME_UNKNOWN shape measured throughout this card.
+ */
+function plainDispatchResult(r) {
+  const res = r && r.result;
+  if (res && typeof res === 'object' && res.ok === false) {
+    return { ok: false, dispatched: true, outcome: res.stage ? `script-${res.stage}` : 'script-reported-failure', evidence: res, error: res.error || (r && r.error) || null };
+  }
+  return { ok: r && r.ok === true, dispatched: true, outcome: r && r.outcome, error: (r && r.error) || null };
+}
 
 /**
  * X-O05/3 (internal tracker; reviewed and accepted): the in-editor chart-style client, prepended
@@ -304,10 +357,124 @@ function chartDeleteBridgeWritePrelude() {
   const __eoChartDeleteFail = w => ({ ok: false, stage: 'bridge-write', reason: w.reason, uncertain: w.uncertain === true, mutation: w.mutation });
 `;
 }
+
+/**
+ * GH #346 AUTO-REPAIR Egyseg 3 (design docs/GH346-DPT-AUTO-REPAIR-DESIGN-20261104.md Dontesi pont 5):
+ * the in-editor dataPoint-style client, prepended ONLY to a set_chart_style command that writes the
+ * `dataPoint` target (every other command stays byte-identical) -- the SAME single-capability, bare-
+ * boolean-gate shape chartDeleteBridgeWritePrelude above uses (unlike chartStyleBridgeWritePrelude/
+ * seriesStyleBridgeWritePrelude, which share ONE gate between TWO capabilities): chart.series.
+ * dataPoint.style.write/v1 is the ONLY capability behind this target, gated on B29 (/27-ONLY, unlike
+ * B22's /12../27 or B24's /15../27 -- the SAME XLSX_B29_BRIDGE_WRITE_RUNTIME_ENTRIES unit 2 already
+ * pinned, core/runtime-identity.cjs + adapters/xlsx/runtime.cjs, `fbb08b5b`).
+ *   __eoDataPointStyleGate(sheet, chart)     the Bridge WRITE gate, ONCE, before any mutation
+ *   __eoDataPointStyleWrite(args)            the ONE write() of the command
+ *   __eoDataPointStyleFail(w)                the failure report: bridge reason, mutation NONE/UNKNOWN
+ *                                             -- NO diagnostic re-read here, same reasoning
+ *                                             chartDeleteBridgeWritePrelude's own header comment
+ *                                             records: classifyStyle's own fresh chart.series.style.
+ *                                             read/v1 read-and-compare re-observes on the next round.
+ */
+function dataPointStyleBridgeWritePrelude() {
+  const W = BRIDGE_WRITES.DATA_POINT_STYLE_WRITE;
+  return `${BRIDGE_CLIENT_SRC}${BRIDGE_WRITE_CLIENT_SRC}${BRIDGE_DATA_POINT_STYLE_WRITE_CLIENT_SRC}
+  let __dpsw = null;
+  const __eoDataPointStyleGate = (sheet, chart) => { const g = __eoBridgeWriteGate(${JSON.stringify(W.id)}, ${W.version}, ${JSON.stringify(XLSX_B29_BRIDGE_WRITE_RUNTIME_ENTRIES)}); if (!g.ok) return { ok: false, stage: 'bridge-write-gate', reason: g.reason, mutation: 'NONE' }; __dpsw = { bridge: g.bridge, sheet, chart }; return { ok: true }; };
+  const __eoDataPointStyleWrite = args => __eoBridgeDataPointStyleWrite(__dpsw.bridge, ${JSON.stringify(W.id)}, Object.assign({ sheet: __dpsw.sheet, chart: __dpsw.chart }, args));
+  const __eoDataPointStyleFail = w => ({ ok: false, stage: 'bridge-write', reason: w.reason, uncertain: w.uncertain === true, mutation: w.mutation });
+`;
+}
+/**
+ * GH #332-#335: table-property WRITE through the DS Bridge (sheet.table.write/v1, /19 ONLY) -- the driver's second line behind the
+ * adapter's table-props.B25_BRIDGE_WRITE_RUNTIMES: a command carrying meta.bridgeTableWrite is refused WITHOUT touching the editor on
+ * any other runtime (on /16../18 the capability does not exist). There is no fallback to the public API (it has no table setter).
+ */
+const B25_BRIDGE_WRITE_RUNTIMES = XLSX_B25_BRIDGE_WRITE_RUNTIME_IDS;
+
+/**
+ * The in-editor table-write client, prepended ONLY to a table-props command (every other command stays byte-identical):
+ *   __eoTableGate(sheet, table)   the Bridge WRITE gate, ONCE, before any mutation
+ *   __eoTableWrite(args)          the ONE write() of the command (its own receipt, parsed by __eoBridgeTableWrite)
+ *   __eoTableFail(w)              the failure report: bridge reason, uncertain, mutation NONE/UNKNOWN -- NO diagnostic re-read here,
+ *                                 the adapter's own classify() / tableReads loop re-observes fresh on the next round.
+ */
+function tableWriteBridgeWritePrelude() {
+  const W = BRIDGE_WRITES.TABLE_WRITE;
+  return `${BRIDGE_CLIENT_SRC}${BRIDGE_WRITE_CLIENT_SRC}${BRIDGE_TABLE_WRITE_CLIENT_SRC}
+  let __tw = null;
+  const __eoTableGate = () => { const g = __eoBridgeWriteGate(${JSON.stringify(W.id)}, ${W.version}, ${JSON.stringify(XLSX_B25_BRIDGE_WRITE_RUNTIME_ENTRIES)}); if (!g.ok) return { ok: false, stage: 'bridge-write-gate', reason: g.reason, mutation: 'NONE' }; __tw = { bridge: g.bridge }; return { ok: true }; };
+  const __eoTableWrite = args => __eoBridgeTableWrite(__tw.bridge, ${JSON.stringify(W.id)}, args);
+  const __eoTableFail = w => ({ ok: false, stage: 'bridge-write', reason: w.reason, uncertain: w.uncertain === true, mutation: w.mutation, observed: w.observed === undefined ? null : w.observed });
+`;
+}
+/**
+ * GH #338-#342: sheet protection WRITE through the DS Bridge (sheet.protection.write/v1 + sheet.cellProtection.write/v1, /22 ONLY) --
+ * the driver's second line behind the adapter's protection-write.B27_BRIDGE_WRITE_RUNTIMES: a command carrying
+ * meta.bridgeProtectionWrite (the capability id) is refused WITHOUT touching the editor on any other runtime. No public fallback
+ * exists (the public API has no protection setter, #299 PR-B01).
+ */
+const B27_BRIDGE_WRITE_RUNTIMES = XLSX_B27_BRIDGE_WRITE_RUNTIME_IDS;
+const PROTECTION_WRITE_IDS = Object.freeze([BRIDGE_WRITES.PROTECTION_WRITE.id, BRIDGE_WRITES.CELL_PROTECTION_WRITE.id]);
+
+/**
+ * The in-editor protection-write client, prepended ONLY to a protection command (every other command stays byte-identical):
+ *   __eoProtGate()                 the Bridge WRITE gate for the command's ONE capability, before any mutation
+ *   __eoProtWrite(args, requested) the ONE write() of the command (its receipt parsed by __eoBridgeProtectionWrite)
+ *   __eoProtFail(w)                the failure report: bridge reason, uncertain, mutation NONE/UNKNOWN -- the adapter re-reads.
+ */
+function protectionWriteBridgeWritePrelude(capabilityId) {
+  const W = Object.values(BRIDGE_WRITES).find(c => c.id === capabilityId);
+  return `${BRIDGE_CLIENT_SRC}${BRIDGE_WRITE_CLIENT_SRC}${BRIDGE_PROTECTION_WRITE_CLIENT_SRC}
+  let __pw = null;
+  const __eoProtGate = () => { const g = __eoBridgeWriteGate(${JSON.stringify(W.id)}, ${W.version}, ${JSON.stringify(XLSX_B27_BRIDGE_WRITE_RUNTIME_ENTRIES)}); if (!g.ok) return { ok: false, stage: 'bridge-write-gate', reason: g.reason, mutation: 'NONE' }; __pw = { bridge: g.bridge }; return { ok: true }; };
+  const __eoProtWrite = (args, requested) => __eoBridgeProtectionWrite(__pw.bridge, ${JSON.stringify(W.id)}, args, requested);
+  const __eoProtFail = w => ({ ok: false, stage: 'bridge-write', reason: w.reason, uncertain: w.uncertain === true, mutation: w.mutation });
+`;
+}
+/** The same dispatch rule for a protection WRITE command. */
+const protectionWriteDispatchResult = r => b05DispatchResult(r, 'protectionWrite');
+
+/**
+ * GH #338-#342 remainder (W3, Bridge /24 ONLY): the driver's second line behind the adapter's own
+ * workbook-protection-write.B28_BRIDGE_WRITE_RUNTIMES -- a command carrying meta.bridgeWorkbookProtectionWrite is
+ * refused WITHOUT touching the editor on any other runtime. No public fallback exists (same as /22's sheet axis).
+ */
+const B28_BRIDGE_WRITE_RUNTIMES = XLSX_B28_BRIDGE_WRITE_RUNTIME_IDS;
+
+/**
+ * The in-editor workbook-protection-write client, prepended ONLY to a workbook-protection command (every other
+ * command stays byte-identical):
+ *   __eoWbProtGate()                 the Bridge WRITE gate for workbook.protection.write/v1, before any mutation
+ *   __eoWbProtWrite(args, requested) the ONE write() of the command (its receipt parsed by __eoBridgeWorkbookProtectionWrite)
+ *   __eoWbProtFail(w)                the failure report: bridge reason, uncertain, mutation NONE/UNKNOWN -- the adapter re-reads.
+ */
+function workbookProtectionWriteBridgeWritePrelude() {
+  const W = BRIDGE_WRITES.WORKBOOK_PROTECTION_WRITE;
+  return `${BRIDGE_CLIENT_SRC}${BRIDGE_WRITE_CLIENT_SRC}${BRIDGE_WORKBOOK_PROTECTION_WRITE_CLIENT_SRC}
+  let __wpw = null;
+  const __eoWbProtGate = () => { const g = __eoBridgeWriteGate(${JSON.stringify(W.id)}, ${W.version}, ${JSON.stringify(XLSX_B28_BRIDGE_WRITE_RUNTIME_ENTRIES)}); if (!g.ok) return { ok: false, stage: 'bridge-write-gate', reason: g.reason, mutation: 'NONE' }; __wpw = { bridge: g.bridge }; return { ok: true }; };
+  const __eoWbProtWrite = (args, requested) => __eoBridgeWorkbookProtectionWrite(__wpw.bridge, ${JSON.stringify(W.id)}, args, requested);
+  const __eoWbProtFail = w => ({ ok: false, stage: 'bridge-write', reason: w.reason, uncertain: w.uncertain === true, mutation: w.mutation });
+`;
+}
+/** The same dispatch rule for a workbook-protection WRITE command. */
+const workbookProtectionWriteDispatchResult = r => b05DispatchResult(r, 'workbookProtectionWrite');
+
+/** The same dispatch rule for a table-property WRITE command. */
+const tableWriteDispatchResult = r => b05DispatchResult(r, 'tableWrite');
 /** The same dispatch rule for a chart-delete WRITE command. */
 const chartDeleteDispatchResult = r => b05DispatchResult(r, 'chartDelete');
 /** The same rule for a marker-symbol/line-style WRITE command (X-O05/5-C). */
 const seriesStyleDispatchResult = r => b05DispatchResult(r, 'seriesStyle');
+/**
+ * GH #346 AUTO-REPAIR Egyseg 3: dataPoint-style WRITE through the DS Bridge -- the adapter's second
+ * line behind charts.cjs's own B29_BRIDGE_WRITE_RUNTIMES (/27-ONLY: chart.series.dataPoint.style.
+ * write/v1 does not exist on any earlier runtime) -- a set_chart_style command carrying `dataPoint`
+ * (meta.bridgeDataPointStyleWrite) is refused WITHOUT touching the editor on any other runtime.
+ */
+const B29_BRIDGE_WRITE_RUNTIMES = XLSX_B29_BRIDGE_WRITE_RUNTIME_IDS;
+/** The same dispatch rule for a dataPoint-style WRITE command. */
+const dataPointStyleDispatchResult = r => b05DispatchResult(r, 'dataPointStyle');
 
 /**
  * The in-editor B03 client, prepended ONLY to a copy_sheet command (every other command stays byte-identical):
@@ -342,22 +509,38 @@ const b03DispatchResult = r => b05DispatchResult(r, 'b03');
  * rest of `command.body` is ever reached -- 'protection-changed-before-mutation', no DispatchResult wrapper (the
  * generic `dispatch()` branch, and the b05-style ones that happen to wrap this command too, both already treat a
  * non-{ok:true} body result as a clean failure; evidence.outcome still names the real reason either way).
+ *
+ * GH #338-#342 remainder (W2, docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md): a `{ workbook: true,
+ * expected }` check (from `protection-gate.cjs`'s new `workbookGate`) has no `sheet` key at all, so it cannot
+ * run through the sheet-scoped branch above unchanged -- it would read as `{ sheet: undefined }` against the
+ * WRONG (per-sheet) capability and compare against a shape that capability can never produce, failing the
+ * race on every workbook-protected task regardless of whether anything actually changed. Each check branches
+ * on `'workbook' in __c`: the workbook branch re-reads the NEW `workbook.protection.read/v1` capability
+ * (Bridge /24 only) with no args, the sheet branch is the pre-existing logic, byte-identical.
  */
 function protectionRacePrelude(checks) {
   const R = BRIDGE_CAPABILITIES.PROTECTION_READ;
+  const WB_R = BRIDGE_CAPABILITIES.WORKBOOK_PROTECTION_READ;
   // its own block: a bridge-write prelude in front of it declares the SAME top-level `const __eoBridgeRead`
   // (BRIDGE_CLIENT_SRC), and two of those in one callCommand body is a SyntaxError -- the block shadows instead
   return `{${BRIDGE_CLIENT_SRC}
   const __eoProtChecks = ${JSON.stringify(checks)};
   let __eoProtFail = null;
   for (const __c of __eoProtChecks) {
-    const __args = __c.range !== undefined ? { sheet: __c.sheet, range: __c.range } : { sheet: __c.sheet };
-    const __r = __eoBridgeRead(${JSON.stringify(R.id)}, ${R.version}, ${JSON.stringify(ACCEPTED_RUNTIMES.xlsx)}, __args, ${JSON.stringify(R.valueType)});
-    // the SAME shape the baseline was stored in: protectionReads (sheet-only) strips \`cells\` entirely
-    // (U4a's own scope); protectionRangeReads (a range given) keeps it whole -- a bare re-read's extra
-    // \`cells: null\` on the sheet-only axis would otherwise mismatch a snapshot that never carried it.
-    const __got = !__r.ok ? 'UNOBSERVABLE:' + __r.reason : (__c.range !== undefined ? __r.value : { protected: __r.value.protected, forbids: __r.value.forbids });
-    if (JSON.stringify(__got) !== JSON.stringify(__c.expected)) { __eoProtFail = { sheet: __c.sheet, range: __c.range || null }; break; }
+    const __got = 'workbook' in __c
+      ? (() => { const __r = __eoBridgeRead(${JSON.stringify(WB_R.id)}, ${WB_R.version}, ${JSON.stringify(ACCEPTED_RUNTIMES.xlsx)}, {}, ${JSON.stringify(WB_R.valueType)});
+                  // GH #338-#342 remainder (W2 review fix): the SAME strictness workbookGate's own malformed-read
+                  // branch now requires at planning -- a boolean-less re-read must NOT silently compare as a
+                  // mismatch-by-accident; it is named here, explicitly, the same way a bridge-read failure already is.
+                  if (!__r.ok) return 'UNOBSERVABLE:' + __r.reason;
+                  return typeof __r.value.lockStructure === 'boolean' ? { lockStructure: __r.value.lockStructure } : 'UNOBSERVABLE:malformed-read'; })()
+      : (() => { const __args = __c.range !== undefined ? { sheet: __c.sheet, range: __c.range } : { sheet: __c.sheet };
+                  const __r = __eoBridgeRead(${JSON.stringify(R.id)}, ${R.version}, ${JSON.stringify(ACCEPTED_RUNTIMES.xlsx)}, __args, ${JSON.stringify(R.valueType)});
+                  // the SAME shape the baseline was stored in: protectionReads (sheet-only) strips \`cells\` entirely
+                  // (U4a's own scope); protectionRangeReads (a range given) keeps it whole -- a bare re-read's extra
+                  // \`cells: null\` on the sheet-only axis would otherwise mismatch a snapshot that never carried it.
+                  return !__r.ok ? 'UNOBSERVABLE:' + __r.reason : (__c.range !== undefined ? __r.value : { protected: __r.value.protected, forbids: __r.value.forbids }); })();
+    if (JSON.stringify(__got) !== JSON.stringify(__c.expected)) { __eoProtFail = { sheet: __c.sheet || null, range: __c.range || null }; break; }
   }
   if (__eoProtFail) return { ok: false, stage: 'protection-race', outcome: 'protection-changed-before-mutation', sheet: __eoProtFail.sheet, range: __eoProtFail.range };
 }
@@ -494,11 +677,11 @@ const WHOLE_SHEET = 'A1:XFD1048576';
 function dependentsBridgeBody() {
   return `${BRIDGE_CLIENT_SRC}
 const rd = (cap, args) => __eoBridgeRead(cap.id, cap.version, ${JSON.stringify(ACCEPTED_RUNTIMES.xlsx)}, args, cap.valueType);
-const out = { names: null, validations: null };
+const out = { names: null, hiddenNames: null, validations: null };
 try {
   const dn = rd(${JSON.stringify(BRIDGE_CAPABILITIES.DEFINED_NAMES_READ)}, {});
-  if (!dn.ok) out.names = 'UNOBSERVABLE:' + dn.reason;
-  else if (!Array.isArray(dn.value)) out.names = 'UNOBSERVABLE:bridge-names-not-a-list';
+  if (!dn.ok) { out.names = 'UNOBSERVABLE:' + dn.reason; out.hiddenNames = out.names; }
+  else if (!Array.isArray(dn.value)) { out.names = 'UNOBSERVABLE:bridge-names-not-a-list'; out.hiddenNames = out.names; }
   else {
     // the OLD reader's exact filter: ref present, not hidden, name WITHOUT '_xlnm'. NOT the bridge's builtIn flag -- the engine
     // stores Print_Area / Print_Titles with isXLNM=true and the '_xlnm.' prefix STRIPPED, and the names family reads them here
@@ -507,8 +690,14 @@ try {
     const scopeKey = e => (e.scope.kind === 'workbook' ? -1 : e.scope.index);
     keep.sort((a, b) => (a.name > b.name ? 1 : a.name < b.name ? -1 : scopeKey(a) - scopeKey(b)));
     out.names = keep.map(e => ({ name: e.name, ref: e.refersTo, scopeSheet: e.scope.kind === 'workbook' ? null : e.scope.sheet }));
+    // GH #362 2nd unit (hidden-name collision): a SEPARATE, UNFILTERED list of the HIDDEN names (ref present) from
+    // the SAME dn.value, for the names family's write-planning collision search ONLY -- read_defined_names keeps
+    // consuming out.names above, byte-identical. '_xlnm'-named entries are excluded: they are RESERVED on the
+    // write side already (names.cjs), so they can never collide with a user-chosen identifier.
+    out.hiddenNames = dn.value.filter(e => e.refersTo !== null && e.hidden === true && e.name.indexOf('_xlnm') === -1)
+      .map(e => ({ name: e.name, scopeSheet: e.scope.kind === 'workbook' ? null : e.scope.sheet }));
   }
-} catch (err) { out.names = 'UNOBSERVABLE:bridge-names-threw'; }
+} catch (err) { out.names = 'UNOBSERVABLE:bridge-names-threw'; out.hiddenNames = out.names; }
 try {
   const v = {};
   for (const ws of (Api.GetSheets() || [])) {
@@ -555,12 +744,14 @@ const MAX_CHART_LABEL_POINTS = 300;
  */
 const PRINT_WIDE_FIELDS = ['oddFooter', 'vCenter', 'firstHeader', 'firstFooter', 'evenHeader', 'evenFooter', 'diffFirst', 'diffOddEven'].map(k => `, ${k}: v.${k}`).join('');
 
+/**
+ * GH #354/#355: the print LAYOUT field (header/footer margin mm, page order) through sheet.printSettings.read/v2 (/21 only),
+ * generated only when asked; its own axis, so a /19 runtime gaps ONLY this field (a named UNOBSERVABLE string), never the v1 half.
+ */
+const printLayoutField = asked => (asked ? `, layout: axis(() => { const x = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.PRINT_SETTINGS_READ_V2)}, { sheet: n }); return typeof x === 'string' ? x : { headerMargin: x.headerMargin, footerMargin: x.footerMargin, pageOrder: x.pageOrder }; })` : '');
+
 /** The D2 column-break field of the print READ: generated only when asked. B12 cutover: the column breaks through sheet.columnBreaks.read/v1 (same { id, man, min, max } list, null -> []). */
 const colBreaksField = asked => (asked ? `colBreaks: axis(() => bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.COL_BREAKS_READ)}, { sheet: n })), ` : '');
-
-/** A driver-side boolean, as the literal text to interpolate into a generated script (one shared
- * ternary, not one per flag -- qlty, readQuery complexity). */
-const boolText = v => (v ? 'true' : 'false');
 
 /** readQuery's optional, build-gated editor-side fragments (kept out of readQuery itself): '' unless switched on. */
 const pick = (on, js, otherwise) => (on === true ? js : otherwise);
@@ -573,7 +764,7 @@ const HYDRATE_JS = `${BRIDGE_HYDRATE_CLIENT_SRC}  // the sheet's view through th
 `;
 const HYDRATE_CALL_JS = "\n      const unhydrated = hydrate(ws);\n      if (unhydrated) return unhydrated;";
 
-function readQuery(windows = [], { panes = false, formatSheets = [], styleSheets = [], objectSheets = [], conditional = false, layout = null, validationRanges = [], cfRanges = [], runCells = [], arrayCells = [], sheetVisibility = false, filterSheets = [], chartSheets = [], pageSheets = [], pagePerSheet = false, printSheets = [], colBreaks = false, drawingSheets = [], usedRanges = true, printWide = false, drawingAnchor = false, hydrateSheets, protectionSheets = [], protectionRanges = [], commentSheets = []} = {}) {
+function readQuery(windows = [], { panes = false, formatSheets = [], styleSheets = [], objectSheets = [], conditional = false, layout = null, validationRanges = [], cfRanges = [], runCells = [], arrayCells = [], sheetVisibility = false, filterSheets = [], filterColor = false, chartSheets = [], chartStyle = false, pageSheets = [], pagePerSheet = false, printSheets = [], printLayout = false, colBreaks = false, drawingSheets = [], usedRanges = true, printWide = false, drawingAnchor = false, hydrateSheets, protectionSheets = [], protectionRanges = [], commentSheets = [], tableSheets = [], hyperlinkSheets = [], printPageSheets = [], workbookProtection = false, compiledStyleRanges = []} = {}) {
   return `
 try {
   const LIMIT = ${MAX_READ_CELLS};
@@ -755,7 +946,15 @@ ${PIVOT_READ}  for (const n of objectSheets) {
   }
   let panes;
   let active;
-${panes ? `  // Freeze panes (wave 4): the ACTIVE sheet name (public) and every sheet's OWN pane through the DS Bridge (B06),
+  let workbookProtectionRead;
+${workbookProtection ? `  // GH #338-#342 (/24 only, W1): the workbook-level structure lock, ONE value for the whole workbook (not
+  // per-sheet, unlike PROTECTION_READ above). On a pre-/24 runtime bridgeAxis degrades this to its own named
+  // 'UNOBSERVABLE:CAPABILITY_MISSING' string, never a guessed value -- the SAME convention protectionReads uses.
+  workbookProtectionRead = axis(() => {
+    const v = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.WORKBOOK_PROTECTION_READ)}, {});
+    return typeof v === 'string' ? v : { lockStructure: v.lockStructure };
+  });
+` : ''}${panes ? `  // Freeze panes (wave 4): the ACTIVE sheet name (public) and every sheet's OWN pane through the DS Bridge (B06),
   // never by activating a sheet. frozen = { state: 'frozen', row0, col0 } (the first UNfrozen cell, 0-based);
   // none = { state: 'none' }; any gap 'UNOBSERVABLE:<why>' -- never 'none'.
   {
@@ -772,6 +971,17 @@ ${panes ? `  // Freeze panes (wave 4): the ACTIVE sheet name (public) and every 
   const visibility = {};
   for (const s of sheets) {
     visibility[s.row.name] = axis(() => { const ws = Api.GetSheet(s.row.name); const v = ws && typeof ws.GetVisible === 'function' ? ws.GetVisible() : undefined; return typeof v === 'boolean' ? v : 'UNOBSERVABLE:visibility-not-boolean'; });
+  }
+  // GH #365 option C U2: for every sheet GetVisible() reported hidden (false), ALSO probe the new
+  // sheet.veryHidden.read/v1 Bridge capability through bridgeAxis -- a visible sheet can never be
+  // veryHidden (OOXML's own "at least one visible sheet" constraint, GetVisible() already told it
+  // apart correctly), so this is never asked for a sheet visibility already reported true.
+  // CAPABILITY_MISSING on any runtime without /29 degrades to the SAME 'UNOBSERVABLE:<reason>' every
+  // other not-yet-installed capability already degrades to (bridgeAxis's own convention).
+  const veryHiddenReads = {};
+  for (const s of sheets) {
+    if (visibility[s.row.name] !== false) continue;
+    veryHiddenReads[s.row.name] = axis(() => { const v = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.VERY_HIDDEN_READ)}, { sheet: s.row.name }); return typeof v === 'string' ? v : v.veryHidden; });
   }
 ` : ''}  // Validation (wave 6, set / clear_validation): the PUBLIC range-level reader (the source's measured getters, B-D16).
   // { type, alertStyle, operator, formula1, formula2, activeCell } | { absent: true } (no validation object, or type null /
@@ -849,13 +1059,24 @@ ${panes ? `  // Freeze panes (wave 4): the ACTIVE sheet name (public) and every 
       return list;
     });
   }
+  // GH #363 2nd unit: per named cell (<=200, enforced before dispatch), the conditional-format-EVALUATED
+  // fill -- through the DS Bridge sheet.cells.compiledStyle.read/v1 (candidate, NOT installed anywhere).
+  // bridgeAxis degrades the WHOLE axis to its own named 'UNOBSERVABLE:CAPABILITY_MISSING' on a pre-/28
+  // runtime, never a guessed value -- proven by this family's own pure test.
+  const compiledStyleReads = {};
+  const compiledStyleAsked = ${JSON.stringify((compiledStyleRanges || []).map(x => ({ sheet: String(x.sheet), range: String(x.range), cells: (x.cells || []).map(String) })))};
+  for (const w of compiledStyleAsked) {
+    compiledStyleReads[w.sheet + '!' + w.range] = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.COMPILED_STYLE_READ)}, { sheet: w.sheet, cells: w.cells });
+  }
 ${(runCells || []).length ? `  // X-F04 (M7 backlog, format_run): a cell's run-map, PUBLIC and
   // character-by-character -- GetCharacters(i, 1).GetFont(), the SAME fontAt(1,1)/(len,1)
   // boundary-check this file's own addStyle() font reader already uses, just called on EVERY
   // character and merging consecutive identical font-tuples. 'UNOBSERVABLE:text-too-long' is
-  // its own named ceiling (256 accepted as a TEMPORARY value, pending a LIVE
-  // timing measurement) -- NOT a guess at a longer text's runs, and NOT a silent truncation.
-  const RUN_MAP_CHAR_CEILING = 256;
+  // its own named ceiling (GH #364: the LIVE timing measurement -- docs/GH364-RUN-FORMAT-CHAR-
+  // CEILING-SOURCE-CONTRACT-20261105.md -- found 1024 SAFE, 10240 MARGINAL; 1024 raised from the
+  // prior TEMPORARY 256, still not the final word on larger texts) -- NOT a guess at a longer
+  // text's runs, and NOT a silent truncation.
+  const RUN_MAP_CHAR_CEILING = 1024;
   const runReads = {};
   const runAsked = ${JSON.stringify((runCells || []).map(x => ({ sheet: String(x.sheet), cell: String(x.cell) })))};
   for (const w of runAsked) {
@@ -921,7 +1142,10 @@ ${(runCells || []).length ? `  // X-F04 (M7 backlog, format_run): a cell's run-m
       if (typeof ids === 'string') return ids;
       if (!ids || ids.range !== addrOf(afRange) || !Array.isArray(ids.fields) || ids.fields.length !== fs.length) return 'UNOBSERVABLE:field-identity-mismatch';
       fs.forEach((f, i) => filters.push({ field: ids.fields[i], on: f.GetOn(), operator: f.GetOperator(), criteria1: f.GetCriteria1(), criteria2: f.GetCriteria2() }));
-      return { range: addrOf(afRange), filters };
+${filterColor ? `      // GH #344: the colour of a COLOUR filter (no public getter) through sheet.autoFilter.colorFilter.read/v1 (/21 only), only when one is present;
+      // its own value: a /19 runtime gaps ONLY the colours (a named string), never the filters
+      if (filters.some(f => f.operator === 'xlFilterCellColor' || f.operator === 'xlFilterFontColor')) return { range: addrOf(afRange), filters, colours: bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.COLOR_FILTER_READ)}, { sheet: n }) };
+` : ''}      return { range: addrOf(afRange), filters };
     });
   }
 ${(commentSheets || []).length ? `  // GH #300 K1 (read_comments): every comment of the asked sheets through the PUBLIC getters (GetText / GetAuthorName /
@@ -1089,8 +1313,19 @@ ${(commentSheets || []).length ? `  // GH #300 K1 (read_comments): every comment
         // gridlinesColor above -- the Bridge handler itself checks the chart is bar-typed (the
         // LIVE-confirmed scope) and names its own reason on every other type, never a guess.
         const gapOverlap = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.GAP_OVERLAP_READ)}, { sheet: n, chart: name });
-        return { name, type, title: c.GetTitle(), legend: c.GetLegendPos(), series,
-          horAxisTitle: c.GetHorAxisTitle(), verAxisTitle: c.GetVerAxisTitle(), dataLabels: c.GetDataLabels(), effectiveLabels, gridlinesColor, gapOverlap };
+${chartStyle ? `        // GH #346: the fill / outline of the six style targets (no public getter) through chart.series.style.read/v1 (/21 only), only when
+        // asked; each target its own value (a /19 runtime: a named string per target). Data points by the SAME bound as effectiveLabels.
+        const styles = {};
+        for (const t of ['chart', 'plotArea', 'title', 'legend']) styles[t] = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.CHART_STYLE_READ)}, { sheet: n, chart: name, target: t });
+        series.forEach((s, si) => { s.style = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.CHART_STYLE_READ)}, { sheet: n, chart: name, target: 'series', series: si }); });
+        let pointStyles;
+        if (typeof effectiveLabels === 'string') pointStyles = effectiveLabels;
+        else {
+          pointStyles = {};
+          series.forEach((s, si) => { for (let pi = 0; pi < pointCounts[si]; pi += 1) pointStyles[si + ':' + pi] = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.CHART_STYLE_READ)}, { sheet: n, chart: name, target: 'dataPoint', series: si, point: pi }); });
+        }
+` : ''}        return { name, type, title: c.GetTitle(), legend: c.GetLegendPos(), series,
+          horAxisTitle: c.GetHorAxisTitle(), verAxisTitle: c.GetVerAxisTitle(), dataLabels: c.GetDataLabels(), effectiveLabels, gridlinesColor, gapOverlap${chartStyle ? ', styles, pointStyles' : ''} };
       });
       const pivots = (ws.GetAllPivotTables() || []).map(p => p.GetName());
       return { charts, pivots };
@@ -1166,7 +1401,7 @@ ${(printSheets || []).length ? `  const printAsked = ${JSON.stringify((printShee
       const v = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.PRINT_SETTINGS_READ)}, { sheet: n });
       if (typeof v === 'string') return v;
       return { fitW: v.fitW, fitH: v.fitH, fitFlag: v.fitFlag, oddHeader: v.oddHeader,
-        rowBreaks: v.rowBreaks, ${colBreaksField(colBreaks || printWide)}useFirstPage: v.useFirstPage, firstPage: v.firstPage, hCenter: v.hCenter, scale: v.scale, width: v.width, height: v.height${printWide ? PRINT_WIDE_FIELDS : ''} };
+        rowBreaks: v.rowBreaks, ${colBreaksField(colBreaks || printWide)}useFirstPage: v.useFirstPage, firstPage: v.firstPage, hCenter: v.hCenter, scale: v.scale, width: v.width, height: v.height${printWide ? PRINT_WIDE_FIELDS : ''}${printLayoutField(printLayout)} };
     });
   }
 ` : ''}  // Sheet protection (GH #326 / #327, U4a client-wiring only): sheet.protection.read/v1 (B/17); generated only
@@ -1198,7 +1433,59 @@ ${(protectionRanges || []).length ? `  const protectionRangeAsked = ${JSON.strin
       return typeof v === 'string' ? v : { protected: v.protected, forbids: v.forbids, cells: v.cells };
     });
   }
-` : ''}  return { ok: true, sheets: sheets.map(s => s.row), cells, truncated, unsupported, objects, conditional, layout, panes, active, validationReads, cfReads, ${(runCells || []).length ? 'runReads, ' : ''}${(arrayCells || []).length ? 'arrayReads, ' : ''}${sheetVisibility ? 'visibility, ' : ''}filterReads, ${(commentSheets || []).length ? 'commentReads, ' : ''}chartReads, pageReads, printReads, drawingReads, protectionReads, protectionRangeReads };
+` : ''}  // GH #298 D (read_tables): every Excel Table of the asked sheets through sheet.tables.read/v1 (B/18);
+  // generated only when asked, '*' = every sheet. { tables: [...] }, document order, each already shaped by the
+  // bridge handler itself (name, ref, headerRow, totalsRow, columns, style, autoFilter). On a /16 or /17 runtime
+  // bridgeAxis degrades the whole axis to its own named 'UNOBSERVABLE:CAPABILITY_MISSING' string, never a
+  // guessed value -- the SAME convention protectionReads above already uses.
+  // GH #361 route probe, route (c): for every table that carries autoFilter:true, ALSO try
+  // sheet.table.autoFilter.criteria.read/v1 (a CANDIDATE capability, not installed anywhere -- see
+  // ds-bridge.cjs's own comment) and attach its raw result as autoFilterDetail. On any runtime without it,
+  // bridgeAxis degrades to the SAME 'UNOBSERVABLE:CAPABILITY_MISSING' string every other not-yet-installed
+  // capability already degrades to -- tables-read.cjs's projection keeps today's behaviour in that case.
+  const tableReads = {};
+${(tableSheets || []).length ? `  const tableAsked = ${JSON.stringify((tableSheets || []).map(String))};
+  for (const n of (tableAsked.includes('*') ? sheets.map(s => s.row.name) : tableAsked)) {
+    tableReads[n] = axis(() => {
+      const ws = Api.GetSheet(n);
+      if (!ws || ws.GetName() !== n) return 'UNOBSERVABLE:sheet-missing';
+      const v = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.TABLES_READ)}, { sheet: n });
+      if (typeof v === 'string') return v;
+      const tables = v.tables.map(t => (t.autoFilter === true
+        ? { ...t, autoFilterDetail: bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.TABLE_AUTOFILTER_CRITERIA_READ)}, { sheet: n, table: t.name }) }
+        : t));
+      return { tables };
+    });
+  }
+` : ''}  // GH #300 L1 (read_hyperlinks): every hyperlink of the asked sheets through sheet.hyperlinks.read/v1
+  // (B/18); generated only when asked, '*' = every sheet. { links: [...] }, row-then-column order, each already
+  // shaped by the bridge handler itself (ref, address, location, tooltip, kind). On a /16 or /17 runtime
+  // bridgeAxis degrades the whole axis to its own named 'UNOBSERVABLE:CAPABILITY_MISSING' string, never a
+  // guessed value -- the SAME convention tableReads above already uses.
+  const hyperlinkReads = {};
+${(hyperlinkSheets || []).length ? `  const hyperlinkAsked = ${JSON.stringify((hyperlinkSheets || []).map(String))};
+  for (const n of (hyperlinkAsked.includes('*') ? sheets.map(s => s.row.name) : hyperlinkAsked)) {
+    hyperlinkReads[n] = axis(() => {
+      const ws = Api.GetSheet(n);
+      if (!ws || ws.GetName() !== n) return 'UNOBSERVABLE:sheet-missing';
+      const v = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.HYPERLINKS_READ)}, { sheet: n });
+      return typeof v === 'string' ? v : { links: v.links };
+    });
+  }
+` : ''}${(printPageSheets || []).length ? `  // GH #356/#357 (read_print_rendering): the rendered print page count of each asked sheet through
+  // sheet.printPageCount.read/v1 (/23 only) -- the editor's own layout under the sheet's stored print settings, the live
+  // model never written (the handler counts on a clone of the print options, History off). { pages }, or the bridge's own
+  // named reason (sheet-hidden, page-count-capped, CAPABILITY_MISSING on /16../22) -- never a 0 for a gap, never a guess.
+  const printPageReads = {};
+  for (const n of ${JSON.stringify((printPageSheets || []).map(String))}) {
+    printPageReads[n] = axis(() => {
+      const ws = Api.GetSheet(n);
+      if (!ws || ws.GetName() !== n) return 'UNOBSERVABLE:sheet-missing';
+      const v = bridgeAxis(${JSON.stringify(BRIDGE_CAPABILITIES.PRINT_PAGE_COUNT_READ)}, { sheet: n });
+      return typeof v === 'string' ? v : { pages: v.pages };
+    });
+  }
+` : ''}  return { ok: true, sheets: sheets.map(s => s.row), cells, truncated, unsupported, objects, conditional, layout, panes, active, workbookProtectionRead, validationReads, cfReads, compiledStyleReads, ${(runCells || []).length ? 'runReads, ' : ''}${(arrayCells || []).length ? 'arrayReads, ' : ''}${sheetVisibility ? 'visibility, veryHiddenReads, ' : ''}filterReads, ${(commentSheets || []).length ? 'commentReads, ' : ''}${(tableSheets || []).length ? 'tableReads, ' : ''}${(hyperlinkSheets || []).length ? 'hyperlinkReads, ' : ''}${(printPageSheets || []).length ? 'printPageReads, ' : ''}chartReads, pageReads, printReads, drawingReads, protectionReads, protectionRangeReads };
 } catch (err) { return { ok: false, error: String(err) }; }
 `;
 }
@@ -1425,16 +1712,22 @@ function tieredPayload(p, g, tier, runtime) {
   if (p.conditional !== undefined) out.conditional = p.conditional;
   if (p.filterReads && Object.keys(p.filterReads).length) out.filterReads = p.filterReads;
   if (p.commentReads && Object.keys(p.commentReads).length) out.commentReads = p.commentReads;
+  if (p.tableReads && Object.keys(p.tableReads).length) out.tableReads = p.tableReads;
+  if (p.hyperlinkReads && Object.keys(p.hyperlinkReads).length) out.hyperlinkReads = p.hyperlinkReads;
+  if (p.printPageReads && Object.keys(p.printPageReads).length) out.printPageReads = p.printPageReads;
   // X-L13/6 fix: the same per-family extras readLive's non-tiered branch already forwards (lines ~1280-1284) --
   // T1's readQuery() returns these on `p` whenever TIERED_EXTRAS asked for them, but the tiered branch dropped
   // them on the floor, so eligibility passed while the family's own gate/classify still saw "not-read"
   if (p.panes !== undefined) { out.panes = p.panes; out.active = p.active; }
+  if (p.workbookProtectionRead !== undefined) out.workbookProtectionRead = p.workbookProtectionRead;
   if (p.validationReads && Object.keys(p.validationReads).length) out.validationReads = p.validationReads;
   if (p.cfReads && Object.keys(p.cfReads).length) out.cfReads = p.cfReads;
+  if (p.compiledStyleReads && Object.keys(p.compiledStyleReads).length) out.compiledStyleReads = p.compiledStyleReads;
   if (p.protectionRangeReads && Object.keys(p.protectionRangeReads).length) out.protectionRangeReads = p.protectionRangeReads;
   if (p.protectionReads && Object.keys(p.protectionReads).length) out.protectionReads = p.protectionReads;
   if (p.runReads && Object.keys(p.runReads).length) out.runReads = p.runReads;
   if (p.visibility && typeof p.visibility === 'object') out.visibility = p.visibility;
+  if (p.veryHiddenReads && typeof p.veryHiddenReads === 'object') out.veryHiddenReads = p.veryHiddenReads;
   // X-L13/8 (zero LIVE r1 finding): the SAME class of bug the X-L13/6 fix above already names --
   // `layout` joined TIERED_EXTRAS but this branch never forwarded it, so layout_range's own L1
   // (gate()/verifyPrimitive(), which reads primary.layout[sheet]) saw "not-read" under BOUNDED.
@@ -1456,6 +1749,12 @@ function sessionUserOf(config) {
 }
 
 function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs = 90000, pollMs = 100, commandTimeoutMs = 15000,
+  // The open() wait's FIRST attempt on the exact no-ds-event failure (NO_DS_EVENT_PATTERN) is bounded short rather
+  // than the full timeoutMs -- measured live, the close-transition race this guards against (a prior editor
+  // session's close racing a new product open) resolves (lock release + etag change) within 6.6-8.1s of the prior
+  // session's close, and a normal open otherwise takes ~3-3.5s; 15s leaves ~4x margin over that. The RETRY always
+  // gets the full timeoutMs (never shortened), so a genuinely slow large-document open is not newly broken.
+  shortOpenMs = 15000,
   // the fixed bound for the DS save acknowledgement at close (P1, owner GO owner channel); never extended at run time
   closeAckTimeoutMs = 30000,
   // forceSave (owner GO, owner channel): the fixed bounds for the precondition (the last save acked) and the confirmation
@@ -1502,7 +1801,7 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
     const r = await runInEditor(dependencyBody()).catch(err => ({ ok: false, outcome: `threw:${String(err && err.message || err).slice(0, 80)}` }));
     const d = r && r.ok ? r.result : null;
     payload.dependents = d && typeof d === 'object' && 'names' in d && 'validations' in d
-      ? { names: d.names, validations: d.validations }
+      ? { names: d.names, validations: d.validations, hiddenNames: d.hiddenNames }
       : `UNOBSERVABLE:dependency-read-failed:${(r && r.outcome) || 'unexpected-shape'}`;
     // true only when neither axis was refused by the bridge's own identity / capability gate
     const gated = x => typeof x === 'string' && /^UNOBSERVABLE:(BRIDGE_UNAVAILABLE|MANIFEST_MALFORMED|BRIDGE_VERSION_MISMATCH|RUNTIME_VERSION_MISMATCH|PATCH_VERSION_MISMATCH|CAPABILITY_MISSING|CAPABILITY_VERSION_MISMATCH)$/.test(x);
@@ -1565,56 +1864,69 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
     async open({ fileId, operation = null }) {
       const loaded = loadPlaywright();
       if (!loaded.ok) return { ok: false, detail: loaded.detail || 'playwright unavailable' };
-      try {
-        state.fileId = String(fileId);
-        state.config = await fetchConfig(fileId, operation);
-        state.host = await startHost(state.config);
-        state.browser = await loaded.pw.chromium.launch();
-        state.page = await state.browser.newPage({ viewport: { width: 1400, height: 900 } });
-        // the editor <-> DS socket of THIS session: the config's DS host and document key (the socket's shardkey)
-        state.mutated = false;
-        state.forceSaveOp = null;
-        state.saveAck = observePage(state.page, dsIdentity(state.config));
-        await state.page.goto(state.host.url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      const attemptOpen = async effectiveTimeoutMs => {
         try {
-          await state.page.waitForFunction(() => window.__ready === true || window.__error, null, { timeout: timeoutMs, polling: pollMs });
-        } catch {
-          // GitHub #77: this is reachable only when NEITHER __ready NOR __error ever became truthy in the
-          // whole window (onError sets __error, so it resolves the wait above, not this catch) -- read back
-          // onWarning/onInfo, or confirm literally nothing arrived
-          const e = new Error(openWaitFailureDetail(await readDsOpenState(state.page)));
-          e.name = 'EditorWaitTimeout';
-          throw e;
-        }
-        // Condition-based: the editor is open once its live spreadsheet model names its active sheet.
-        const deadline = Date.now() + timeoutMs;
-        while (Date.now() < deadline) {
-          state.frame = state.page.frames().find(f => /spreadsheeteditor/.test(f.url())) || null;
-          if (state.frame) {
-            const r = await runInEditor('return Api.GetActiveSheet().GetName();').catch(() => null);
-            if (r && r.ok && typeof r.result === 'string' && r.result) { await establishRuntime(); return { ok: true, id: `eo-${fileId}-${Date.now()}` }; }
+          state.fileId = String(fileId);
+          state.config = await fetchConfig(fileId, operation);
+          state.host = await startHost(state.config);
+          state.browser = await loaded.pw.chromium.launch();
+          state.page = await state.browser.newPage({ viewport: { width: 1400, height: 900 } });
+          // the editor <-> DS socket of THIS session: the config's DS host and document key (the socket's shardkey)
+          state.mutated = false;
+          state.forceSaveOp = null;
+          state.saveAck = observePage(state.page, dsIdentity(state.config));
+          await state.page.goto(state.host.url, { waitUntil: 'domcontentloaded', timeout: effectiveTimeoutMs });
+          try {
+            await state.page.waitForFunction(() => window.__ready === true || window.__error, null, { timeout: effectiveTimeoutMs, polling: pollMs });
+          } catch {
+            // GitHub #77: this is reachable only when NEITHER __ready NOR __error ever became truthy in the
+            // whole window (onError sets __error, so it resolves the wait above, not this catch) -- read back
+            // onWarning/onInfo, or confirm literally nothing arrived
+            const e = new Error(openWaitFailureDetail(await readDsOpenState(state.page)));
+            e.name = 'EditorWaitTimeout';
+            throw e;
           }
-          await state.page.waitForTimeout(pollMs);
+          // Condition-based: the editor is open once its live spreadsheet model names its active sheet.
+          const deadline = Date.now() + effectiveTimeoutMs;
+          while (Date.now() < deadline) {
+            state.frame = state.page.frames().find(f => /spreadsheeteditor/.test(f.url())) || null;
+            if (state.frame) {
+              const r = await runInEditor('return Api.GetActiveSheet().GetName();').catch(() => null);
+              if (r && r.ok && typeof r.result === 'string' && r.result) { await establishRuntime(); return { ok: true, id: `eo-${fileId}-${Date.now()}` }; }
+            }
+            await state.page.waitForTimeout(pollMs);
+          }
+          // GitHub #77: the ready/error wait above resolves as soon as DS reports EITHER __ready or __error --
+          // an onError does NOT fail-fast (whether onDocumentReady still arrives afterward is NEM-MERT, so a
+          // successful open must not be cut short), which means a real onError lands HERE, not in the catch
+          // below. Read back whatever DS reported before the generic message swallows it.
+          // the DS description is page-reported text -- redacted like every other detail that leaves open()
+          const dsDetail = (state.host ? state.host.redact : (x => x))(openWaitFailureDetail(await readDsOpenState(state.page)));
+          await teardown();
+          return { ok: false, detail: `live spreadsheet model not ready (${dsDetail})` };
+        } catch (err) {
+          // M11.3b.1: a navigation error carries the host URL -- the session token is redacted before anything leaves
+          const redact = state.host ? state.host.redact : (x => x);
+          await teardown();
+          // a controlled config-source refusal (M11.2) keeps its product error class; the editor was never started
+          if (err && err.name === 'ConfigSourceError') return { ok: false, code: err.code, detail: err.detail || err.code };
+          // GitHub #77: the ready/error wait timed out -- err.message already names the DS's own code/description,
+          // what onWarning/onInfo recorded, or 'no-ds-event' (config-host.cjs openWaitFailureDetail)
+          if (err && err.name === 'EditorWaitTimeout') return { ok: false, detail: redact(err.message) };
+          return { ok: false, detail: redact(String(err && err.message || err)) };
         }
-        // GitHub #77: the ready/error wait above resolves as soon as DS reports EITHER __ready or __error --
-        // an onError does NOT fail-fast (whether onDocumentReady still arrives afterward is NEM-MERT, so a
-        // successful open must not be cut short), which means a real onError lands HERE, not in the catch
-        // below. Read back whatever DS reported before the generic message swallows it.
-        // the DS description is page-reported text -- redacted like every other detail that leaves open()
-        const dsDetail = (state.host ? state.host.redact : (x => x))(openWaitFailureDetail(await readDsOpenState(state.page)));
-        await teardown();
-        return { ok: false, detail: `live spreadsheet model not ready (${dsDetail})` };
-      } catch (err) {
-        // M11.3b.1: a navigation error carries the host URL -- the session token is redacted before anything leaves
-        const redact = state.host ? state.host.redact : (x => x);
-        await teardown();
-        // a controlled config-source refusal (M11.2) keeps its product error class; the editor was never started
-        if (err && err.name === 'ConfigSourceError') return { ok: false, code: err.code, detail: err.detail || err.code };
-        // GitHub #77: the ready/error wait timed out -- err.message already names the DS's own code/description,
-        // what onWarning/onInfo recorded, or 'no-ds-event' (config-host.cjs openWaitFailureDetail)
-        if (err && err.name === 'EditorWaitTimeout') return { ok: false, detail: redact(err.message) };
-        return { ok: false, detail: redact(String(err && err.message || err)) };
-      }
+      };
+      const first = await attemptOpen(Math.min(shortOpenMs, timeoutMs));
+      // A no-ds-event failure within the SHORT window is, by the measured close-transition timing (lock release +
+      // etag change 6.6-8.1s after a prior session's close), most likely a still-settling previous session --
+      // retry ONCE, with a fresh browser/page, at the FULL timeoutMs. ONLY this exact failure shape is retried
+      // (dispatched=false: nothing was sent to the DS yet, so a repeated open is structurally safe) -- every other
+      // open() failure (onError, ds-state-unreadable, a config-source refusal, a navigation error, ...) returns
+      // after the first attempt, unchanged.
+      if (first.ok || first.code || !NO_DS_EVENT_PATTERN.test(first.detail || '')) return first;
+      const second = await attemptOpen(timeoutMs);
+      if (second.ok || second.code || !NO_DS_EVENT_PATTERN.test(second.detail || '')) return second;
+      return { ok: false, detail: `${second.detail} (after the second attempt)` };
     },
 
     /**
@@ -1735,7 +2047,7 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
       const tier = await tierFor(runInEditor, request);
       if (tier.bounded) request = request.boundedVariant;
       const wantDeps = !!(request && request.dependents);
-      const opts = { panes: !!(request && request.panes), validationRanges: (request && request.validationRanges) || [], cfRanges: (request && request.cfRanges) || [], runCells: (request && request.runCells) || [], arrayCells: (request && request.arrayCells) || [], sheetVisibility: !!(request && request.sheetVisibility), filterSheets: (request && request.filterSheets) || [], chartSheets: (request && request.chartSheets) || [], pageSheets: (request && request.pageSheets) || [], pagePerSheet, printSheets: (request && request.printSheets) || [], printWide: true, colBreaks: !!(request && request.colBreaks), drawingSheets: (request && request.drawingSheets) || [], drawingAnchor, hydrateSheets, protectionSheets: (request && request.protectionSheets) || [], protectionRanges: (request && request.protectionRanges) || [], commentSheets: (request && request.commentSheets) || [], styleSheets: (request && request.styleSheets) || [], formatSheets: (request && request.formatSheets) || [], objectSheets: wantDeps ? ['*'] : ((request && request.objectSheets) || []), conditional: wantDeps, layout: (request && request.layout) || null };
+      const opts = { panes: !!(request && request.panes), validationRanges: (request && request.validationRanges) || [], cfRanges: (request && request.cfRanges) || [], compiledStyleRanges: (request && request.compiledStyleRanges) || [], runCells: (request && request.runCells) || [], arrayCells: (request && request.arrayCells) || [], sheetVisibility: !!(request && request.sheetVisibility), filterSheets: (request && request.filterSheets) || [], filterColor: !!(request && request.filterColor), chartSheets: (request && request.chartSheets) || [], chartStyle: !!(request && request.chartStyle), pageSheets: (request && request.pageSheets) || [], pagePerSheet, printSheets: (request && request.printSheets) || [], printLayout: !!(request && request.printLayout), printWide: true, colBreaks: !!(request && request.colBreaks), drawingSheets: (request && request.drawingSheets) || [], drawingAnchor, hydrateSheets, protectionSheets: (request && request.protectionSheets) || [], protectionRanges: (request && request.protectionRanges) || [], commentSheets: (request && request.commentSheets) || [], tableSheets: (request && request.tableSheets) || [], hyperlinkSheets: (request && request.hyperlinkSheets) || [], printPageSheets: (request && request.printPageSheets) || [], workbookProtection: !!(request && request.workbookProtection), styleSheets: (request && request.styleSheets) || [], formatSheets: (request && request.formatSheets) || [], objectSheets: wantDeps ? ['*'] : ((request && request.objectSheets) || []), conditional: wantDeps, layout: (request && request.layout) || null };
       if (tier.tier === 'window') {
         const w = await runRead(readQuery((request && request.windows) || [], { ...opts, usedRanges: false }));
         const p = w.ok ? w.result : null;
@@ -1755,15 +2067,21 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
       if (tier.tier === 'refused' && p.truncated) payload.unsupported = withLimitNote(p.unsupported, tier);
       if (p.layout !== undefined) payload.layout = p.layout;
       if (p.panes !== undefined) { payload.panes = p.panes; payload.active = p.active; }
+      if (p.workbookProtectionRead !== undefined) payload.workbookProtectionRead = p.workbookProtectionRead;
       if (p.validationReads && Object.keys(p.validationReads).length) payload.validationReads = p.validationReads;
       if (p.cfReads && Object.keys(p.cfReads).length) payload.cfReads = p.cfReads;
+      if (p.compiledStyleReads && Object.keys(p.compiledStyleReads).length) payload.compiledStyleReads = p.compiledStyleReads;
       if (p.protectionRangeReads && Object.keys(p.protectionRangeReads).length) payload.protectionRangeReads = p.protectionRangeReads;
       if (p.protectionReads && Object.keys(p.protectionReads).length) payload.protectionReads = p.protectionReads;
       if (p.runReads && Object.keys(p.runReads).length) payload.runReads = p.runReads;
       if (p.arrayReads && Object.keys(p.arrayReads).length) payload.arrayReads = p.arrayReads;
       if (p.visibility && typeof p.visibility === 'object') payload.visibility = p.visibility;
+      if (p.veryHiddenReads && typeof p.veryHiddenReads === 'object') payload.veryHiddenReads = p.veryHiddenReads;
       if (p.filterReads && Object.keys(p.filterReads).length) payload.filterReads = p.filterReads;
       if (p.commentReads && Object.keys(p.commentReads).length) payload.commentReads = p.commentReads;
+      if (p.tableReads && Object.keys(p.tableReads).length) payload.tableReads = p.tableReads;
+      if (p.hyperlinkReads && Object.keys(p.hyperlinkReads).length) payload.hyperlinkReads = p.hyperlinkReads;
+      if (p.printPageReads && Object.keys(p.printPageReads).length) payload.printPageReads = p.printPageReads;
       if (request && request.sessionUser) payload.sessionUser = sessionUserOf(state.config) || 'UNOBSERVABLE:no-session-user';
       if (p.chartReads && Object.keys(p.chartReads).length) payload.chartReads = p.chartReads;
       if (p.drawingReads && Object.keys(p.drawingReads).length) payload.drawingReads = p.drawingReads;
@@ -1786,6 +2104,10 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
       if (b10 && !(command.meta.bridgePrintWrite === true && B10_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId))) {
         return { ok: false, dispatched: false, outcome: 'b10-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
       }
+      const b26 = b10 && command.meta.bridgePrintLayoutWrite === true;
+      if (b26 && !B26_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId)) {
+        return { ok: false, dispatched: false, outcome: 'b26-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
+      }
       const b05 = !!(command && command.meta && command.meta.family === 'format' && command.meta.bridgeAlignExtWrite === true);
       if (b05 && !B05_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId)) {
         return { ok: false, dispatched: false, outcome: 'b05-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
@@ -1803,6 +2125,21 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
       if (b23 && !B23_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId)) {
         return { ok: false, dispatched: false, outcome: 'b23-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
       }
+      // GH #332-#335: a single boolean gate (sheet.table.write/v1 exists on /19 ONLY)
+      const b25 = !!(command && command.meta && command.meta.family === 'table-props' && command.meta.bridgeTableWrite === true);
+      if (b25 && !B25_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId)) {
+        return { ok: false, dispatched: false, outcome: 'b25-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
+      }
+      // GH #338-#342: the capability id travels in meta; both protection writes exist on /22 ONLY
+      const protCapId = command && command.meta && command.meta.family === 'protection' ? command.meta.bridgeProtectionWrite : null;
+      if (protCapId && (!PROTECTION_WRITE_IDS.includes(protCapId) || !B27_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId))) {
+        return { ok: false, dispatched: false, outcome: 'b27-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
+      }
+      // GH #338-#342 remainder (W3): a single boolean gate (workbook.protection.write/v1 exists on /24 ONLY)
+      const b28 = !!(command && command.meta && command.meta.family === 'workbook-protection' && command.meta.bridgeWorkbookProtectionWrite === true);
+      if (b28 && !B28_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId)) {
+        return { ok: false, dispatched: false, outcome: 'b28-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
+      }
       // X-O05/5-C: the SAME meta-carries-the-capability-ID shape as chart-style above (two
       // capabilities, one gate) -- but on B24_BRIDGE_WRITE_RUNTIMES (/15-ONLY), a DIFFERENT meta
       // key (bridgeSeriesStyleWrite) so this never collides with the B22 chart-style gate above.
@@ -1810,6 +2147,13 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
       const seriesStyleCap = seriesStyleCapId ? Object.values(BRIDGE_WRITES).find(c => c.id === seriesStyleCapId) : null;
       if (seriesStyleCapId && (!seriesStyleCap || !B24_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId))) {
         return { ok: false, dispatched: false, outcome: 'series-style-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
+      }
+      // GH #346 AUTO-REPAIR Egyseg 3: a single boolean gate, like b23/b25/b28 above (unlike
+      // chart-style/series-style's two-capability lookup) -- `dataPoint` has exactly ONE Bridge
+      // WRITE behind it, on B29_BRIDGE_WRITE_RUNTIMES (/27-ONLY).
+      const dataPointStyleWrite = !!(command && command.meta && command.meta.family === 'charts' && command.meta.bridgeDataPointStyleWrite === true);
+      if (dataPointStyleWrite && !B29_BRIDGE_WRITE_RUNTIMES.includes(state.runtimeId)) {
+        return { ok: false, dispatched: false, outcome: 'b29-bridge-write-runtime-not-proven', runtime: state.runtimeId, refusal: state.runtimeRefusal };
       }
       if (!command || command.kind !== 'callCommand' || typeof command.body !== 'string') {
         return { ok: false, dispatched: false, detail: 'unsupported command kind' };
@@ -1828,13 +2172,17 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
       }
       const body = (raceChecks ? protectionRacePrelude(raceChecks) : '') + authorPrelude + command.body;
       if (b05) return b05DispatchResult(await runInEditor(b05BridgeWritePrelude() + body));
-      if (b10) return b10DispatchResult(await runInEditor(b10BridgeWritePrelude() + body));
+      if (b10) return b10DispatchResult(await runInEditor((b26 ? b26BridgeWritePrelude() : b10BridgeWritePrelude()) + body));
       if (b03) return b03DispatchResult(await runInEditor(b03BridgeWritePrelude() + body));
       if (chartStyleCap) return chartStyleDispatchResult(await runInEditor(chartStyleBridgeWritePrelude(chartStyleCap) + body));
       if (b23) return chartDeleteDispatchResult(await runInEditor(chartDeleteBridgeWritePrelude() + body));
+      if (b25) return tableWriteDispatchResult(await runInEditor(tableWriteBridgeWritePrelude() + body));
+      if (protCapId) return protectionWriteDispatchResult(await runInEditor(protectionWriteBridgeWritePrelude(protCapId) + body));
+      if (b28) return workbookProtectionWriteDispatchResult(await runInEditor(workbookProtectionWriteBridgeWritePrelude() + body));
       if (seriesStyleCap) return seriesStyleDispatchResult(await runInEditor(seriesStyleBridgeWritePrelude(seriesStyleCap) + body));
+      if (dataPointStyleWrite) return dataPointStyleDispatchResult(await runInEditor(dataPointStyleBridgeWritePrelude() + body));
       const r = await runInEditor(body);
-      return { ok: r.ok === true, dispatched: true, outcome: r.outcome, error: r.error || null };
+      return plainDispatchResult(r);
     },
 
     async readPackage() {
@@ -1847,4 +2195,4 @@ function createEuroOfficeXlsxDriver({ url, user, pass, loadPlaywright, timeoutMs
   };
 }
 
-module.exports = { createEuroOfficeXlsxDriver, sessionUserOf, TIERED_EXTRAS, readQuery, usedProbeQuery, digestQuery, tierOf, tieredPayload, withLimitNote, formulaIndexWanted, SHA256_SRC, MAX_TIERED_CELLS, dependentsBridgeBody, EO_PAGE_LAYOUT_PER_SHEET_RUNTIMES, B10_BRIDGE_WRITE_RUNTIMES, B05_BRIDGE_WRITE_RUNTIMES, B03_BRIDGE_WRITE_RUNTIMES, b05BridgeWritePrelude, b05DispatchResult, b10BridgeWritePrelude, b10DispatchResult, b03BridgeWritePrelude, b03DispatchResult, MAX_READ_CELLS, MAX_COMMENT_SCAN_CELLS, MAX_COMMENTS, MAX_LAYOUT_ITEMS, MAX_CHART_LABEL_POINTS, B22_BRIDGE_WRITE_RUNTIMES, chartStyleBridgeWritePrelude, chartStyleDispatchResult, B23_BRIDGE_WRITE_RUNTIMES, chartDeleteBridgeWritePrelude, chartDeleteDispatchResult, B24_BRIDGE_WRITE_RUNTIMES, seriesStyleBridgeWritePrelude, seriesStyleDispatchResult, protectionRacePrelude };
+module.exports = { createEuroOfficeXlsxDriver, B25_BRIDGE_WRITE_RUNTIMES, tableWriteBridgeWritePrelude, B27_BRIDGE_WRITE_RUNTIMES, protectionWriteBridgeWritePrelude, B28_BRIDGE_WRITE_RUNTIMES, workbookProtectionWriteBridgeWritePrelude, workbookProtectionWriteDispatchResult, sessionUserOf, TIERED_EXTRAS, readQuery, usedProbeQuery, digestQuery, tierOf, tieredPayload, withLimitNote, formulaIndexWanted, SHA256_SRC, MAX_TIERED_CELLS, dependentsBridgeBody, EO_PAGE_LAYOUT_PER_SHEET_RUNTIMES, B10_BRIDGE_WRITE_RUNTIMES, B05_BRIDGE_WRITE_RUNTIMES, B03_BRIDGE_WRITE_RUNTIMES, b05BridgeWritePrelude, b05DispatchResult, b10BridgeWritePrelude, b10DispatchResult, b26BridgeWritePrelude, B26_BRIDGE_WRITE_RUNTIMES, b03BridgeWritePrelude, b03DispatchResult, MAX_READ_CELLS, MAX_COMMENT_SCAN_CELLS, MAX_COMMENTS, MAX_LAYOUT_ITEMS, MAX_CHART_LABEL_POINTS, B22_BRIDGE_WRITE_RUNTIMES, chartStyleBridgeWritePrelude, chartStyleDispatchResult, B23_BRIDGE_WRITE_RUNTIMES, chartDeleteBridgeWritePrelude, chartDeleteDispatchResult, B24_BRIDGE_WRITE_RUNTIMES, seriesStyleBridgeWritePrelude, seriesStyleDispatchResult, protectionRacePrelude, B29_BRIDGE_WRITE_RUNTIMES, dataPointStyleBridgeWritePrelude, dataPointStyleDispatchResult, plainDispatchResult };

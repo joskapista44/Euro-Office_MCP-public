@@ -21,6 +21,13 @@
  * an unlocked one proceeds; (b) a multi-step task whose SECOND step is protected-refused never dispatches
  * its first step either (preflightDecisive); (c) the protection axis itself unreadable fails the whole task
  * closed, named.
+ *
+ * Part E (GH #338-#342 remainder, W2, docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md "W2 -- the five
+ * structural guards"): the workbook-wide structure lock, orthogonal to the per-sheet axis above --
+ * `workbookGate`'s own condition table, pure (E1-E4); `protectionRacePrelude`'s new workbook branch against
+ * the REAL /24 candidate block (E5, the SAME style as Part B); the product WRITE tool end to end for all
+ * five `WORKBOOK_STRUCTURE_INTENTS` (E6); two local NEGATIVE controls proving E1/E6 are not vacuously green
+ * (E7).
  */
 
 const test = require('node:test');
@@ -34,10 +41,15 @@ const { harness, req, createStore } = require('../fakes/write-wiring.cjs');
 
 // ---- Part A: protection-gate.cjs, pure ------------------------------------------------------------------------
 
-const primaryOf = ({ sheets = ['S'], range = {}, sheetLevel = {} } = {}) => ({
+// GH #338-#342 remainder (W2): every op now ALSO carries `workbookProtectionRead` (sheets.cjs's liveExtras
+// opts every one of its 5 intents into it unconditionally) -- defaulted here to the pre-/24 pass-through
+// shape so every PRE-EXISTING test below, none of which is testing the workbook axis, keeps exercising only
+// the sheet-level axis it always did. A test that wants the workbook axis itself passes `workbook` explicitly.
+const primaryOf = ({ sheets = ['S'], range = {}, sheetLevel = {}, workbook = 'UNOBSERVABLE:CAPABILITY_MISSING' } = {}) => ({
   sheets: sheets.map(name => ({ name })),
   protectionRangeReads: range,
   protectionReads: sheetLevel,
+  workbookProtectionRead: workbook,
 });
 const unprotected = { protected: false, forbids: null };
 const protectedWith = (forbids = {}) => ({ protected: true, forbids: Object.assign({ formatCells: false, insertRows: false, insertColumns: false }, forbids) });
@@ -135,7 +147,9 @@ test('A11: a missing / case-mismatched sheet is NOT this gate\'s concern -- it p
 });
 
 test('A12: create_sheet and a `names` family synthetic selector are out of scope -- no sheet exists to be protected', () => {
-  const primary = { sheets: [{ name: 'S' }], protectionReads: { S: protectedWith() }, protectionRangeReads: {} };
+  // GH #338-#342 remainder (W2): create_sheet IS a WORKBOOK_STRUCTURE_INTENT, so it now runs workbookGate
+  // first -- CAPABILITY_MISSING (the pre-/24 pass-through) keeps this test on the per-sheet axis it tests.
+  const primary = { sheets: [{ name: 'S' }], protectionReads: { S: protectedWith() }, protectionRangeReads: {}, workbookProtectionRead: 'UNOBSERVABLE:CAPABILITY_MISSING' };
   assert.deepEqual(protectionGate.gate(primary, { intent: 'create_sheet', selector: { name: 'New' } }), { refusal: null, raceChecks: [] });
   assert.deepEqual(protectionGate.gate(primary, { intent: 'set_defined_name', selector: { sheet: '\u0000name:s!x', range: 'A1', name: 'x' } }), { refusal: null, raceChecks: [] });
 });
@@ -280,4 +294,268 @@ test('D1: protectionRacePrelude + each bridge-write prelude still compiles as ON
     // the SAME order dispatch() builds: the bridge-write prelude, then (raceChecks ? race : '') + command.body
     assert.doesNotThrow(() => new Function(pre + race + 'return 1;'), `${name} + race prelude`);
   }
+});
+
+// ---- Part E: GH #338-#342 remainder (W2) -- the workbook-wide structure lock -----------------------------------
+
+const V24 = fs.readFileSync(path.join(DIR, 'rev24-candidate', 'bridge-block.js'), 'utf8');
+const WORKBOOK_OPS = {
+  create_sheet: { intent: 'create_sheet', selector: { name: 'New' } },
+  rename_sheet: { intent: 'rename_sheet', selector: { sheet: 'S', name: 'Renamed' } },
+  delete_sheet: { intent: 'delete_sheet', selector: { sheet: 'S' } },
+  move_sheet: { intent: 'move_sheet', selector: { sheet: 'S', reference: 'T', where: 'before' } },
+  copy_sheet: { intent: 'copy_sheet', selector: { sheet: 'S', name: 'Copy' } },
+};
+
+test('E1: all five WORKBOOK_STRUCTURE_INTENTS, workbook locked -- refused PRE_DISPATCH, named, no raceCheck', () => {
+  const primary = primaryOf({ workbook: { lockStructure: true } });
+  for (const [intent, op] of Object.entries(WORKBOOK_OPS)) {
+    const g = protectionGate.gate(primary, op);
+    assert.equal(g.refusal.reason, 'xlsx-protected-workbook-locked-structure', intent);
+    assert.deepEqual(g.raceChecks, [], intent);
+  }
+});
+
+test('E2: all five, workbook UNLOCKED (and the sheet-level axis also unprotected) -- proceeds, carrying the workbook raceCheck', () => {
+  const wbRead = { lockStructure: false };
+  const primary = primaryOf({ workbook: wbRead, sheetLevel: { S: unprotected } });
+  for (const [intent, op] of Object.entries(WORKBOOK_OPS)) {
+    const g = protectionGate.gate(primary, op);
+    assert.equal(g.refusal, null, intent);
+    const wbCheck = g.raceChecks.find(c => c.workbook === true);
+    assert.deepEqual(wbCheck, { workbook: true, expected: wbRead }, intent);
+  }
+  // create_sheet names no EXISTING sheet -- gateSheetLevel's own early exit contributes [], so the
+  // workbook's raceCheck is the ONLY one; the defect this guards against (blocker 2.i) is it being lost.
+  assert.deepEqual(protectionGate.gate(primary, WORKBOOK_OPS.create_sheet).raceChecks, [{ workbook: true, expected: wbRead }]);
+  // the other four ALSO carry the sheet-level axis's own raceCheck (gateSheetLevel's unmeasured(), merged, not replaced).
+  for (const intent of ['rename_sheet', 'delete_sheet', 'move_sheet', 'copy_sheet']) {
+    const g = protectionGate.gate(primary, WORKBOOK_OPS[intent]);
+    assert.equal(g.raceChecks.length, 2, intent);
+  }
+});
+
+test('E3: CAPABILITY_MISSING (pre-/24 runtime) -- deliberate pass-through, unchanged from today, no raceCheck of its own', () => {
+  assert.deepEqual(protectionGate.workbookGate({ workbookProtectionRead: 'UNOBSERVABLE:CAPABILITY_MISSING' }), { refusal: null, raceChecks: [] });
+  // and the full gate() composition still falls through to the per-sheet axis unchanged
+  const primary = primaryOf({ workbook: 'UNOBSERVABLE:CAPABILITY_MISSING', sheetLevel: { S: protectedWith() } });
+  const g = protectionGate.gate(primary, WORKBOOK_OPS.rename_sheet);
+  assert.equal(g.refusal.reason, 'xlsx-protected-sheet-intent-not-measured:rename_sheet');
+});
+
+test('E4: every OTHER unobservable workbook reason, and a simply-absent read -- fails closed, named, distinctly from CAPABILITY_MISSING', () => {
+  assert.equal(protectionGate.workbookGate({ workbookProtectionRead: 'UNOBSERVABLE:protection-flag-not-boolean' }).refusal.reason, 'xlsx-protection-unobservable:workbook-protection-flag-not-boolean');
+  assert.equal(protectionGate.workbookGate({ workbookProtectionRead: undefined }).refusal.reason, 'xlsx-protection-unobservable:workbook-not-read');
+  assert.equal(protectionGate.workbookGate({}).refusal.reason, 'xlsx-protection-unobservable:workbook-not-read');
+  // and fully composed: FAIL_CLOSED regardless of the per-sheet axis's own state
+  const primary = primaryOf({ workbook: 'UNOBSERVABLE:model-missing', sheetLevel: { S: unprotected } });
+  assert.equal(protectionGate.gate(primary, WORKBOOK_OPS.delete_sheet).refusal.reason, 'xlsx-protection-unobservable:workbook-model-missing');
+});
+
+/**
+ * E4b (internal tracker review, #ref, blocker 1): `raw === null` and a MALFORMED object read -- fixed here. `null` is
+ * the LIVE shape a missing read normalizes to (inventory.cjs:141), not just the theoretical `undefined` this
+ * gate originally handled -- `raw.lockStructure` on `null` THREW a TypeError instead of returning a named
+ * refusal. And `{}` / `{ lockStructure: null }` / a non-boolean `lockStructure` previously read as "not
+ * locked" (fail-OPEN, `!== true`), the exact hazard W3's own gate() (families/workbook-protection-write.cjs)
+ * already refuses as `malformed-read` for the SAME capability's read -- W2 must match it, not fall open.
+ */
+test('E4b: a null read (the LIVE missing-read shape) and a malformed object -- fail closed, named, NO exception, NO silent pass-through', () => {
+  assert.equal(protectionGate.workbookGate({ workbookProtectionRead: null }).refusal.reason, 'xlsx-protection-unobservable:workbook-not-read');
+  for (const malformed of [{}, { lockStructure: null }, { lockStructure: 'true' }, { lockStructure: 1 }]) {
+    const g = protectionGate.workbookGate({ workbookProtectionRead: malformed });
+    assert.equal(g.refusal.reason, 'xlsx-protection-unobservable:workbook-malformed-read', JSON.stringify(malformed));
+    assert.deepEqual(g.raceChecks, [], JSON.stringify(malformed));
+  }
+  // composed through gate(): the same five intents, zero of them silently pass a malformed read
+  const primary = primaryOf({ workbook: { lockStructure: 'true' } });
+  for (const [intent, op] of Object.entries(WORKBOOK_OPS)) {
+    assert.equal(protectionGate.gate(primary, op).refusal.reason, 'xlsx-protection-unobservable:workbook-malformed-read', intent);
+  }
+});
+
+test('E4c NEG. KONTROLL: reverting to the ORIGINAL `raw.lockStructure !== true` check reopens the fail-open hole E4b closes', () => {
+  // the exact pre-fix line (`!== true` reads anything-not-true as "proceed"), run against E4b's own fixtures
+  const buggyGate = raw => (raw === undefined ? { refusal: { reason: 'xlsx-protection-unobservable:workbook-not-read' } } : (raw.lockStructure !== true ? { refusal: null, raceChecks: [{ workbook: true, expected: raw }] } : { refusal: { reason: 'xlsx-protected-workbook-locked-structure' } }));
+  assert.throws(() => buggyGate(null), TypeError, 'the bug: null throws instead of refusing, named');
+  assert.equal(buggyGate({}).refusal, null, 'the bug: a malformed {} reads as "proceed", fail-OPEN');
+  assert.equal(buggyGate({ lockStructure: 'true' }).refusal, null, 'the bug: a non-boolean truthy-looking string also reads as "proceed"');
+  // the real, fixed workbookGate refuses all three, named, no throw
+  assert.doesNotThrow(() => protectionGate.workbookGate({ workbookProtectionRead: null }));
+  assert.equal(protectionGate.workbookGate({ workbookProtectionRead: null }).refusal.reason, 'xlsx-protection-unobservable:workbook-not-read');
+  assert.equal(protectionGate.workbookGate({ workbookProtectionRead: {} }).refusal.reason, 'xlsx-protection-unobservable:workbook-malformed-read');
+  assert.equal(protectionGate.workbookGate({ workbookProtectionRead: { lockStructure: 'true' } }).refusal.reason, 'xlsx-protection-unobservable:workbook-malformed-read');
+});
+
+// ---- Part E5: protectionRacePrelude's new workbook branch, against the REAL /24 candidate block -----------------
+
+function workbookEngine(lockStructure) {
+  const wb = { getWorkbookProtection(t) { if (t !== 0) throw new Error('bad type'); return lockStructure; } };
+  const Asc = { editor: { wbModel: wb }, c_oAscWorkbookProtectType: { lockStructure: 0, lockWindows: 1, lockRevisions: 2 }, CWorkbookProtection: function () {} };
+  return { Api: { GetSheet: () => null }, Asc, window: { Asc }, AscCommon: { History: { Is_On: () => true } } };
+}
+const runPrelude24 = (e, checks) => {
+  new Function('Api', 'Asc', 'window', 'AscCommon', V24.replace(/\}\s*,\s*$/, '}'))(e.Api, e.Asc, e.window, e.AscCommon);
+  return new Function('Api', `${protectionRacePrelude(checks)}\nreturn { ok: true, ranTheRestOfTheBody: true };`)(e.Api);
+};
+
+test('E5a: workbook unchanged (still unlocked) -- the rest of the command body runs', () => {
+  const out = runPrelude24(workbookEngine(false), [{ workbook: true, expected: { lockStructure: false } }]);
+  assert.deepEqual(out, { ok: true, ranTheRestOfTheBody: true });
+});
+
+test('E5b: a co-editor locked the workbook between planning and the mutation -- aborts BEFORE the rest of the body, named, sheet: null', () => {
+  // the PLANNING-time read saw: unlocked; a second session's protect_workbook ran in between -- NOW locked
+  const out = runPrelude24(workbookEngine(true), [{ workbook: true, expected: { lockStructure: false } }]);
+  assert.deepEqual(out, { ok: false, stage: 'protection-race', outcome: 'protection-changed-before-mutation', sheet: null, range: null });
+});
+
+test('E5c: a workbook check and a sheet check in the SAME prelude -- either mismatch aborts (the create_sheet-under-race shape)', () => {
+  const race = protectionRacePrelude([{ workbook: true, expected: { lockStructure: false } }, { sheet: 'S', expected: { protected: false, forbids: null } }]);
+  assert.doesNotThrow(() => new Function(race + 'return 1;'), 'compiles standalone, no bridge-write prelude needed');
+});
+
+/**
+ * E5d (internal tracker review, #ref, blocker 2): the FRESH re-read itself comes back malformed (bridge ok:true, a
+ * non-boolean `lockStructure`) -- race-FAILS, named, same as any other mismatch; never a silent pass-through.
+ * The REAL /24 handler's own `typeof v !== "boolean"` guard (handler-wb-protection-read-v24.txt) means this
+ * exact bridge-level shape cannot occur through V24 today -- so this is tested against a minimal stub bridge
+ * satisfying only __eoBridgeRead's own manifest/capability contract, proving the PRELUDE's OWN defense, not
+ * relying on the handler upstream to always keep doing so.
+ */
+test('E5d: the FRESH re-read itself is malformed (ok:true, non-boolean lockStructure) -- race-fails, named, never silently accepted', () => {
+  const { BRIDGE_CAPABILITIES } = require('../../src/drivers/eurooffice/ds-bridge.cjs');
+  const { ACCEPTED_RUNTIMES } = require('../../src/core/runtime-identity.cjs');
+  const WB_R = BRIDGE_CAPABILITIES.WORKBOOK_PROTECTION_READ;
+  const rt = ACCEPTED_RUNTIMES.xlsx[ACCEPTED_RUNTIMES.xlsx.length - 1]; // the /24 entry
+  const manifest = { bridgeVersion: '1.0.0', documentServerVersion: rt.documentServerVersion, documentServerBuild: 'x', patchVersion: rt.patchVersion, capabilities: [{ id: WB_R.id, version: WB_R.version, kind: 'READ', format: 'XLSX', mutation: 'NO' }] };
+  const bridge = { manifest: () => manifest, read: id => (id === WB_R.id ? { ok: true, value: { lockStructure: 'not-a-boolean' } } : { ok: false, reason: 'unexpected' }) };
+  const Api = { GetEuroOfficeBridge: () => bridge };
+  const race = protectionRacePrelude([{ workbook: true, expected: { lockStructure: false } }]);
+  const out = new Function('Api', `${race}\nreturn { ok: true, ranTheRestOfTheBody: true };`)(Api);
+  assert.deepEqual(out, { ok: false, stage: 'protection-race', outcome: 'protection-changed-before-mutation', sheet: null, range: null });
+});
+
+test('E5e NEG. KONTROLL: without the typeof-boolean check, E5d\'s exact malformed re-read would silently PASS through', () => {
+  // the PRE-FIX line this review caught: `{ lockStructure: __r.value.lockStructure }` unconditionally, whatever
+  // shape __r.value.lockStructure has -- run the SAME scenario E5d measures through that (buggy) generator.
+  const { BRIDGE_CAPABILITIES } = require('../../src/drivers/eurooffice/ds-bridge.cjs');
+  const { ACCEPTED_RUNTIMES } = require('../../src/core/runtime-identity.cjs');
+  const { BRIDGE_CLIENT_SRC } = require('../../src/drivers/eurooffice/ds-bridge.cjs');
+  const WB_R = BRIDGE_CAPABILITIES.WORKBOOK_PROTECTION_READ;
+  const buggyRace = (checks) => `{${BRIDGE_CLIENT_SRC}
+  const __eoProtChecks = ${JSON.stringify(checks)};
+  let __eoProtFail = null;
+  for (const __c of __eoProtChecks) {
+    const __r = __eoBridgeRead(${JSON.stringify(WB_R.id)}, ${WB_R.version}, ${JSON.stringify(ACCEPTED_RUNTIMES.xlsx)}, {}, ${JSON.stringify(WB_R.valueType)});
+    const __got = !__r.ok ? 'UNOBSERVABLE:' + __r.reason : { lockStructure: __r.value.lockStructure }; // the bug: no boolean check
+    if (JSON.stringify(__got) !== JSON.stringify(__c.expected)) { __eoProtFail = { sheet: null, range: null }; break; }
+  }
+  if (__eoProtFail) return { ok: false, stage: 'protection-race', outcome: 'protection-changed-before-mutation', sheet: __eoProtFail.sheet, range: __eoProtFail.range };
+}
+`;
+  const rt = ACCEPTED_RUNTIMES.xlsx[ACCEPTED_RUNTIMES.xlsx.length - 1];
+  const manifest = { bridgeVersion: '1.0.0', documentServerVersion: rt.documentServerVersion, documentServerBuild: 'x', patchVersion: rt.patchVersion, capabilities: [{ id: WB_R.id, version: WB_R.version, kind: 'READ', format: 'XLSX', mutation: 'NO' }] };
+  // chosen so the bug's own coincidental shape ({lockStructure: undefined} -> JSON '{}') matches `expected: {}`
+  // -- a shape that cannot arise from the REAL (fixed) gate() anymore, but is exactly what the bug let through.
+  const bridge = { manifest: () => manifest, read: id => (id === WB_R.id ? { ok: true, value: {} } : { ok: false, reason: 'unexpected' }) };
+  const Api = { GetEuroOfficeBridge: () => bridge };
+  const out = new Function('Api', `${buggyRace([{ workbook: true, expected: {} }])}\nreturn { ok: true, ranTheRestOfTheBody: true };`)(Api);
+  assert.deepEqual(out, { ok: true, ranTheRestOfTheBody: true }, 'the bug: a malformed re-read silently passes, because it coincidentally JSON-matches a malformed expected');
+  // the REAL (fixed) prelude, same malformed re-read -- fails closed regardless of what `expected` says
+  const realOut = new Function('Api', `${protectionRacePrelude([{ workbook: true, expected: {} }])}\nreturn { ok: true, ranTheRestOfTheBody: true };`)(Api);
+  assert.equal(realOut.ok, false, 'the real prelude never accepts a non-boolean lockStructure, even against a degenerate expected');
+});
+
+// ---- Part E6: the product WRITE tool, end to end, over the fake driver -- all five intents, both lock states ----
+
+const sheetsBook = () => [{ name: 'S', cells: { A1: { v: 1 } } }, { name: 'T', cells: { A1: { v: 2 } } }];
+const wbSteps = {
+  create_sheet: { intent: 'create_sheet', id: 's', name: 'New' },
+  rename_sheet: { intent: 'rename_sheet', id: 's', sheet: 'S', name: 'Renamed' },
+  delete_sheet: { intent: 'delete_sheet', id: 's', sheet: 'S' },
+  move_sheet: { intent: 'move_sheet', id: 's', sheet: 'S', after: 'T' },
+  copy_sheet: { intent: 'copy_sheet', id: 's', sheet: 'S', name: 'Copy' },
+};
+
+test('E6a: all five intents, workbook LOCKED -- refused PRE_DISPATCH, named, ZERO dispatch, the document untouched', async () => {
+  for (const [intent, step] of Object.entries(wbSteps)) {
+    const store = createStore(sheetsBook());
+    store.workbookLocked = true;
+    const { r, h } = await run([step], store);
+    assert.equal(r.ok, false, `${intent}: ${JSON.stringify(r).slice(0, 300)}`);
+    assert.match(JSON.stringify(r), /xlsx-protected-workbook-locked-structure/, intent);
+    assert.equal(h.calls().dispatch, 0, intent);
+    assert.deepEqual(store.durable.map(s => s.name), ['S', 'T'], `${intent}: the sheet list never changed`);
+  }
+});
+
+test('E6b: all five intents, workbook UNLOCKED -- proceeds exactly as before W2 (unaffected, APPLY)', async () => {
+  for (const [intent, step] of Object.entries(wbSteps)) {
+    const store = createStore(sheetsBook());
+    store.workbookLocked = false;
+    const { r } = await run([step], store);
+    assert.equal(r.ok, true, `${intent}: ${JSON.stringify(r).slice(0, 300)}`);
+  }
+});
+
+test('E6c: pre-/24 runtime shape (CAPABILITY_MISSING) -- unaffected, a locked-looking store still APPLIES', async () => {
+  const store = createStore(sheetsBook());
+  store.workbookLocked = true; // would refuse on /24 -- but the runtime cannot even observe the axis
+  const { r } = await run([wbSteps.delete_sheet], store, { script: { workbookProtectionUnobservable: 'CAPABILITY_MISSING' } });
+  assert.equal(r.ok, true, JSON.stringify(r).slice(0, 300));
+});
+
+test('E6d: a DIFFERENT unobservable workbook reason -- fails closed, named, zero dispatch, even though the sheet axis itself is fine', async () => {
+  const store = createStore(sheetsBook());
+  const { r, h } = await run([wbSteps.rename_sheet], store, { script: { workbookProtectionUnobservable: 'model-missing' } });
+  assert.equal(r.ok, false);
+  assert.match(JSON.stringify(r), /xlsx-protection-unobservable:workbook-model-missing/);
+  assert.equal(h.calls().dispatch, 0);
+});
+
+test('E6e (zero\'s review, #ref): a malformed workbook read (null / {} / non-boolean lockStructure) -- all five intents fail closed, named, ZERO dispatch, product tool end to end', async () => {
+  for (const malformed of [null, {}, { lockStructure: null }, { lockStructure: 'true' }]) {
+    for (const [intent, step] of Object.entries(wbSteps)) {
+      const store = createStore(sheetsBook());
+      const { r, h } = await run([step], store, { script: { workbookProtectionMalformed: malformed } });
+      const label = `${intent} / ${JSON.stringify(malformed)}`;
+      assert.equal(r.ok, false, `${label}: ${JSON.stringify(r).slice(0, 300)}`);
+      assert.match(JSON.stringify(r), /xlsx-protection-unobservable:workbook-(not-read|malformed-read)/, label);
+      assert.equal(h.calls().dispatch, 0, label);
+      assert.deepEqual(store.durable.map(s => s.name), ['S', 'T'], `${label}: the sheet list never changed`);
+    }
+  }
+});
+
+// E6e's own mutation control lives at the gate level, where it is simplest and most robust: E4c already
+// proves that reverting workbookGate's boolean-typeof check to the original `!== true` rule turns `{}` / `null`
+// from a named refusal back into a silent, fail-OPEN "proceed" -- the SAME rule E6e's product-level run depends
+// on. E5e proves the SAME mutation for protectionRacePrelude's own re-read. A third, end-to-end-level copy of
+// the identical mutation would not catch anything these two do not already catch.
+
+// ---- Part E7: two local NEGATIVE controls -- proving E1/E6a are not vacuously green -----------------------------
+// (the same discipline as the fail-closed/race tests elsewhere in this file: a test that cannot go RED on a
+// reintroduction of the exact defect it names is not a test of that defect.)
+
+test('E7a NEG. KONTROLL: without workbookGate, E1 (locked refuses) goes RED -- the real gate() does not', () => {
+  // the ORIGINAL blocker-1-shaped bug: compose only the per-sheet axis, as if workbookGate were never added
+  const buggyGate = (primary, op) => protectionGate.gateSheetLevel(primary, op);
+  const primary = primaryOf({ workbook: { lockStructure: true } });
+  const buggy = buggyGate(primary, WORKBOOK_OPS.create_sheet);
+  assert.equal(buggy.refusal, null, 'the bug: create_sheet sails through a locked workbook');
+  const real = protectionGate.gate(primary, WORKBOOK_OPS.create_sheet);
+  assert.equal(real.refusal.reason, 'xlsx-protected-workbook-locked-structure', 'the real gate() catches it');
+});
+
+test('E7b NEG. KONTROLL: overwriting raceChecks instead of merging loses the workbook check -- the real gate() keeps it', () => {
+  // the ORIGINAL blocker-2.i-shaped bug: `{ refusal: null, raceChecks: inner.raceChecks }` (overwrite, not spread)
+  const wbRead = { lockStructure: false };
+  const primary = primaryOf({ workbook: wbRead });
+  const wb = protectionGate.workbookGate(primary);
+  const inner = protectionGate.gateSheetLevel(primary, WORKBOOK_OPS.create_sheet); // -> { refusal: null, raceChecks: [] }
+  const buggy = { refusal: null, raceChecks: inner.raceChecks }; // overwrite: the workbook check is gone
+  assert.deepEqual(buggy.raceChecks, [], 'the bug: create_sheet under an unlocked workbook carries NO race check at all');
+  const real = protectionGate.gate(primary, WORKBOOK_OPS.create_sheet);
+  assert.deepEqual(real.raceChecks, [{ workbook: true, expected: wbRead }], 'the real gate() keeps it, via spread-merge');
 });

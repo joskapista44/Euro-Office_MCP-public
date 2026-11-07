@@ -150,3 +150,53 @@ test('X-L05: clear_filter is NOT touched by this gate -- a hidden data row never
   const { result } = await run(createStore(b), clearStep);
   assert.equal(result.ok, true, JSON.stringify(result.execution.primitiveVerification));
 });
+
+// GH #344 G2 LIVE finding (prod 1.1.0-44fe2c4e8639, internal tracker): a values list of 3 or more written to
+// one field while ANOTHER field already carries an active filter made the other field's filter disappear and the
+// write came back DISPATCHED_OUTCOME_UNKNOWN. Reproduced WITHOUT any colour filter -- the 3+-value path itself is
+// the trigger. Refused BEFORE the write, the same way X-L05 refuses adjacent-data / manual-hidden-row risk above.
+const VALUES3 = { field: 1, values: ['1', '2', '3'] };
+
+test('values3plus RED->GREEN: a 3+ value list beside an ACTIVE other field refuses BEFORE the write, named, the other field untouched', async () => {
+  const b = book();
+  b[0].autoFilter = { range: 'A1:C4', filters: [{ field: 2, on: true, operator: 'xlOr', criteria1: '=x', criteria2: null }] };
+  const store = createStore(b);
+  const { result, m } = await run(store, step(VALUES3));
+  assert.equal(result.ok, false, JSON.stringify(result.execution.primitiveVerification));
+  assert.deepEqual([m.writes, m.commands], [0, 0]);
+  assert.equal(reason(result), 'xlsx-filter-values3plus-would-drop-other-field');
+  assert.deepEqual(filters(store), [{ field: 2, on: true, operator: 'xlOr', criteria1: '=x', criteria2: null }], 'the other field is never even attempted, let alone dropped');
+});
+
+test('values3plus: with NO other active field, the write proceeds exactly as before (R19 unaffected)', async () => {
+  // fa7244ac/2 (c19b1065 Q2 MEASURED, landed in filter.cjs's allValuesInColumn): VALUES3 ['1','2','3'] happens to
+  // equal book()'s own field-1 FULL distinct set on its 3-row fixture -- a fixture-size coincidence, not a real
+  // conflict between the two measured findings. A locally widened, 4-distinct-value row keeps this test's own
+  // intent (3+ values, no other field, proceeds) a genuine SUBSET, so it no longer collides with the new
+  // PRE-MUTATION "select everything is a no-op" refusal.
+  const b = book();
+  b[0].cells.A5 = { v: 4 }; b[0].cells.B5 = { v: 'w' }; b[0].cells.C5 = { v: 4 };
+  const wideStep = { id: 'm7-d-r19', steps: [{ intent: 'filter_range', sheet: 'FL', range: 'A1:C5', ...VALUES3 }] };
+  const { result, m } = await run(createStore(b), wideStep);
+  assert.equal(result.ok, true, JSON.stringify(result.execution.primitiveVerification));
+  assert.deepEqual([m.writes, m.commands], [1, 1]);
+});
+
+test('values3plus: a TWO-value list beside an active other field is unaffected -- only 3+ triggers the guard', async () => {
+  const b = book();
+  b[0].autoFilter = { range: 'A1:C4', filters: [{ field: 2, on: true, operator: 'xlOr', criteria1: '=x', criteria2: null }] };
+  const { result, m } = await run(createStore(b), step(LIST));
+  assert.equal(result.ok, true, JSON.stringify(result.execution.primitiveVerification));
+  assert.deepEqual([m.writes, m.commands], [1, 1]);
+});
+
+test('values3plus: already exactly applied, with another field active alongside it, is left alone on retry (not re-refused)', async () => {
+  const b = book();
+  b[0].autoFilter = { range: 'A1:C4', filters: [
+    { field: 1, on: true, operator: 'xlFilterValues', criteria1: ['1', '2', '3'], criteria2: null },
+    { field: 2, on: true, operator: 'xlOr', criteria1: '=x', criteria2: null },
+  ] };
+  const { result, m } = await run(createStore(b), step(VALUES3));
+  assert.equal(result.ok, true, JSON.stringify(result.execution.primitiveVerification));
+  assert.deepEqual([m.writes, m.commands], [0, 0], 'already SATISFIED -- no dispatch, and the guard does not disturb a settled state it did not create');
+});

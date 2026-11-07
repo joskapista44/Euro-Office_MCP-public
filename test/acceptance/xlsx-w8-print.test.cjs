@@ -128,7 +128,7 @@ test('the print WRITE runtime list (M11.5b.4 Bridge WRITE; DS9346: now the singl
   const drv = require('../../src/drivers/eurooffice/xlsx-driver.cjs');
   assert.deepEqual([...print.B10_BRIDGE_WRITE_RUNTIMES], [...drv.B10_BRIDGE_WRITE_RUNTIMES]);
   for (const k of ['EO_INTERNAL_PRINT_RUNTIMES', 'EO_INTERNAL_PRINT_WRITE_RUNTIMES']) { assert.equal(k in drv, false, k); assert.equal(k in print, false, k); }
-  assert.deepEqual([...drv.B10_BRIDGE_WRITE_RUNTIMES], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17'], 'the explicit manifest runtime id, never a URL cache key');
+  assert.deepEqual([...drv.B10_BRIDGE_WRITE_RUNTIMES], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', '9.3.5|euro-office-bridge-v1/9.3.5.0/17', '9.3.5|euro-office-bridge-v1/9.3.5.0/18', '9.3.5|euro-office-bridge-v1/9.3.5.0/19', '9.3.5|euro-office-bridge-v1/9.3.5.0/21', '9.3.5|euro-office-bridge-v1/9.3.5.0/22', '9.3.5|euro-office-bridge-v1/9.3.5.0/23', '9.3.5|euro-office-bridge-v1/9.3.5.0/24', '9.3.5|euro-office-bridge-v1/9.3.5.0/25', '9.3.5|euro-office-bridge-v1/9.3.5.0/26', '9.3.5|euro-office-bridge-v1/9.3.5.0/27', '9.3.5|euro-office-bridge-v1/9.3.5.0/28', '9.3.5|euro-office-bridge-v1/9.3.5.0/29'], 'the explicit manifest runtime id, never a URL cache key');
   const d = drv.createEuroOfficeXlsxDriver({ url: 'u', user: 'u', pass: 'p', loadPlaywright: () => ({ ok: false }) });
   const r = await d.dispatch(null, print.lower(planOperations(one(STEPS.center)).operations[0]));
   assert.equal(r.ok, false);

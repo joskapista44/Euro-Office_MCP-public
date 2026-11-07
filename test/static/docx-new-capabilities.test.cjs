@@ -16,8 +16,8 @@ const { planOperations } = require('../../src/adapters/docx/adapter.cjs');
  * CLOSED list, and that list never grows by accident or leaks into the migration count.
  */
 
-test('NEW_INTENTS is exactly the post-M7 capability set, today [define_style, modify_style, set_page_setup, format_table, set_numbering, set_image_size, set_image_wrap, resolve_comment, reply_comment, add_comment_on_match]', () => {
-  assert.deepEqual(NEW_INTENTS.map(r => r.intent), ['define_style', 'modify_style', 'set_page_setup', 'format_table', 'set_numbering', 'set_image_size', 'set_image_wrap', 'resolve_comment', 'reply_comment', 'add_comment_on_match']);
+test('NEW_INTENTS is exactly the post-M7 capability set, today [define_style, modify_style, set_page_setup, format_table, set_numbering, set_image_size, set_image_wrap, resolve_comment, reply_comment, add_comment_on_match, insert_table, insert_section_break, insert_image]', () => {
+  assert.deepEqual(NEW_INTENTS.map(r => r.intent), ['define_style', 'modify_style', 'set_page_setup', 'format_table', 'set_numbering', 'set_image_size', 'set_image_wrap', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'insert_table', 'insert_section_break', 'insert_image', 'insert_paragraphs', 'insert_shape', 'insert_chart', 'delete_image', 'replace_image']);
 });
 
 test('NEW_INTENTS is disjoint from the 28 migrated intents (intents.cjs)', () => {
@@ -113,4 +113,47 @@ test('set_image_wrap plans with the row\'s own declared preservationMode, and re
   assert.equal(planned.operations[0].preservationMode, row.preservationMode);
   const unmeasured = planOperations({ steps: [{ intent: 'set_image_wrap', selector: { index: 0 }, wrap: 'tight' }] });
   assert.equal(unmeasured.ok, false, 'tight is NEM-MÉRT -- must be refused at plan time');
+});
+
+test('insert_table plans with the row\'s own declared preservationMode, and refuses an out-of-bound rows/cols', () => {
+  const row = NEW_INTENTS.find(r => r.intent === 'insert_table');
+  const planned = planOperations({ steps: [{ intent: 'insert_table', selector: { afterParagraph: 'x' }, rows: 2, cols: 2 }] });
+  assert.equal(planned.ok, true, planned.detail);
+  assert.equal(planned.operations[0].preservationMode, row.preservationMode);
+  const zero = planOperations({ steps: [{ intent: 'insert_table', selector: { afterParagraph: 'x' }, rows: 0, cols: 2 }] });
+  assert.equal(zero.ok, false, 'rows: 0 is the measured CreateTable null boundary -- must be refused at plan time');
+});
+
+test('insert_section_break plans with the row\'s own declared preservationMode, and refuses an unmeasured type', () => {
+  const row = NEW_INTENTS.find(r => r.intent === 'insert_section_break');
+  const planned = planOperations({ steps: [{ intent: 'insert_section_break', selector: { afterParagraph: 'x' }, type: 'nextPage' }] });
+  assert.equal(planned.ok, true, planned.detail);
+  assert.equal(planned.operations[0].preservationMode, row.preservationMode);
+  const unmeasured = planOperations({ steps: [{ intent: 'insert_section_break', selector: { afterParagraph: 'x' }, type: 'evenPage' }] });
+  assert.equal(unmeasured.ok, false, 'evenPage/oddPage/nextColumn were not measured -- must be refused at plan time');
+});
+
+test('insert_image plans with the row\'s own declared preservationMode, and refuses a malformed source and an out-of-range EMU', () => {
+  const row = NEW_INTENTS.find(r => r.intent === 'insert_image');
+  const source = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const planned = planOperations({ steps: [{ intent: 'insert_image', selector: { afterParagraph: 'x' }, source, widthEmu: 914400, heightEmu: 914400 }] });
+  assert.equal(planned.ok, true, planned.detail);
+  assert.equal(planned.operations[0].preservationMode, row.preservationMode);
+  assert.equal(planned.operations[0].position, 'after', 'position defaults to \'after\'');
+  const bad = planOperations({ steps: [{ intent: 'insert_image', selector: { afterParagraph: 'x' }, source: 'data:image/gif;base64,abcd', widthEmu: 914400, heightEmu: 914400 }] });
+  assert.equal(bad.ok, false, 'a GIF data URI is not PNG/JPEG -- must be refused at plan time');
+  const zero = planOperations({ steps: [{ intent: 'insert_image', selector: { afterParagraph: 'x' }, source, widthEmu: 0, heightEmu: 914400 }] });
+  assert.equal(zero.ok, false, 'widthEmu: 0 is not a positive integer -- must be refused at plan time');
+});
+
+test('insert_paragraphs plans with the row\'s own declared preservationMode, and refuses an out-of-range count and an unknown format key', () => {
+  const row = NEW_INTENTS.find(r => r.intent === 'insert_paragraphs');
+  const planned = planOperations({ steps: [{ intent: 'insert_paragraphs', selector: { afterParagraph: 'x' }, paragraphs: [{ text: 'a' }, { text: 'b', style: 'Normal', format: { bold: true } }] }] });
+  assert.equal(planned.ok, true, planned.detail);
+  assert.equal(planned.operations[0].preservationMode, row.preservationMode);
+  assert.equal(planned.operations[0].paragraphs.length, 2);
+  const tooMany = planOperations({ steps: [{ intent: 'insert_paragraphs', selector: { afterParagraph: 'x' }, paragraphs: Array.from({ length: 201 }, (_, i) => ({ text: `p${i}` })) }] });
+  assert.equal(tooMany.ok, false, '201 paragraphs is over the measured 200 ceiling -- must be refused at plan time');
+  const badFormat = planOperations({ steps: [{ intent: 'insert_paragraphs', selector: { afterParagraph: 'x' }, paragraphs: [{ text: 'a', format: { highlight: 'yellow' } }] }] });
+  assert.equal(badFormat.ok, false, 'highlight is not in the accepted format subset -- must be refused at plan time');
 });

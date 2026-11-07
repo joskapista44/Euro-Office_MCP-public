@@ -234,7 +234,7 @@ test('structure: without the anchor read (unproven build) a target sheet hosting
   for (const d of [fakeImg(), fakeShp(), fakeImg({ pos: { fromCol: 0, colOffset: 0, fromRow: 0, rowOffset: 0 } })]) {
     await refused(book({ s: { drawings: [d] } }), insRows(19), 'xlsx-structure-drawing-geometry-unobservable', { anchorBuild: false });
     await refused(book({ s: { drawings: [d] } }), insCols('L'), 'xlsx-structure-drawing-geometry-unobservable', { anchorBuild: false });
-    await refused(book({ s: { drawings: [d] } }), { intent: 'delete_rows', sheet: 'S', at: 19, count: 1, anchor: { column: 'A', value: 'r20' } }, 'xlsx-structure-drawing-geometry-unobservable', { anchorBuild: false });
+    await refused(book({ s: { drawings: [d] } }), { intent: 'delete_rows', sheet: 'S', at: 19, count: 1, anchor: { column: 'A', value: 'r20' }, witness: { column: 'A', value: 'r19' } }, 'xlsx-structure-drawing-geometry-unobservable', { anchorBuild: false });
   }
 });
 

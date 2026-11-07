@@ -1,5 +1,6 @@
 'use strict';
 
+const { EXACT_PARAGRAPH_LOOKUP } = require('./paragraph-lookup.cjs');
 const { norm } = require('../inventory.cjs');
 const { inlineTarget, keyText, selectorCheck } = require('./rich.cjs');
 
@@ -115,9 +116,10 @@ try {
   const textOpts = { Numbering: false };
   const doc = Api.GetDocument();
   if (!doc || doc.GetCurrentFootEndnote() !== null) return;
-  const hits = (doc.Search(m.targetText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.targetText);
-  if (hits.length !== 1) return;
-  hits[0].Select();
+${EXACT_PARAGRAPH_LOOKUP}
+  const target = unitRangeOf(m.targetText, true); // a run+link unit too: the note goes at the range's end (paragraph-lookup.cjs)
+  if (!target || String(target.GetText(textOpts) || '') !== m.targetText) return;
+  target.Select();
   const note = m.kind === 'footnote' ? doc.AddFootnote() : doc.AddEndnote();
   if (!note) { doc.MoveCursorToStart(); return; }
   try { const first = note.GetElement(0); if (first) first.AddText(m.text); } finally { doc.MoveCursorToStart(); }

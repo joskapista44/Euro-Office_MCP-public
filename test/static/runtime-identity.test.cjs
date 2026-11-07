@@ -14,8 +14,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { RUNTIMES, XLSX_RUNTIME_17, ACCEPTED_RUNTIMES, XLSX_RUNTIME_ID, XLSX_RUNTIME_IDS, DOCX_RUNTIME_ID, DOCX_RUNTIME_IDS, runtimeIdOf, cacheKeyOf, HANDSHAKE_BODY, classifyHandshake } = require('../../src/core/runtime-identity.cjs');
+const { RUNTIMES, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, ACCEPTED_RUNTIMES, XLSX_RUNTIME_ID, XLSX_RUNTIME_IDS, DOCX_RUNTIME_ID, DOCX_RUNTIME_IDS, runtimeIdOf, cacheKeyOf, HANDSHAKE_BODY, classifyHandshake } = require('../../src/core/runtime-identity.cjs');
 const XLSX_RUNTIME_17_ID = runtimeIdOf(XLSX_RUNTIME_17);
+const XLSX_RUNTIME_18_ID = runtimeIdOf(XLSX_RUNTIME_18);
+const XLSX_RUNTIME_19_ID = runtimeIdOf(XLSX_RUNTIME_19);
+const XLSX_RUNTIME_21_ID = runtimeIdOf(XLSX_RUNTIME_21);
 
 // manifest()'s default IS the accepted xlsx identity now -- positive-control tests need no override;
 // a test that needs the (now entirely retired) 9.3.4.60 family overrides documentServerVersion/patchVersion
@@ -117,7 +120,11 @@ test('STATIC GUARD: no 9.3.4-<hash> cache-key literal in any src/ string or code
 test('STATIC GUARD: every runtime-gated list in src is built from a core/runtime-identity.cjs RUNTIME_ID (DS9346: each now a SINGLE 9.3.5.0 entry)', () => {
   const root = path.join(__dirname, '../../src');
   const lists = [];
-  const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.cjs')) fs.readFileSync(p, 'utf8').split('\n').forEach((l, i) => { if (/^const \w+_RUNTIMES = (Object\.freeze\(\[|DOCX_RUNTIME_IDS|DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS|DOCX_B21_BRIDGE_READ_RUNTIME_IDS|XLSX_RUNTIME_IDS|XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS)/.test(l)) lists.push([`${path.relative(root, p)}:${i + 1}`, l]); }); } };
+  // TOTALS_OFF_BRIDGE_RUNTIMES (table-props.cjs) is EXCLUDED: it is a single Bridge handler's own, narrower
+  // refusal list (one revision today, GH #335 remainder) built from a core RUNTIME_ID literal, not a whole-list
+  // alias of one of the family-wide compatibility lists this guard checks -- a different, smaller class this
+  // test was never meant to cover (ds935-bridge24-write-handler-identity.test.cjs pins it instead).
+  const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.cjs')) fs.readFileSync(p, 'utf8').split('\n').forEach((l, i) => { if (/^const \w+_RUNTIMES = (Object\.freeze\(\[|DOCX_RUNTIME_IDS|DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS|DOCX_B21_BRIDGE_READ_RUNTIME_IDS|XLSX_RUNTIME_IDS|XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS)/.test(l) && !/^const TOTALS_OFF_BRIDGE_RUNTIMES =/.test(l)) lists.push([`${path.relative(root, p)}:${i + 1}`, l]); }); } };
   walk(root);
   assert.ok(lists.length >= 10, `found ${lists.length} runtime lists`);
   for (const [where, l] of lists) assert.match(l, /= (DOCX_RUNTIME_IDS|DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS|DOCX_B21_BRIDGE_READ_RUNTIME_IDS|XLSX_RUNTIME_IDS|XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS|XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS);$/, where);
@@ -143,7 +150,7 @@ test('the XLSX adapter\'s own runtime copy (it imports nothing outside its tree)
     ['XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS', 'families/charts.cjs', 'B22_BRIDGE_WRITE_RUNTIMES', 'B22_BRIDGE_WRITE_RUNTIMES'],
     ['XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS', 'families/charts.cjs', 'B23_BRIDGE_WRITE_RUNTIMES', 'B23_BRIDGE_WRITE_RUNTIMES'],
   ]) {
-    assert.deepEqual([...core[coreKey]], [XLSX_RUNTIME_ID, XLSX_RUNTIME_17_ID], coreKey);
+    assert.deepEqual([...core[coreKey]], [XLSX_RUNTIME_ID, XLSX_RUNTIME_17_ID, runtimeIdOf(XLSX_RUNTIME_18), XLSX_RUNTIME_19_ID, '9.3.5|euro-office-bridge-v1/9.3.5.0/21', '9.3.5|euro-office-bridge-v1/9.3.5.0/22', '9.3.5|euro-office-bridge-v1/9.3.5.0/23', '9.3.5|euro-office-bridge-v1/9.3.5.0/24', '9.3.5|euro-office-bridge-v1/9.3.5.0/25', '9.3.5|euro-office-bridge-v1/9.3.5.0/26', '9.3.5|euro-office-bridge-v1/9.3.5.0/27', '9.3.5|euro-office-bridge-v1/9.3.5.0/28', '9.3.5|euro-office-bridge-v1/9.3.5.0/29'], coreKey);
     const adapterRuntimeKey = coreKey.replace('XLSX_', 'XLSX_');
     assert.deepEqual([...require('../../src/adapters/xlsx/runtime.cjs')[adapterRuntimeKey]], [...core[coreKey]], `adapters/xlsx/runtime.cjs ${adapterRuntimeKey}`);
     assert.deepEqual([...require(`../../src/adapters/xlsx/${adapterModule}`)[adapterKey]], [...core[coreKey]], `adapters/xlsx/${adapterModule} ${adapterKey}`);
@@ -156,10 +163,20 @@ test('the XLSX adapter\'s own runtime copy (it imports nothing outside its tree)
   assert.deepEqual(core.XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES.map(core.runtimeIdOf), [...core.XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS]);
 });
 
-test('ACCEPTED LIST (GH #326/#327: 9.3.5.0/16 + /17 xlsx, compatibility-first; docx 9.3.5.0/5 only since the GH #292 S4 D-state; no range/wildcard); every 9.3.4.60 revision, suffix, other DS / family -> FAIL_CLOSED', () => {
-  assert.deepEqual([...XLSX_RUNTIME_IDS], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', XLSX_RUNTIME_17_ID]);
+test('ACCEPTED LIST (GH #326/#327: 9.3.5.0/16 + /17 xlsx, compatibility-first; GH #300 L1/#298 D widens to /18 too; docx 9.3.5.0/5 only since the GH #292 S4 D-state; no range/wildcard); every 9.3.4.60 revision, suffix, other DS / family -> FAIL_CLOSED', () => {
+  assert.deepEqual([...XLSX_RUNTIME_IDS], ['9.3.5|euro-office-bridge-v1/9.3.5.0/16', XLSX_RUNTIME_17_ID, XLSX_RUNTIME_18_ID, XLSX_RUNTIME_19_ID, XLSX_RUNTIME_21_ID, '9.3.5|euro-office-bridge-v1/9.3.5.0/22', '9.3.5|euro-office-bridge-v1/9.3.5.0/23', '9.3.5|euro-office-bridge-v1/9.3.5.0/24', '9.3.5|euro-office-bridge-v1/9.3.5.0/25', '9.3.5|euro-office-bridge-v1/9.3.5.0/26', '9.3.5|euro-office-bridge-v1/9.3.5.0/27', '9.3.5|euro-office-bridge-v1/9.3.5.0/28', '9.3.5|euro-office-bridge-v1/9.3.5.0/29']);
   // POSITIVE: /17 is now accepted too (GH #326/#327), the same pair/runtimeId shape /16 already proves above
   assert.deepEqual([classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/17' }))), ACCEPTED_RUNTIMES.xlsx).ok, classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/17' }))), ACCEPTED_RUNTIMES.xlsx).runtimeId], [true, XLSX_RUNTIME_17_ID]);
+  // POSITIVE: /18 is now accepted too (GH #300 L1 / #298 D), the same shape
+  assert.deepEqual([classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/18' }))), ACCEPTED_RUNTIMES.xlsx).ok, classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/18' }))), ACCEPTED_RUNTIMES.xlsx).runtimeId], [true, XLSX_RUNTIME_18_ID]);
+  // POSITIVE: /19 is accepted too (GH #332-#335: /18 + sheet.table.write/v1), the same shape
+  assert.deepEqual([classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/19' }))), ACCEPTED_RUNTIMES.xlsx).ok, classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/19' }))), ACCEPTED_RUNTIMES.xlsx).runtimeId], [true, XLSX_RUNTIME_19_ID]);
+  // POSITIVE: /21 is accepted too (GH #354/#355: /19 + the /20 READs + sheet.printSettings.write/v2), the same shape
+  assert.deepEqual([classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/21' }))), ACCEPTED_RUNTIMES.xlsx).ok, classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/21' }))), ACCEPTED_RUNTIMES.xlsx).runtimeId], [true, XLSX_RUNTIME_21_ID]);
+  // POSITIVE: /28 is accepted too (GH #361/#363 pre-install readiness gate, internal tracker: /27 + table.autoFilter.
+  // criteria.read/v1 + cells.compiledStyle.read/v1, byte-identity warrant ds935-bridge28-table-autofilter-criteria-
+  // write-handler-identity.test.cjs) -- the REAL candidate patchVersion, carrying its directory suffix.
+  assert.deepEqual([classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/28' }))), ACCEPTED_RUNTIMES.xlsx).ok, classifyHandshake(handshake(apiWith(manifest({ patchVersion: 'euro-office-bridge-v1/9.3.5.0/28' }))), ACCEPTED_RUNTIMES.xlsx).runtimeId], [true, '9.3.5|euro-office-bridge-v1/9.3.5.0/28']);
   // GH #292 S4 D-state (owner GO 2026-10-24): the word /3 and /4 compat entries are retired with their DS rollback points; /5 alone
   assert.deepEqual(ACCEPTED_RUNTIMES.docx.map(runtimeIdOf), [DOCX_RUNTIME_ID]);
   assert.deepEqual([...DOCX_RUNTIME_IDS], ACCEPTED_RUNTIMES.docx.map(runtimeIdOf));
@@ -178,7 +195,7 @@ test('ACCEPTED LIST (GH #326/#327: 9.3.5.0/16 + /17 xlsx, compatibility-first; d
 
   // NEG: documentServerVersion 9.3.5 (now accepted) with any OTHER patchVersion still refuses (PATCH_VERSION_MISMATCH:
   // the version itself has an accepted entry, but none of these pairs it correctly)
-  for (const pv of ['euro-office-bridge-v1/9.3.5.0/15', 'euro-office-bridge-v1/9.3.5.0/18', 'euro-office-bridge-word-v1/9.3.5.0/2', 'euro-office-bridge-word-v1/9.3.5.0/4',
+  for (const pv of ['euro-office-bridge-v1/9.3.5.0/15', 'euro-office-bridge-v1/9.3.5.0/20', 'euro-office-bridge-word-v1/9.3.5.0/2', 'euro-office-bridge-word-v1/9.3.5.0/4',
     'euro-office-bridge-v1/9.3.4.60/16', ' euro-office-bridge-v1/9.3.5.0/16', 'euro-office-bridge-v2/9.3.5.0/16'])
     assert.deepEqual(classifyHandshake(handshake(apiWith(manifest({ patchVersion: pv }))), ACCEPTED_RUNTIMES.xlsx), { ok: false, reason: 'PATCH_VERSION_MISMATCH' }, pv);
 

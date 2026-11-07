@@ -1,7 +1,12 @@
 'use strict';
 
+const { EXACT_PARAGRAPH_LOOKUP } = require('./paragraph-lookup.cjs');
 const { norm, blockText, resolveTextUnit } = require('../inventory.cjs');
 const { resolveStableTarget } = require('../resolver.cjs');
+// GH #324/follow-up: the SAME language-tag shape define_style/modify_style already refuses pre-
+// dispatch (style-definition.cjs) -- ONE constant, not a second copy, so the two families cannot
+// drift apart on what counts as a valid tag.
+const { LANGUAGE_PATTERN } = require('./style-definition.cjs');
 
 /**
  * DOCX `formatting` family: format_text (M4 Wave 1).
@@ -74,7 +79,9 @@ const { resolveStableTarget } = require('../resolver.cjs');
  */
 
 const BOOLEAN_KEYS = Object.freeze(['bold', 'italic', 'underline', 'strike']);
-const NUMBER_KEYS = Object.freeze(['fontSize', 'spaceBefore', 'spaceAfter', 'lineSpacing', 'indentLeft', 'indentRight', 'indentFirstLine']);
+const NUMBER_KEYS = Object.freeze(['fontSize', 'spaceBefore', 'spaceAfter', 'lineSpacing', 'indentLeft', 'indentRight', 'indentFirstLine', 'characterSpacing']);
+// lineHeight is NOT in NUMBER_KEYS -- it is handled exclusively by the lineSpacingRule pairing check
+// below (normalizeWanted), which also enforces the cross-field rule NUMBER_KEYS' uniform loop cannot.
 const NAME_KEYS = Object.freeze(['fontFamily', 'style', 'language']);
 const ALIGNMENTS = Object.freeze(['left', 'right', 'center', 'justify']);
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
@@ -94,11 +101,45 @@ const TAB_ALIGNS = Object.freeze(['left', 'right', 'center']);
 const BORDER_STYLES = Object.freeze(['single', 'none']);
 const BORDER_SIDES = Object.freeze(['Top', 'Bottom', 'Left', 'Right']);
 const BORDER_KEYS = Object.freeze(BORDER_SIDES.map(s => `border${s}`));
+// GH #314 (LIVE-measured): a paragraph border's `space` (the gap between the
+// border line and the text) is stored by the DS rounded DOWN to whole millimeters first, then
+// rounded to the nearest point for the OOXML attribute -- round(floor(requested * 25.4/72) * 72/25.4),
+// silently (no call ever throws), confirmed by a full 0..31 sweep + the earlier 4/32/-1 probe. Only
+// 12 point-values are exactly reachable this way (0..11mm); sending a TARGET value directly often
+// lands on a DIFFERENT one (e.g. 12 -> 11). BORDER_SPACE_WRITE_INPUT maps each reachable target to
+// the MEASURED, smallest input that round-trips to exactly that target -- the write side always
+// sends the INPUT (SPACE_WRITE_INPUT[requested]), never the requested value itself. Keys and values
+// are both points; the keys are the only values `format.border<Side>.space` accepts (enforced in
+// docx-write-tools.cjs's formatGridProblem, which imports BORDER_SPACE_POINTS from here so the
+// accepted list and the write-side table can never drift apart).
+const BORDER_SPACE_WRITE_INPUT = Object.freeze({ 0: 0, 3: 3, 6: 6, 9: 9, 11: 12, 14: 15, 17: 18, 20: 20, 23: 23, 26: 26, 28: 29, 31: 32 });
+const BORDER_SPACE_POINTS = Object.freeze(Object.keys(BORDER_SPACE_WRITE_INPUT).map(Number));
 // PAGINATION_KEYS do NOT join BOOLEAN_KEYS: that loop blindly coerces any value with Boolean(),
 // which would silently accept `false` as a request -- clearing (false) is explicitly NOT
 // MEASURED (design doc point 4) and must be refused with a named reason, not silently no-op'd.
 const PAGINATION_KEYS = Object.freeze(['keepNext', 'keepLines', 'pageBreakBefore', 'widowControl']);
-const KNOWN_KEYS = Object.freeze([...BOOLEAN_KEYS, ...NUMBER_KEYS, ...NAME_KEYS, 'alignment', 'color', 'highlight', 'vertAlign', SHADING_KEY, 'tabs', ...BORDER_KEYS, ...PAGINATION_KEYS]);
+// GH #315: `lineSpacingRule` ('exact' | 'atLeast') + `lineHeight` (points) -- paragraph-level, the
+// SAME `paraPr.SetSpacingLine` call the existing `lineSpacing` (GH #231b, 'auto' rule only) already
+// uses, with a DIFFERENT rule argument. Deliberately MUTUALLY EXCLUSIVE with `lineSpacing`: both set
+// the SAME underlying property, and a request naming both would be ambiguous about which rule wins
+// (plan() refuses the combination, named, rather than picking one silently). `lineSpacingRule` is
+// NOT accepted as 'auto' here -- that case is `lineSpacing`'s own, existing, measured path; this pair
+// exists ONLY for the two rules `lineSpacing` cannot express.
+// LIVE-MEASURED: the twips hypothesis (ECMA-376 §17.3.1.33, w:spacing/@w:line twentieths-of-a-point
+// whenever lineRule != 'auto') HOLDS -- GetSpacingLineValue() == written-points*20 for all 10 tested
+// (value, rule) pairs, AND GetSpacingLineRule() returns exactly the written rule string. See
+// docx-driver.cjs's READ side and docs/GH315-GH318-LINE-HEIGHT-CHARACTER-SPACING-PLAN.md section 3.
+const LINE_SPACING_RULES = Object.freeze(['exact', 'atLeast']);
+// GH #318: `characterSpacing` (points, may be negative -- OOXML allows condensed text) -- RUN-level,
+// via `range.GetTextPr().SetSpacing()`. Unlike color/highlight/vertAlign (measured to work BOTH
+// directly on `range` and via `GetTextPr()`), `SetSpacing`/`GetSpacing` are only LIVE-confirmed to
+// EXIST on ApiTextPr (docs/evidence/gh292s8-style-unset-probe-20261022.json, "ZQ292e textpr methods")
+// -- never measured directly on ApiRange, so this always goes through GetTextPr(), the SAME
+// defensive path `language` already uses for the identical reason (SetLanguage is ApiTextPr-only too).
+// LIVE-MEASURED (same evidence as above): the twips hypothesis (ECMA-376 §17.3.2.34, w:spacing/
+// @w:val) HOLDS -- GetSpacing() == written-points*20 across all 5 tested points, negative and
+// explicit-zero included.
+const KNOWN_KEYS = Object.freeze([...BOOLEAN_KEYS, ...NUMBER_KEYS, ...NAME_KEYS, 'alignment', 'color', 'highlight', 'vertAlign', SHADING_KEY, 'tabs', ...BORDER_KEYS, ...PAGINATION_KEYS, 'lineSpacingRule', 'lineHeight']);
 // shading compares like a NAME_KEY (case-insensitive string) without joining NAME_KEYS itself --
 // NAME_KEYS also drives normalizeWanted's blind trim-and-accept loop, and shading must instead be
 // format-validated (SHADING_HEX_RE) and rejected outright when malformed (measured: a malformed
@@ -106,7 +147,10 @@ const KNOWN_KEYS = Object.freeze([...BOOLEAN_KEYS, ...NUMBER_KEYS, ...NAME_KEYS,
 // repeat that at its own boundary).
 const CASE_INSENSITIVE_KEYS = Object.freeze([...NAME_KEYS, SHADING_KEY]);
 const FORMATTABLE_KINDS = Object.freeze(['paragraph', 'heading']);
-const TEXT_KEYS = Object.freeze(['bold', 'italic', 'underline', 'strike', 'fontFamily', 'fontSize', 'language', 'color', 'highlight', 'vertAlign']);
+// GH #318 (CANDIDATE): characterSpacing is run-level (ApiTextPr.SetSpacing), the same bucket as
+// color/highlight/vertAlign -- this list is what splitWanted() uses to route a matchText (range)
+// write's keys to the text-run compare (rangeState/charFormats) instead of the paragraph compare.
+const TEXT_KEYS = Object.freeze(['bold', 'italic', 'underline', 'strike', 'fontFamily', 'fontSize', 'language', 'color', 'highlight', 'vertAlign', 'characterSpacing']);
 // W-09's new fields, for L3's own extension below -- every OTHER paragraph's state on these
 // keys must be unchanged (the whole-paragraph L3 previously only checked TEXT/EXISTENCE
 // survival of other paragraphs, never their format -- this is new coverage, scoped to exactly
@@ -161,7 +205,17 @@ function normalizeBorderSide(key, value) {
   // slice(4,6) RGB split (SetTopBorder etc. take separate r/g/b ints, like SetShd already does)
   const color = String(value.color == null ? '' : value.color);
   if (!HEX_RE.test(color)) return { ok: false, detail: `${key}.color must be #RRGGBB` };
-  return { ok: true, value: { style, size, color: color.replace(/^#/, '').toUpperCase() } };
+  const out = { style, size, color: color.replace(/^#/, '').toUpperCase() };
+  // GH #314: optional, points -- the exact 12-value allowlist is enforced at the MCP tool layer
+  // (docx-write-tools.cjs's formatGridProblem, the quantization-artifact convention GH #232
+  // already uses for size/tabs); here only basic shape is refused, the same split that size's
+  // own positivity check (above) already has against the 1/8-point grid check at that same layer.
+  if (value.space !== undefined) {
+    const space = Number(value.space);
+    if (!Number.isFinite(space) || space < 0) return { ok: false, detail: `${key}.space must be a non-negative number (points)` };
+    out.space = space;
+  }
+  return { ok: true, value: out };
 }
 
 /** W-09 tabs deep-equality: same length, each entry's pos within 0.01pt and align exact. */
@@ -170,13 +224,28 @@ function tabsEqual(actual, wanted) {
   return wanted.every((w, i) => actual[i] && Number.isFinite(Number(actual[i].pos)) && Math.abs(Number(actual[i].pos) - w.pos) < 0.01 && actual[i].align === w.align);
 }
 
-/** W-09 border side deep-equality: style exact, size within 0.01pt, color case-insensitive. */
+/** W-09 border side deep-equality: style exact, size within 0.01pt, color case-insensitive.
+ * GH #314 R1 review (LIVE-measured): `space`, when requested, matches EITHER of the two MEASURED
+ * states a read can land on -- the requested value R itself (the stored, post-reopen value, once
+ * BORDER_SPACE_WRITE_INPUT[R] has round-tripped through the DS's own mm-rounding), OR
+ * BORDER_SPACE_WRITE_INPUT[R] (the IN-SESSION value: ParaPr.ToJSON() echoes the raw input sent to
+ * SetTopBorder/etc BEFORE a save+reopen, never the rounded one -- LIVE-measured, R1 review: a real
+ * write of space 11 verified L1 FAIL in-session while the saved XML already read "11" correctly).
+ * verifyPrimitive runs in BOTH shapes depending on when it is called relative to a save, and this
+ * is the only way it can be right in both. Any OTHER value is a genuine mismatch. */
 function borderSideEqual(actual, wanted) {
   if (!actual || typeof actual !== 'object') return false;
   // GH #290: a removed side is an explicit 'none' (size / colour carry nothing); an ABSENT side is not proof -- the
   // paragraph's style may define a border there
   if (wanted.style === 'none') return actual.style === 'none';
-  return actual.style === wanted.style && Number.isFinite(Number(actual.size)) && Math.abs(Number(actual.size) - wanted.size) < 0.01 && String(actual.color || '').toUpperCase() === wanted.color.toUpperCase();
+  const base = actual.style === wanted.style && Number.isFinite(Number(actual.size)) && Math.abs(Number(actual.size) - wanted.size) < 0.01 && String(actual.color || '').toUpperCase() === wanted.color.toUpperCase();
+  if (!base || wanted.space === undefined) return base;
+  // typeof-gated, NOT Number(actual.space): borderSideFormat reports an unreadable/absent space as
+  // `null`, and Number(null) is 0 -- coercing it would make a requested space of 0 false-match an
+  // UNKNOWN value instead of correctly failing as unproven.
+  if (typeof actual.space !== 'number' || !Number.isFinite(actual.space)) return false;
+  const preRoundtripInput = BORDER_SPACE_WRITE_INPUT[wanted.space];
+  return actual.space === wanted.space || (preRoundtripInput !== undefined && actual.space === preRoundtripInput);
 }
 
 /** Source normalizeWanted, plus an explicit refusal of anything it would silently drop. */
@@ -214,10 +283,29 @@ function normalizeWanted(format) {
     out[k] = n;
   }
   for (const k of NAME_KEYS) if (format[k] != null) out[k] = String(format[k]).trim();
+  // GH #324 follow-up: `language` is a NAME_KEY (trimmed above like fontFamily/style), but unlike
+  // those two it has an engine-enforced shape -- SetLanguage on an invalid-looking tag is a silent
+  // no-op (measured at the style layer; the run-level setter is the SAME ApiTextPr call, see the
+  // module comment above), so an unchecked write here would look APPLIED and do nothing.
+  if (out.language != null && !LANGUAGE_PATTERN.test(out.language)) return { ok: false, detail: `language must be a BCP-47-ish language tag (e.g. 'hu-HU', 'en')` };
   if (format.alignment != null) {
     const a = String(format.alignment).toLowerCase();
     if (!ALIGNMENTS.includes(a)) return { ok: false, detail: `alignment must be one of ${ALIGNMENTS.join(', ')}` };
     out.alignment = a;
+  }
+  // GH #315: lineSpacingRule + lineHeight are a PAIR -- neither means anything alone (the rule with
+  // no height, or a height with an implicit, ambiguous rule). Mutually exclusive with `lineSpacing`
+  // (GH #231b): both write the SAME paraPr.SetSpacingLine call, and naming both would leave it
+  // undefined which rule/value actually lands.
+  if (format.lineSpacingRule != null || format.lineHeight != null) {
+    if ('lineSpacing' in format) return { ok: false, detail: 'lineSpacingRule/lineHeight cannot be combined with lineSpacing -- they set the same property with a different rule' };
+    if (format.lineSpacingRule == null || format.lineHeight == null) return { ok: false, detail: 'lineSpacingRule and lineHeight must be given together' };
+    const r = String(format.lineSpacingRule);
+    if (!LINE_SPACING_RULES.includes(r)) return { ok: false, detail: `lineSpacingRule must be one of ${LINE_SPACING_RULES.join(', ')}` };
+    const h = Number(format.lineHeight);
+    if (!Number.isFinite(h)) return { ok: false, detail: 'lineHeight must be a number' };
+    out.lineSpacingRule = r;
+    out.lineHeight = h;
   }
   const w08err = normalizeW08(format, out);
   if (w08err) return { ok: false, detail: w08err };
@@ -254,6 +342,21 @@ function compare(actual, wanted) {
   const missing = [];
   const unobservable = [];
   for (const [k, v] of Object.entries(wanted)) {
+    // GH #315: lineHeight only MEANS something when the rule in play (the wanted/preserved pairing)
+    // is exact/atLeast -- on an 'auto' rule it is simply not applicable, same as how a preservation
+    // re-check of an untouched paragraph carries its BEFORE-state's own 'auto' rule as `wanted`.
+    // Checked BEFORE the generic undefined-is-unobservable gate right below, the same way
+    // PAGINATION_KEYS' false-flag case is (its own comment above: "checked BEFORE the generic
+    // null-is-unobservable branch"). A DIFFERENT observed rule than requested already proves a
+    // mismatch without needing the paired height value to be independently readable.
+    if (k === 'lineHeight') {
+      if (wanted.lineSpacingRule !== 'exact' && wanted.lineSpacingRule !== 'atLeast') continue; // not applicable -- no verdict
+      const observedRule = actual && actual.lineSpacingRule;
+      if (observedRule !== wanted.lineSpacingRule) { missing.push({ property: k, expected: v, actual: actual ? actual[k] : undefined }); continue; }
+      if (!actual || actual[k] === undefined) { unobservable.push(k); continue; }
+      if (!Number.isFinite(Number(actual[k])) || Math.abs(Number(actual[k]) - Number(v)) > 0.01) missing.push({ property: k, expected: v, actual: actual[k] });
+      continue;
+    }
     if (!actual || actual[k] === undefined) { unobservable.push(k); continue; }
     if (k === 'tabs') {
       if (!tabsEqual(actual[k], v)) missing.push({ property: k, expected: v, actual: actual[k] });
@@ -534,14 +637,15 @@ function commandBody(targetText, wanted) {
 try {
   const targetText = ${JSON.stringify(targetText)};
   const wanted = ${JSON.stringify(wanted)};
+  const SPACE_WRITE_INPUT = ${JSON.stringify(BORDER_SPACE_WRITE_INPUT)}; // GH #314, see this family's own header comment
   const doc = Api.GetDocument();
   if (!doc || !targetText) return;
-  const ranges = doc.Search(targetText, { MatchCase: true }) || [];
-  if (ranges.length !== 1) return;
-  const range = ranges[0];
-  if (String(range.GetText({ Numbering: false }) || '') !== targetText) return;
-  const paragraph = range.GetParagraph(0);
+${EXACT_PARAGRAPH_LOOKUP}
+  const paragraph = exactParagraphOf(targetText);
   if (!paragraph) return;
+  // a run+link unit gets its range: formatting over a link it covers whole keeps the link (measured, see paragraph-lookup.cjs)
+  const range = unitRangeOf(targetText, true);
+  if (!range || String(range.GetText({ Numbering: false }) || '') !== targetText) return;
   let requestedStyle = null;
   // W-10-9 (the SAME bug class as style-definition.cjs's commandBody, W10-7):
   // doc.GetStyle(<unknown name>) falls back to the 'Normal' style object instead of null -- a
@@ -561,12 +665,20 @@ try {
   if ('color' in wanted) range.SetColor(Api.HexColor(wanted.color.replace('#', '')));
   if ('highlight' in wanted) range.SetHighlight(wanted.highlight);
   if ('vertAlign' in wanted) range.SetVertAlign(wanted.vertAlign);
+  // GH #318: LIVE-MEASURED twips hypothesis (see this family's own header comment). SetSpacing is
+  // ApiTextPr-only, the SAME defensive GetTextPr() path 'language' above uses.
+  if ('characterSpacing' in wanted) { const textPr = range.GetTextPr(); if (!textPr || typeof textPr.SetSpacing !== 'function') return; textPr.SetSpacing(Math.round(wanted.characterSpacing * 20)); }
   const paraPr = paragraph.GetParaPr();
   if (!paraPr) return;
   if ('alignment' in wanted) paraPr.SetJc(wanted.alignment === 'justify' ? 'both' : wanted.alignment);
   if ('spaceBefore' in wanted) paraPr.SetSpacingBefore(wanted.spaceBefore * 20, false);
   if ('spaceAfter' in wanted) paraPr.SetSpacingAfter(wanted.spaceAfter * 20, false);
   if ('lineSpacing' in wanted) paraPr.SetSpacingLine(wanted.lineSpacing * 240, 'auto');
+  // GH #315: LIVE-MEASURED twips hypothesis (see this family's own header comment). The SAME
+  // SetSpacingLine call as 'auto' above, with the 'exact'/'atLeast' rule argument this family's
+  // write side has NEVER used before (decision doc GH231 section 8.8 names this as the open
+  // extension point).
+  if ('lineSpacingRule' in wanted) paraPr.SetSpacingLine(Math.round(wanted.lineHeight * 20), wanted.lineSpacingRule);
   if ('indentLeft' in wanted) paraPr.SetIndLeft(wanted.indentLeft * 20);
   if ('indentRight' in wanted) paraPr.SetIndRight(wanted.indentRight * 20);
   if ('indentFirstLine' in wanted) paraPr.SetIndFirstLine(wanted.indentFirstLine * 20);
@@ -578,21 +690,28 @@ try {
     const t = wanted.tabs;
     paraPr.SetTabs(t.map(x => Math.round(x.pos * 20)), t.map(x => x.align));
   }
+  // GH #314: space, when requested, goes through SPACE_WRITE_INPUT (see this family's own header
+  // comment) -- never the requested value directly, which the DS would silently store rounded to a
+  // DIFFERENT point value. Unrequested: 0, the prior behaviour, unchanged.
   if ('borderTop' in wanted) {
     const b = wanted.borderTop;
-    paraPr.SetTopBorder(b.style, Math.round(b.size * 8), 0, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
+    const space = 'space' in b ? SPACE_WRITE_INPUT[b.space] : 0;
+    paraPr.SetTopBorder(b.style, Math.round(b.size * 8), space, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
   }
   if ('borderBottom' in wanted) {
     const b = wanted.borderBottom;
-    paraPr.SetBottomBorder(b.style, Math.round(b.size * 8), 0, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
+    const space = 'space' in b ? SPACE_WRITE_INPUT[b.space] : 0;
+    paraPr.SetBottomBorder(b.style, Math.round(b.size * 8), space, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
   }
   if ('borderLeft' in wanted) {
     const b = wanted.borderLeft;
-    paraPr.SetLeftBorder(b.style, Math.round(b.size * 8), 0, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
+    const space = 'space' in b ? SPACE_WRITE_INPUT[b.space] : 0;
+    paraPr.SetLeftBorder(b.style, Math.round(b.size * 8), space, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
   }
   if ('borderRight' in wanted) {
     const b = wanted.borderRight;
-    paraPr.SetRightBorder(b.style, Math.round(b.size * 8), 0, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
+    const space = 'space' in b ? SPACE_WRITE_INPUT[b.space] : 0;
+    paraPr.SetRightBorder(b.style, Math.round(b.size * 8), space, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
   }
   if ('keepNext' in wanted) paraPr.SetKeepNext(wanted.keepNext);
   if ('keepLines' in wanted) paraPr.SetKeepLines(wanted.keepLines);
@@ -614,12 +733,12 @@ try {
   const parentText = ${JSON.stringify(parentText)};
   const matchText = ${JSON.stringify(matchText)};
   const wanted = ${JSON.stringify(wanted)};
+  const SPACE_WRITE_INPUT = ${JSON.stringify(BORDER_SPACE_WRITE_INPUT)}; // GH #314, see this family's own header comment
   const textOpts = { Numbering: false };
   const doc = Api.GetDocument();
   if (!doc || !parentText || !matchText) return;
-  const parents = (doc.Search(parentText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === parentText);
-  if (parents.length !== 1) return;
-  const paragraph = parents[0].GetParagraph(0);
+${EXACT_PARAGRAPH_LOOKUP}
+  const paragraph = exactParagraphOf(parentText);
   if (!paragraph || typeof paragraph.Search !== 'function') return;
   const hits = (paragraph.Search(matchText, true) || []).filter(r => String(r.GetText(textOpts) || '') === matchText);
   if (hits.length !== 1) return;
@@ -641,12 +760,20 @@ try {
   if ('color' in wanted) range.SetColor(Api.HexColor(wanted.color.replace('#', '')));
   if ('highlight' in wanted) range.SetHighlight(wanted.highlight);
   if ('vertAlign' in wanted) range.SetVertAlign(wanted.vertAlign);
+  // GH #318: LIVE-MEASURED twips hypothesis (see this family's own header comment). SetSpacing is
+  // ApiTextPr-only, the SAME defensive GetTextPr() path 'language' above uses.
+  if ('characterSpacing' in wanted) { const textPr = range.GetTextPr(); if (!textPr || typeof textPr.SetSpacing !== 'function') return; textPr.SetSpacing(Math.round(wanted.characterSpacing * 20)); }
   const paraPr = paragraph.GetParaPr();
   if (!paraPr) return;
   if ('alignment' in wanted) paraPr.SetJc(wanted.alignment === 'justify' ? 'both' : wanted.alignment);
   if ('spaceBefore' in wanted) paraPr.SetSpacingBefore(wanted.spaceBefore * 20, false);
   if ('spaceAfter' in wanted) paraPr.SetSpacingAfter(wanted.spaceAfter * 20, false);
   if ('lineSpacing' in wanted) paraPr.SetSpacingLine(wanted.lineSpacing * 240, 'auto');
+  // GH #315: LIVE-MEASURED twips hypothesis (see this family's own header comment). The SAME
+  // SetSpacingLine call as 'auto' above, with the 'exact'/'atLeast' rule argument this family's
+  // write side has NEVER used before (decision doc GH231 section 8.8 names this as the open
+  // extension point).
+  if ('lineSpacingRule' in wanted) paraPr.SetSpacingLine(Math.round(wanted.lineHeight * 20), wanted.lineSpacingRule);
   if ('indentLeft' in wanted) paraPr.SetIndLeft(wanted.indentLeft * 20);
   if ('indentRight' in wanted) paraPr.SetIndRight(wanted.indentRight * 20);
   if ('indentFirstLine' in wanted) paraPr.SetIndFirstLine(wanted.indentFirstLine * 20);
@@ -658,21 +785,28 @@ try {
     const t = wanted.tabs;
     paraPr.SetTabs(t.map(x => Math.round(x.pos * 20)), t.map(x => x.align));
   }
+  // GH #314: space, when requested, goes through SPACE_WRITE_INPUT (see this family's own header
+  // comment) -- never the requested value directly, which the DS would silently store rounded to a
+  // DIFFERENT point value. Unrequested: 0, the prior behaviour, unchanged.
   if ('borderTop' in wanted) {
     const b = wanted.borderTop;
-    paraPr.SetTopBorder(b.style, Math.round(b.size * 8), 0, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
+    const space = 'space' in b ? SPACE_WRITE_INPUT[b.space] : 0;
+    paraPr.SetTopBorder(b.style, Math.round(b.size * 8), space, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
   }
   if ('borderBottom' in wanted) {
     const b = wanted.borderBottom;
-    paraPr.SetBottomBorder(b.style, Math.round(b.size * 8), 0, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
+    const space = 'space' in b ? SPACE_WRITE_INPUT[b.space] : 0;
+    paraPr.SetBottomBorder(b.style, Math.round(b.size * 8), space, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
   }
   if ('borderLeft' in wanted) {
     const b = wanted.borderLeft;
-    paraPr.SetLeftBorder(b.style, Math.round(b.size * 8), 0, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
+    const space = 'space' in b ? SPACE_WRITE_INPUT[b.space] : 0;
+    paraPr.SetLeftBorder(b.style, Math.round(b.size * 8), space, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
   }
   if ('borderRight' in wanted) {
     const b = wanted.borderRight;
-    paraPr.SetRightBorder(b.style, Math.round(b.size * 8), 0, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
+    const space = 'space' in b ? SPACE_WRITE_INPUT[b.space] : 0;
+    paraPr.SetRightBorder(b.style, Math.round(b.size * 8), space, parseInt(b.color.slice(0, 2), 16), parseInt(b.color.slice(2, 4), 16), parseInt(b.color.slice(4, 6), 16));
   }
   if ('keepNext' in wanted) paraPr.SetKeepNext(wanted.keepNext);
   if ('keepLines' in wanted) paraPr.SetKeepLines(wanted.keepLines);
@@ -841,5 +975,9 @@ function producedText(op) {
 module.exports = {
   plan, classify, resolve, preDispatchCheck, lower, commandBody, verifyPrimitive, verifyPreservation,
   wholeTaskChecks, producedText, normalizeWanted, compare, blockText, rangeState, rangeCommandBody,
-  styleNamesOf,
+  styleNamesOf, BORDER_SPACE_WRITE_INPUT, BORDER_SPACE_POINTS,
+  // GH #317: header-footer.cjs's own `format` field reuses these AS-IS (one validator/comparator,
+  // not a second copy) to add `tabs` support -- the SAME W-09 shape this family already ships for
+  // body paragraphs (points, align restricted to TAB_ALIGNS).
+  normalizeTabs, tabsEqual, TAB_ALIGNS,
 };

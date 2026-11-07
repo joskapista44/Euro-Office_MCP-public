@@ -1,5 +1,6 @@
 'use strict';
 
+const { EXACT_PARAGRAPH_LOOKUP } = require('./paragraph-lookup.cjs');
 const { norm, textUnits } = require('../inventory.cjs');
 const { listState, levelReferencedBy, sharedAbstractWith, listMembersOf } = require('./list.cjs');
 
@@ -61,12 +62,21 @@ const CODE_TABLE = Object.freeze({
 });
 const DEFAULT_BULLET_SYMBOL = '-';
 const MEASURED_ALIGN = Object.freeze(['left']);
+// GH #319 (LIVE-measured, gh319-bulletcolorfont-probe-20261028): the bullet GLYPH itself carries
+// NO direct colour/font setter on the level object -- only through `level.GetTextPr()` (the SAME
+// split run-level text-properties shape formatting.cjs's own `range.SetColor`/`SetFontFamily` use
+// elsewhere, confirmed a DIFFERENT object, not assumed from that family's shape). `bulletColor`/
+// `bulletFont` are therefore CODE:'bullet'-ONLY (same gating as `symbol`): the glyph's own colour
+// and typeface are properties of the TEMPLATE being written in this step, not of an existing
+// numbering whose code the caller leaves untouched -- requiring `code: 'bullet'` in the SAME step
+// keeps the write unambiguous, the same reasoning `symbol`'s own check already applies.
+const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
 
 // This is the SAME setter-not-in-STEP_KEYS situation page-setup.cjs's own
 // comment documents (page-setup.cjs:40-48) -- field-contract.cjs's STEP_KEYS stays closed to the
 // 28/28, and its own acceptance test asserts that 1:1, so a 29th/30th key there would break it.
 // The fail-closed-unknown-field protection is re-implemented HERE, locally.
-const FIELDS = Object.freeze(['code', 'custom', 'symbol', 'start', 'suffix']);
+const FIELDS = Object.freeze(['code', 'custom', 'symbol', 'start', 'suffix', 'bulletColor', 'bulletFont']);
 // GH #248: `sharedDefinition` is NOT a numbering field but the caller's POLICY for a definition other items sit on: 'propagate' (the default, the W-07 behaviour -- the co-members show the new value,
 // L3 expects it) or 'refuse' (the product: a write that would change another item's numbering fails closed BEFORE any dispatch).
 const SHARED_POLICIES = Object.freeze(['propagate', 'refuse']);
@@ -111,6 +121,9 @@ function plan(step, index) {
   if (step.scope !== undefined && !SCOPES.includes(step.scope)) return { ok: false, detail: `step ${index}: set_numbering scope must be one of ${SCOPES.join(', ')}` };
   if (step.code !== undefined && step.custom !== undefined) return { ok: false, detail: `step ${index}: set_numbering code and custom are mutually exclusive` };
   if (step.symbol !== undefined && step.code !== 'bullet') return { ok: false, detail: `step ${index}: set_numbering symbol is only valid with code: 'bullet'` };
+  // GH #319: the glyph's own colour/font -- CODE:'bullet' REQUIRED in the SAME step (see header note).
+  if (step.bulletColor !== undefined && step.code !== 'bullet') return { ok: false, detail: `step ${index}: set_numbering bulletColor is only valid with code: 'bullet'` };
+  if (step.bulletFont !== undefined && step.code !== 'bullet') return { ok: false, detail: `step ${index}: set_numbering bulletFont is only valid with code: 'bullet'` };
 
   const fields = {};
   if (step.code !== undefined) {
@@ -130,6 +143,14 @@ function plan(step, index) {
   if (step.suffix !== undefined) {
     if (!SUFFIXES.includes(step.suffix)) return { ok: false, detail: `step ${index}: set_numbering suffix must be one of ${SUFFIXES.join(', ')}` };
     fields.suffix = step.suffix;
+  }
+  if (step.bulletColor !== undefined) {
+    if (typeof step.bulletColor !== 'string' || !HEX_RE.test(step.bulletColor)) return { ok: false, detail: `step ${index}: set_numbering bulletColor must be #RRGGBB` };
+    fields.bulletColor = step.bulletColor.toUpperCase();
+  }
+  if (step.bulletFont !== undefined) {
+    if (typeof step.bulletFont !== 'string' || !step.bulletFont.trim()) return { ok: false, detail: `step ${index}: set_numbering bulletFont must be a non-empty string` };
+    fields.bulletFont = step.bulletFont;
   }
   if (!fields.format && fields.start === undefined && fields.suffix === undefined) {
     return { ok: false, detail: `step ${index}: set_numbering requires at least one of code, custom, start, suffix` };
@@ -162,6 +183,17 @@ function fieldMatches(fmt, fields) {
     // the ToJSON spelling for 'none' is unmeasured -- 'nothing' accepted too, named here.
     const want = fields.suffix === 'none' ? ['none', 'nothing'] : [fields.suffix];
     out.suffix = !!fmt && want.includes(fmt.suff);
+  }
+  // GH #319: fmt.color/fmt.font come from the SAME ToJSON-sourced level read (docx-driver.cjs's
+  // own rPr.color/rFonts.ascii parse), never from the write args -- an unread/absent value is a
+  // non-match (false), not UNOBSERVABLE: the glyph's rPr is created by THIS write, so after a
+  // successful dispatch it is always observable (a still-missing value after dispatch is a real
+  // verify FAIL, not an unproven state).
+  if (fields.bulletColor !== undefined) {
+    out.bulletColor = !!fmt && typeof fmt.color === 'string' && fmt.color.toUpperCase() === fields.bulletColor.toUpperCase();
+  }
+  if (fields.bulletFont !== undefined) {
+    out.bulletFont = !!fmt && typeof fmt.font === 'string' && fmt.font === fields.bulletFont;
   }
   return out;
 }
@@ -312,6 +344,14 @@ function lower(op, target) {
  * The setter checks first, then the Bridge gate (a refusal writes nothing), the detach, and the level write on the COPY -- the level is
  * read again from the paragraph, never reused from before the detach. The body's { ok: true } is the receipt the driver requires.
  */
+/**
+ * GH #319: the bullet glyph's own colour/font -- through `level.GetTextPr()` (LIVE-measured,
+ * gh319-bulletcolorfont-probe-20261028: no direct setter on the level object itself). The
+ * EXISTENCE check (`tp`, fetched from the PRE-detach `level`) follows the SAME convention
+ * `needsCustom`/`SetCustomType` already uses above -- checked once, against `level`, before any
+ * write in either branch; the detach branch re-fetches its OWN TextPr from `moved` for the
+ * actual write (never reuses the pre-detach `tp` object across a detach).
+ */
 const LIST_DETACH_BLOCK = `  if (m.fields.start !== undefined && typeof level.SetStart !== 'function') return;
   if (m.fields.suffix !== undefined && typeof level.SetSuff !== 'function') return;
   const g = __eoL7Gate();
@@ -323,6 +363,12 @@ const LIST_DETACH_BLOCK = `  if (m.fields.start !== undefined && typeof level.Se
   if (needsCustom) moved.SetCustomType(m.fields.format.numFmt, m.fields.format.lvlText, m.fields.format.align);
   if (m.fields.start !== undefined) moved.SetStart(m.fields.start);
   if (m.fields.suffix !== undefined) moved.SetSuff(m.fields.suffix);
+  if (needsTextPr) {
+    const movedTp = moved.GetTextPr();
+    if (!movedTp) return { ok: false, stage: 'after-detach', reason: 'textpr-not-found', mutation: 'DETACHED' };
+    if (needsBulletColor) movedTp.SetColor(Api.HexColor(m.fields.bulletColor.replace('#', '')));
+    if (needsBulletFont) movedTp.SetFontFamily(m.fields.bulletFont);
+  }
   return { ok: true, detached: d.moved };
 `;
 
@@ -333,9 +379,8 @@ try {
   const textOpts = { Numbering: false };
   const doc = Api.GetDocument();
   if (!doc) return;
-  const hits = (doc.Search(m.targetText, { MatchCase: true }) || []).filter(r => String(r.GetText(textOpts) || '') === m.targetText);
-  if (hits.length !== 1) return;
-  const paragraph = hits[0].GetParagraph(0);
+${EXACT_PARAGRAPH_LOOKUP}
+  const paragraph = exactParagraphOf(m.targetText);
   if (!paragraph) return;
   const level = typeof paragraph.GetNumbering === 'function' ? paragraph.GetNumbering() : null;
   if (!level) return;
@@ -343,11 +388,24 @@ try {
   if (liveLevel !== m.ownLevel) return;
   const needsCustom = !!m.fields.format;
   if (needsCustom && typeof level.SetCustomType !== 'function') return;
+  const needsBulletColor = m.fields.bulletColor !== undefined;
+  const needsBulletFont = m.fields.bulletFont !== undefined;
+  const needsTextPr = needsBulletColor || needsBulletFont;
+  if (needsTextPr && typeof level.GetTextPr !== 'function') return;
+  let tp = null;
+  if (needsTextPr) {
+    tp = level.GetTextPr();
+    if (!tp) return;
+    if (needsBulletColor && typeof tp.SetColor !== 'function') return;
+    if (needsBulletFont && typeof tp.SetFontFamily !== 'function') return;
+  }
 ${meta.bridgeListDetach === true ? LIST_DETACH_BLOCK : ''}  if (m.fields.start !== undefined && typeof level.SetStart !== 'function') return;
   if (m.fields.suffix !== undefined && typeof level.SetSuff !== 'function') return;
   if (needsCustom) level.SetCustomType(m.fields.format.numFmt, m.fields.format.lvlText, m.fields.format.align);
   if (m.fields.start !== undefined) level.SetStart(m.fields.start);
   if (m.fields.suffix !== undefined) level.SetSuff(m.fields.suffix);
+  if (needsBulletColor) tp.SetColor(Api.HexColor(m.fields.bulletColor.replace('#', '')));
+  if (needsBulletFont) tp.SetFontFamily(m.fields.bulletFont);
 } catch (_) {}
 `;
 }

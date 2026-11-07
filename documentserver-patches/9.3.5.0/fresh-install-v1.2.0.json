@@ -1,0 +1,59 @@
+{
+  "_comment": "DS v9.3.5.0 fresh install plan, v1.2.0 (B3'): cell = euro-office-bridge-v1/9.3.5.0/29 (chart-read /1 + GH#362 + GH#365 R1-R3 + rev29-veryhidden block); word = euro-office-bridge-word-v1/9.3.5.0/5 (unchanged). cell.output_sha256 measured 2026-11-07 by running plan-rev29-veryhidden.py against the real unpatched 9.3.5.0 cell sdk-all.js taken from the Document Server 9.3.5.0 image; it equals the cell bundle served by the reference production deployment.",
+  "cell": {
+    "file": "sdkjs/cell/sdk-all.js",
+    "input_sha256": "5e1e7d6df5a0868ef08d9adea1e18d8b18a11cb2ce21c1ace94f5bc36bcd7b49",
+    "anchor": "Api.GetSheets=function(){",
+    "blocks": [
+      {
+        "_step": "xlnm-print-titles (GH #362)",
+        "old": "\"Print_Area\"===defNameList[i].Name&&null!=defNameList[i].LocalSheetId&&!0===defNameList[i].isXLNM&&(defNameList[i].Name=\"_xlnm.\"+defNameList[i].Name)",
+        "new": "(\"Print_Area\"===defNameList[i].Name||\"Print_Titles\"===defNameList[i].Name)&&null!=defNameList[i].LocalSheetId&&!0===defNameList[i].isXLNM&&(defNameList[i].Name=\"_xlnm.\"+defNameList[i].Name)"
+      },
+      {
+        "_step": "veryhidden-R1 (GH #365)",
+        "old": "case EVisibleType.visibleHidden:case EVisibleType.visibleVeryHidden:oWorksheet.bHidden=!0;break;",
+        "new": "case EVisibleType.visibleHidden:oWorksheet.bHidden=!0;break;case EVisibleType.visibleVeryHidden:oWorksheet.bHidden=!0;oWorksheet.bEoVeryHidden=!0;break;"
+      },
+      {
+        "_step": "veryhidden-R2 (GH #365)",
+        "old": "1==ws.bHidden?this.memory.WriteByte(EVisibleType.visibleHidden):this.memory.WriteByte(EVisibleType.visibleVisible)",
+        "new": "1==ws.bHidden?(ws.bEoVeryHidden===!0?this.memory.WriteByte(EVisibleType.visibleVeryHidden):this.memory.WriteByte(EVisibleType.visibleHidden)):this.memory.WriteByte(EVisibleType.visibleVisible)"
+      },
+      {
+        "_step": "veryhidden-R3 (GH #365)",
+        "old": "Worksheet.prototype.setHidden=function(hidden){",
+        "new": "Worksheet.prototype.setHidden=function(hidden){hidden||(this.bEoVeryHidden=!1);"
+      },
+      {
+        "file": "euro-office-chart-read-v1/chart-read-block.js",
+        "sha256": "20d06243532ccd40ee139e738da48b9afbc7baa160d57ced4f2545b647a678b1",
+        "layer": "euro-office-chart-read-v1/9.3.5.0/1",
+        "anchor": "AscBuilder.Cell.init=function("
+      },
+      {
+        "file": "euro-office-bridge-v1/rev29-veryhidden-candidate/bridge-block.js",
+        "sha256": "0a2fae2c9419ce12b09278260493a32e667b45c722b4cf5f1b9dbd0ac275b3ba",
+        "layer": "euro-office-bridge-v1/9.3.5.0/29"
+      }
+    ],
+    "output_sha256": "75da09a457559333c75583a92c267d62b5e0b0c7c3eb7e26b18498411ed49f97",
+    "patchVersion": "euro-office-bridge-v1/9.3.5.0/29",
+    "_comment": "v1.2.0 (B3'): cell /29 = chart-read /1 (unchanged) + GH#362 Print_Titles save-fix + GH#365 veryHidden R1-R3 + the rev29-veryhidden bridge block (/28 + sheet.veryHidden.read/v1), same chain plan-rev29-veryhidden.py produces against the real unpatched input. input_sha256 reused unchanged from fresh-install.json/fresh-install-v1.1.0.json (same base bundle). output_sha256 measured by running this repo's own plan-rev29-veryhidden.py against the real unpatched bundle (2026-11-07) -- equals the cell served by the reference production deployment."
+  },
+  "word": {
+    "file": "sdkjs/word/sdk-all.js",
+    "input_sha256": "4392397b3b3544d013108515374c60b35f42f97326694033dc9a60a2a9bd854e",
+    "anchor": "Api.attachEvent=function(eventName,callback){",
+    "blocks": [
+      {
+        "file": "euro-office-bridge-word-v1/rev5-candidate/bridge-block.js",
+        "sha256": "daf94343282b602c212d2e5f194a146b9ed64cc7c9c362ae7b5ecc73b51c4583",
+        "layer": "euro-office-bridge-word-v1/9.3.5.0/5"
+      }
+    ],
+    "output_sha256": "dd9c4a9aacd74602d83956fe8e35beebf9c51433fda005798ac5991bb9448945",
+    "patchVersion": "euro-office-bridge-word-v1/9.3.5.0/5",
+    "_comment": "v1.2.0 (B3'): word unchanged from v1.1.0 -- no word Bridge advance in this window (own audit, release-v1.2.0-rc-audit section 6)."
+  }
+}

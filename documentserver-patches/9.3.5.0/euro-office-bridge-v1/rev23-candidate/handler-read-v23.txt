@@ -1,0 +1,41 @@
+"sheet.printPageCount.read/v1": function (args) {
+  if (!args || typeof args !== "object" || typeof args.sheet !== "string" || args.sheet === "") return { ok: false, reason: "bad-args" };
+  var w = Api.GetSheet(args.sheet);
+  if (!w) return { ok: false, reason: "sheet-not-found" };
+  var m;
+  try { m = w.worksheet; } catch (e) { return { ok: false, reason: "model-missing" }; }
+  if (!m || typeof m.getIndex !== "function" || typeof m.getHidden !== "function" || !m.PagePrintOptions || typeof m.PagePrintOptions.clone !== "function") return { ok: false, reason: "model-missing" };
+  if (m.getHidden() === true) return { ok: false, reason: "sheet-hidden" };
+  var A = typeof window !== "undefined" && window ? window.Asc : null;
+  var X = typeof window !== "undefined" && window ? window.AscCommonExcel : null;
+  var E = A ? A.editor : null;
+  var wb = E ? E.wb : null;
+  if (!wb || typeof wb.calcPagesPrint !== "function" || typeof wb.getZoom !== "function" || typeof wb.changeZoom !== "function" || typeof A.asc_CAdjustPrint !== "function" || !A.c_oAscPrintType || typeof A.c_oAscPrintType.ActiveSheets !== "number") return { ok: false, reason: "print-calc-unavailable" };
+  var cap = X ? X.c_kMaxPrintPages : void 0;
+  if (typeof cap !== "number" || !(cap > 0)) return { ok: false, reason: "print-calc-unavailable" };
+  var H = typeof AscCommon !== "undefined" && AscCommon ? AscCommon.History : null;
+  if (!H || typeof H.TurnOff !== "function" || typeof H.TurnOn !== "function") return { ok: false, reason: "history-missing" };
+  var adj = new A.asc_CAdjustPrint();
+  if (typeof adj.asc_setPrintType !== "function" || typeof adj.asc_setActiveSheetsArray !== "function") return { ok: false, reason: "print-calc-unavailable" };
+  adj.asc_setPrintType(A.c_oAscPrintType.ActiveSheets);
+  adj.asc_setActiveSheetsArray([m.getIndex()]);
+  var real = m.PagePrintOptions;
+  var copy;
+  try { copy = real.clone(m); } catch (e) { return { ok: false, reason: "options-clone-threw" }; }
+  if (!copy || copy === real) return { ok: false, reason: "options-clone-threw" };
+  var z = wb.getZoom();
+  var res;
+  var threw = false;
+  m.PagePrintOptions = copy;
+  H.TurnOff();
+  try { res = wb.calcPagesPrint(adj); } catch (e) { threw = true; } finally {
+    H.TurnOn();
+    m.PagePrintOptions = real;
+    try { if (wb.getZoom() !== z) wb.changeZoom(z, true, true); } catch (e) { }
+  }
+  if (threw) return { ok: false, reason: "print-calc-threw" };
+  var pages = res ? res.arrPages : null;
+  if (!Array.isArray(pages)) return { ok: false, reason: "print-calc-unexpected-shape" };
+  if (pages.length >= cap) return { ok: false, reason: "page-count-capped" };
+  return { ok: true, value: { pages: pages.length } };
+},

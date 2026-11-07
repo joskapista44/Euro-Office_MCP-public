@@ -26,6 +26,12 @@ function norm(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+// GH #317: `norm` with one difference -- a TAB survives (a real <w:tab/> in a header/footer paragraph is
+// content the caller wrote, not layout whitespace). Every other whitespace run still becomes one space.
+function normKeepTabs(value) {
+  return String(value ?? '').replace(/[^\S\t]+/g, ' ').replace(/^ +/, '').replace(/ +$/, '');
+}
+
 function decodeHtml(s) {
   return String(s || '')
     .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
@@ -218,6 +224,10 @@ function attachProperties(blocks, paragraphs) {
       ...(typeof n.format.suff === 'string' ? { suff: n.format.suff } : {}),
       ...(typeof n.format.lvlJc === 'string' ? { lvlJc: n.format.lvlJc } : {}),
       ...(Number.isInteger(n.format.start) ? { start: n.format.start } : {}),
+      // GH #319: the bullet glyph's own colour/font (the SAME rPr.color/rFonts.ascii the driver's
+      // own ToJSON parse reads) -- re-validated here too, same discipline as every other key above.
+      ...(typeof n.format.color === 'string' ? { color: n.format.color } : {}),
+      ...(typeof n.format.font === 'string' ? { font: n.format.font } : {}),
     }) : null;
     return Object.freeze({ ...n, levelFormats: lf, format: fmt });
   };
@@ -243,6 +253,10 @@ function attachProperties(blocks, paragraphs) {
     node.hyperlinks = h && Array.isArray(h.hyperlinks) ? Object.freeze(h.hyperlinks.map(x => Object.freeze({ ...x }))) : (h && typeof h.hyperlinks === 'string' && h.hyperlinks.startsWith('UNOBSERVABLE:') ? h.hyperlinks : null);   // a NAMED unreadable field stays named; absent stays null
     node.noteRefs = h && h.noteRefs && typeof h.noteRefs === 'object' ? Object.freeze({ ...h.noteRefs }) : (h && typeof h.noteRefs === 'string' && h.noteRefs.startsWith('UNOBSERVABLE:') ? h.noteRefs : null);   // a NAMED unreadable count stays named; absent stays null
     node.liveText = covered ? String(h.text) : null;
+    // GH #313 R2: this paragraph's own section index (value-based chain-walk, docx-driver.cjs's
+    // sectionIndexOf -- same text-match attach as every other per-paragraph field here). A bare
+    // integer or an UNOBSERVABLE: string; absent (no unique live match) stays null.
+    node.sectionIndex = h && (Number.isInteger(h.sectionIndex) || (typeof h.sectionIndex === 'string' && h.sectionIndex.startsWith('UNOBSERVABLE:'))) ? h.sectionIndex : null;
     node.runs = covered
       ? Object.freeze(h.runs.map(r => Object.freeze({ text: String(r.text), start: r.start, end: r.end, format: Object.freeze({ ...(r.format || {}) }) })))
       : null;
@@ -305,15 +319,57 @@ function shadingVal(v) {
   if (v && typeof v === 'object') return Object.freeze({ val: v.val, fill: v.fill, color: v.color });
   return unobservableOr(v, null);
 }
-/** GH #268b: one driver image row -> the inventory row: placement inline | floating (the ToJSON drawingType inline | anchor), the size in EMU, absent properties null, a failed ToJSON read named on every JSON-derived field. */
+/** GH #268b: one driver image row -> the inventory row: placement inline | floating (the ToJSON drawingType inline | anchor), the size in EMU, absent properties null, a failed ToJSON read named on every JSON-derived field.
+ * GH #306b: `part` ('body' | 'header:<sectionIndex>:<variant>' | 'footer:<sectionIndex>:<variant>') passed through as-is -- a named string, or a named 'UNOBSERVABLE:<reason>' (the driver's own
+ * enumeration-count-mismatch gate), never re-derived here. `index` is UNCHANGED from before this field existed (still doc.GetAllImages() order) -- image.cjs's set_image_size/set_image_wrap address
+ * an image by this same index directly against doc.GetAllImages(), so this row never reorders. */
+/** GH #306 part 4: an image row's floating placement (docx-images-read.cjs) -- the SAME fields shapeRowOf below carries; a failed ToJSON (`j`) names every one of them. */
+const IMAGE_PLACEMENT_STRINGS = Object.freeze(['hRel', 'hAlign', 'vRel', 'vAlign']);
+function imagePlacementOf(r, j) {
+  if (j) return { behindDoc: j, hRel: j, hAlign: j, hOffset: j, vRel: j, vAlign: j, vOffset: j };
+  const out = { behindDoc: typeof r.behindDoc === 'boolean' ? r.behindDoc : null };
+  for (const k of IMAGE_PLACEMENT_STRINGS) out[k] = typeof r[k] === 'string' ? r[k] : null;
+  for (const k of ['hOffset', 'vOffset']) out[k] = typeof r[k] === 'number' && Number.isFinite(r[k]) ? r[k] : null;
+  return out;
+}
 function imageRowOf(r) {
   const j = typeof r.json === 'string' ? r.json : null;
   const placement = j || (r.drawingType === 'inline' ? 'inline' : (r.drawingType === 'anchor' ? 'floating' : (r.drawingType === null || r.drawingType === undefined ? 'UNOBSERVABLE:drawing-type-absent' : `UNKNOWN:${r.drawingType}`)));
   return Object.freeze({
-    index: r.index, alt: j || (r.descr === undefined ? null : r.descr), title: j || (r.title === undefined ? null : r.title),
+    index: r.index, part: typeof r.part === 'string' ? r.part : null,
+    alt: j || (r.descr === undefined ? null : r.descr), title: j || (r.title === undefined ? null : r.title),
     placement, wrap: j || (r.wrapType === undefined ? null : r.wrapType), widthEmu: j || (r.cx === undefined ? null : r.cx), heightEmu: j || (r.cy === undefined ? null : r.cy),
+    ...imagePlacementOf(r, j),
     paragraph: typeof r.paragraph === 'string' ? r.paragraph : null,
+    // GH #317 follow-up: the paragraph's index inside its own part (docx-images-read.cjs part-walk) -- an integer, the walk's own named gap, or null.
+    paragraphIndex: Number.isInteger(r.paragraphIndex) || (typeof r.paragraphIndex === 'string' && r.paragraphIndex.startsWith('UNOBSERVABLE:')) ? r.paragraphIndex : null,
   });
+}
+
+/** GH #309: one driver shape row -> the inventory row (docx-shapes-read.cjs): the shape's OWN text, its size in EMU, the text of its own (empty) body paragraph and of the body element right before it. Absent -> null; a failed read stays 'UNOBSERVABLE:<reason>'. */
+function shapeRowOf(r) {
+  const s = v => (typeof v === 'string' ? v : null);
+  const n = v => (typeof v === 'number' && Number.isFinite(v) ? v : (typeof v === 'string' ? v : null));
+  const b = v => (typeof v === 'boolean' || typeof v === 'string' ? v : null);
+  return Object.freeze({
+    index: r.index, text: s(r.text), widthEmu: n(r.cx), heightEmu: n(r.cy), paragraph: s(r.paragraph), previous: s(r.previous),
+    // GH #309 part 3: the ToJSON placement projection (drawingType 'inline' | 'anchor', wrapType, behindDoc, positionH / positionV)
+    drawingType: s(r.drawingType), wrapType: s(r.wrapType), behindDoc: b(r.behindDoc),
+    hRel: s(r.hRel), hAlign: s(r.hAlign), hOffset: n(r.hOffset), vRel: s(r.vRel), vAlign: s(r.vAlign), vOffset: n(r.vOffset),
+  });
+}
+
+/** GH #323: one driver chart row -> the inventory row (docx-charts-read.cjs): the chart type, its size in EMU, its own (empty) body paragraph and the body element right before it, and the
+ * series / categories inflated from the driver's JSON strings. A string that does not parse, or a failed read, is named ('UNOBSERVABLE:<reason>'), never a guessed value. */
+function chartRowOf(r) {
+  const s = v => (typeof v === 'string' ? v : null);
+  const n = v => (typeof v === 'number' && Number.isFinite(v) ? v : (typeof v === 'string' ? v : null));
+  const inflate = v => {
+    if (typeof v !== 'string') return null;
+    if (v.startsWith('UNOBSERVABLE:')) return v;
+    try { return JSON.parse(v); } catch { return 'UNOBSERVABLE:chart-json-unparsable'; }
+  };
+  return Object.freeze({ index: r.index, type: s(r.type), widthEmu: n(r.cx), heightEmu: n(r.cy), paragraph: s(r.paragraph), previous: s(r.previous), series: inflate(r.seriesJson), categories: inflate(r.categoriesJson) });
 }
 
 function tableFormatOf(f) {
@@ -414,11 +470,16 @@ function normalizeInventory(payload) {
     // GH #268b: the images the driver's page-side projection returned (docx-images-read.cjs): per image a row of primitives; 'UNOBSERVABLE:<reason>' per field / for the whole list when a read failed.
     // NOT the preservation multiset `images` above (the HTML projection's src / alt / title): that one stays as it is.
     images: Array.isArray(d.images) ? Object.freeze(d.images.map(imageRowOf)) : (typeof d.images === 'string' ? d.images : 'UNOBSERVABLE:unread'),
+    // GH #309: the DrawingML shapes the driver's page-side walk returned (docx-shapes-read.cjs): per shape a row of primitives. A DOCUMENT-level list like `images` (a shape paragraph has no text, so the
+    // per-paragraph read skips it); canonicalBlock never reads it, so no other intent's preservation moves. 'UNOBSERVABLE:<reason>' for the whole list when the read failed.
+    shapes: Array.isArray(d.shapes) ? Object.freeze(d.shapes.map(shapeRowOf)) : (typeof d.shapes === 'string' ? d.shapes : 'UNOBSERVABLE:unread'),
+    // GH #323: the native charts the driver's page-side walk returned (docx-charts-read.cjs), the SAME document-level row-list shape as `shapes` above.
+    charts: Array.isArray(d.charts) ? Object.freeze(d.charts.map(chartRowOf)) : (typeof d.charts === 'string' ? d.charts : 'UNOBSERVABLE:unread'),
     // Wave 5: per section, per kind (header/footer), per variant: null = no part of its own;
     // the part's paragraphs (normalized text + format). sections null = unread.
     sections: Array.isArray(d.sections) ? Object.freeze(d.sections.map((s, index) => {
       const part = p => (p && Array.isArray(p.paras) ? Object.freeze({ paragraphs: p.paragraphs, simple: p.simple === true,
-        paras: Object.freeze(p.paras.map(x => Object.freeze({ text: norm(x.text), format: Object.freeze({ ...(x.format || {}) }),
+        paras: Object.freeze(p.paras.map(x => Object.freeze({ text: normKeepTabs(x.text), format: Object.freeze({ ...(x.format || {}) }),
           // M5 gate 6: the effective run properties; null = unread
           runs: Array.isArray(x.runs) ? Object.freeze(x.runs.map(r => Object.freeze({ ...r, text: String(r.text || '') }))) : null,
           // GH #289: the non-plain content types of the paragraph's public ToJSON (a field, an image ...); null = unread
@@ -439,7 +500,12 @@ function normalizeInventory(payload) {
         pageWidth: measured(s.pageWidth), pageHeight: measured(s.pageHeight),
         margins: Object.freeze({ top: measured(s.margins && s.margins.top), right: measured(s.margins && s.margins.right), bottom: measured(s.margins && s.margins.bottom), left: measured(s.margins && s.margins.left) }),
         columnsCount: measured(s.columnsCount), columnsSpaces: measuredArr(s.columnsSpaces), startPageNumber: measured(s.startPageNumber),
-      } : { pageWidth: 'UNOBSERVABLE:unread', pageHeight: 'UNOBSERVABLE:unread', margins: Object.freeze({ top: 'UNOBSERVABLE:unread', right: 'UNOBSERVABLE:unread', bottom: 'UNOBSERVABLE:unread', left: 'UNOBSERVABLE:unread' }), columnsCount: 'UNOBSERVABLE:unread', columnsSpaces: 'UNOBSERVABLE:unread', startPageNumber: 'UNOBSERVABLE:unread' };
+        // GH #313: the section's own break type (nextPage/continuous/...) -- same `measured()`
+        // passthrough (a real string verbatim, the driver's own 'UNOBSERVABLE:<reason>' AS-IS,
+        // never a guessed default). closingBlockIndex was tried and REMOVED here (R1 LIVE review):
+        // see docx-driver.cjs's own comment at the same spot.
+        type: measured(s.type),
+      } : { pageWidth: 'UNOBSERVABLE:unread', pageHeight: 'UNOBSERVABLE:unread', margins: Object.freeze({ top: 'UNOBSERVABLE:unread', right: 'UNOBSERVABLE:unread', bottom: 'UNOBSERVABLE:unread', left: 'UNOBSERVABLE:unread' }), columnsCount: 'UNOBSERVABLE:unread', columnsSpaces: 'UNOBSERVABLE:unread', startPageNumber: 'UNOBSERVABLE:unread', type: 'UNOBSERVABLE:unread' };
       return Object.freeze({ index, header: kind('header'), footer: kind('footer'), titlePage: variantFlag(s && s.titlePage), evenAndOdd: variantFlag(s && s.evenAndOdd), ...pageSetup });
     })) : null,
     // W-10 (style DEFINITIONS): keyed by NAME (never styleId -- the driver's own
@@ -492,4 +558,4 @@ function countExact(primary, text) {
   return ((primary && primary.blocks) || []).filter(b => blockText(b) === wanted).length;
 }
 
-module.exports = { normalizeInventory, stripFootnoteProjection, parseBlocks, parseImages, norm, blockText, countExact, textUnits, tablesContent, resolveTextUnit };
+module.exports = { normalizeInventory, stripFootnoteProjection, parseBlocks, parseImages, norm, normKeepTabs, blockText, countExact, textUnits, tablesContent, resolveTextUnit };

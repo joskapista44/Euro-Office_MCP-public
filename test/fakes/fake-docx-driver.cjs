@@ -68,8 +68,11 @@ function htmlOf(paragraphs, images = [], doc = null) {
   }
 }
 
-const TEXT_KEYS = ['bold', 'italic', 'underline', 'strike', 'fontFamily', 'fontSize', 'language', 'color', 'highlight', 'vertAlign'];
-const pointSize = v => (Number(v) > 16 ? Number(v) / 2 : Number(v));
+// GH #318 (CANDIDATE): characterSpacing is run-level (ApiTextPr.SetSpacing), same bucket as color/
+// highlight/vertAlign -- plain pass-through, no fontSize-style doubling (that 2x is this fixture's
+// own half-point convention for fontSize, not a product rule the new field inherits).
+const TEXT_KEYS = ['bold', 'italic', 'underline', 'strike', 'fontFamily', 'fontSize', 'language', 'color', 'highlight', 'vertAlign', 'characterSpacing'];
+const pointSize = v => Number(v) / 2;
 
 /** A paragraph's runs; a paragraph without explicit runs is one run carrying its `props`. */
 const runsOf = p => (Array.isArray(p.runs) ? p.runs : [{ text: p.text, props: p.props || {} }]);
@@ -85,6 +88,13 @@ function runFormat(props) {
   if (pr.color) f.color = pr.color;
   if (pr.highlight) f.highlight = pr.highlight;
   if (pr.vertAlign) f.vertAlign = pr.vertAlign;
+  // GH #318: UNLIKE every other key above, characterSpacing is ALWAYS observable, not absent --
+  // same reasoning as fontSize's pointSize() baseline, but fontSize happens to always be set in
+  // every fixture here. The real driver's Number(null)=0 reading (docx-driver.cjs) makes an
+  // untouched run's characterSpacing a DEFINITE 0, which rangeState()'s per-character unknown-
+  // check (TEXT_KEYS loop) and compare()'s paragraph-level aggregation both need, to classify a
+  // first-time request as APPLY rather than an unobservable fail-closed.
+  f.characterSpacing = Number.isFinite(Number(pr.characterSpacing)) ? Number(pr.characterSpacing) : 0;
   return f;
 }
 
@@ -100,6 +110,13 @@ function formatOf(p) {
     fontFamily: pr.fontFamily, fontSize: pointSize(pr.fontSize),
     language: pr.language, alignment: 'left', spaceBefore: 0, spaceAfter: 0, lineSpacing: 1, style: 'Normal',
     color: pr.color, highlight: pr.highlight, vertAlign: pr.vertAlign,
+    // GH #315/#318 candidates: lineSpacingRule mirrors shading's observable 'auto' sentinel (the
+    // real driver's own matching fix, docx-driver.cjs's lineSpacing read block) -- an untouched
+    // paragraph is DEFINITELY on the 'auto' rule, not unobservable. characterSpacing mirrors
+    // fontSize's always-numeric baseline (the real driver's Number(null)=0 reading, same
+    // ambiguity already accepted for fontSize) -- 0 on an untouched run, not absent.
+    lineSpacingRule: 'auto',
+    characterSpacing: Number.isFinite(Number(pr.characterSpacing)) ? Number(pr.characterSpacing) : 0,
     // W-09: numeric getters (like spaceBefore/spaceAfter above) have a real baseline (no
     // indentation) even on an untouched paragraph. shading's "no colour set" sentinel is 'auto'
     // (the Builder's own IsAutoColor() terminology, measured) -- NOT absent/null: an absent key
@@ -221,11 +238,17 @@ const DEFAULT_TABLE_STYLES = Object.freeze([Object.freeze({ name: 'Table Grid', 
 /** Wave 5: the driver's public read of one header/footer part (paragraph text ends in '\r\n', probes 1-2). */
 function partRead(part) {
   if (!part) return null;
-  const fmt = x => ({ ...runFormat(x.props), alignment: x.alignment || 'left', ...(x.style ? { style: x.style } : {}) });
+  // GH #317: tabs are PARAGRAPH-level (like alignment), ALWAYS present (an empty array, never
+  // undefined/omitted) -- the SAME always-present shape the real driver's paragraphFormat() gives
+  // (docx-driver.cjs: `format.tabs = Array.isArray(ptj.tabs) ? ... : []`).
+  const fmt = x => ({ ...runFormat(x.props), alignment: x.alignment || 'left', tabs: x.tabs || [], ...(x.style ? { style: x.style } : {}) });
   // M5 gate 6: the effective properties of the paragraph's one run, in the RAW getter units (the LIVE
   // read: bold/italic/underline/strike booleans, font family, size as GetFontSize returns it)
-  const runs = x => [{ text: x.text, bold: !!(x.props || {}).bold, italic: !!(x.props || {}).italic, underline: !!(x.props || {}).underline, strike: !!(x.props || {}).strike,
-    fontFamily: (x.props || {}).fontFamily, fontSize: (x.props || {}).fontSize }];
+  // GH #316: color via the SAME conditional-presence convention as the real driver's colorHex (never
+  // an undefined/null key) -- fontSize deliberately stays the RAW, un-halved value: the real driver's
+  // header/footer run reader has no `/2` either (see header-footer.cjs's own module comment).
+  const runs = x => { const r = { text: x.text, bold: !!(x.props || {}).bold, italic: !!(x.props || {}).italic, underline: !!(x.props || {}).underline, strike: !!(x.props || {}).strike,
+    fontFamily: (x.props || {}).fontFamily, fontSize: (x.props || {}).fontSize }; if ((x.props || {}).color) r.color = (x.props || {}).color; return [r]; };
   // GH #289: `x.runs` ([{ text, props? }]) models a paragraph of several runs (a field / an image is a run with no text)
   const runsOf = x => (Array.isArray(x.runs) ? x.runs.map(r => runs({ text: r.text, props: r.props || x.props })[0]) : runs(x));
   const textOf = x => (Array.isArray(x.runs) ? x.runs.map(r => r.text).join('') : x.text);
@@ -279,10 +302,33 @@ function createFakeDocxDriver(store, script = {}) {
     if (hits.length !== 1) return; // the real command also returns without mutating
     if (script.fault === 'insert-only') { hits[0].text = `${newText}${oldText}`; dirty = true; return; }
     if (script.fault === 'ignore') return;
+    // GH #359 (3/3), measured LIVE (three run-count shapes): a rewrite's
+    // new, single run deterministically takes on the FIRST source run's own formatting -- modelled
+    // HERE, explicitly, because the default path below (props/runs left untouched) cannot
+    // reproduce the measured mismatch: a mixed-run baseline that stays mixed on BOTH sides of the
+    // comparison trivially matches itself. 'rewrite-collapses-to-second-run' is the negative
+    // control zero asked for (the engine giving the SECOND run's value instead stays L3 FAIL).
+    if (script.fault === 'rewrite-collapses-to-first-run' || script.fault === 'rewrite-collapses-to-second-run') {
+      const runs = Array.isArray(hits[0].runs) ? hits[0].runs : [];
+      const picked = script.fault === 'rewrite-collapses-to-first-run' ? runs[0] : runs[1];
+      if (picked) hits[0].props = { ...picked.props };
+      hits[0].runs = undefined;
+    }
     hits[0].text = newText;
     if (script.fault === 'rewrite-into-list') hits[0].list = { type: 'bullet', level: 0, numId: 'undeclared' };
     // `dropPropsOn` limits the fault to the listed dispatch numbers (1-based); absent = every rewrite.
     if (script.fault === 'drop-props' && (!script.dropPropsOn || script.dropPropsOn.includes(calls.dispatch))) hits[0].props = { ...hits[0].props, bold: false, italic: false, language: 'en-US' };
+    dirty = true;
+  }
+
+  /** GH #307: the `emptyDocument` write -- no oldText to search by (there is none), so the
+   * precondition is the SAME one the real command checks inside itself: exactly one paragraph,
+   * trimmed-empty. AddText on an empty paragraph starts a fresh run, so `props` stays whatever it
+   * already was (null/absent for a never-formatted paragraph) -- mirrors the real editor: there was
+   * no run before, so there is no "old" formatting to carry over. */
+  function applyRewriteEmptyDocument({ newText }) {
+    if (live.length !== 1 || String(live[0].text || '').trim() !== '') return;
+    live[0].text = newText;
     dirty = true;
   }
 
@@ -325,6 +371,13 @@ function createFakeDocxDriver(store, script = {}) {
     p.format = fmt;
     p.props = { ...p.props, ...Object.fromEntries(['bold', 'italic', 'underline', 'strike', 'fontFamily', 'language', 'color', 'highlight', 'vertAlign'].filter(k => k in fmt).map(k => [k, fmt[k]])) };
     if ('fontSize' in format && !(f === 'format-partial' && !apply.includes('fontSize'))) p.props.fontSize = format.fontSize * 2;
+    // GH #318: unlike the list above, characterSpacing's `fmt` value is ALWAYS present (the new
+    // observable-0 baseline, same reasoning as fontSize just above) -- mirroring it unconditionally
+    // would stamp a brand-new `characterSpacing` key into props on EVERY format_text write, even one
+    // that never asked for it, which a preservation check (constraints.cjs's formattingUnchangedExcept
+    // Requested) would then see as a changed, unrequested field. Mirror it ONLY when requested, the
+    // same `'<key> in format'` guard fontSize uses.
+    if ('characterSpacing' in format && !(f === 'format-partial' && !apply.includes('characterSpacing'))) p.props.characterSpacing = fmt.characterSpacing;
     if (Array.isArray(p.runs)) setRangeProps(p, 0, p.text.length, Object.fromEntries(apply.filter(k => TEXT_KEYS.includes(k)).map(k => [k, k === 'fontSize' ? format[k] * 2 : format[k]])));
     if (f === 'format-drop-other') { const i = live.findIndex(x => x !== p); if (i >= 0) live.splice(i, 1); }
     if (f === 'format-change-text') p.text = `${p.text} (edited)`;
@@ -461,6 +514,11 @@ function createFakeDocxDriver(store, script = {}) {
     if (m.fields.format) { next.numFmt = m.fields.format.numFmt; next.lvlText = m.fields.format.lvlText; next.lvlJc = m.fields.format.align; }
     if (m.fields.start !== undefined) next.start = f === 'numbering-start-not-written' ? current.start : m.fields.start;
     if (m.fields.suffix !== undefined) next.suff = f === 'numbering-suffix-nothing-spelling' && m.fields.suffix === 'none' ? 'nothing' : m.fields.suffix;
+    // GH #319: the bullet glyph's own colour/font -- level.GetTextPr().SetColor/SetFontFamily
+    // (LIVE-measured, gh319-bulletcolorfont-probe-20261028), mirrored here the SAME way the
+    // other three setters already are: a plain field write on the SAME shared slot.
+    if (m.fields.bulletColor !== undefined) next.color = f === 'numbering-bulletcolor-not-written' ? current.color : m.fields.bulletColor;
+    if (m.fields.bulletFont !== undefined) next.font = f === 'numbering-bulletfont-not-written' ? current.font : m.fields.bulletFont;
     slot[m.ownLevel] = next;
     if (f === 'numbering-touch-other-numid') { const otherId = Object.keys(liveDoc.numberingFormats).find(k => k !== m.numId); if (otherId) liveDoc.numberingFormats[otherId][0] = { ...(liveDoc.numberingFormats[otherId][0] || {}), lvlJc: 'right' }; }
     // GH #248: a write at one level that also rewrites ANOTHER level of the same numbering
@@ -714,7 +772,21 @@ function createFakeDocxDriver(store, script = {}) {
    * header/footer probes 1-2): the whole content becomes ONE plain paragraph (default run props,
    * left alignment); a created part exists only on that section. Faults model the negative controls.
    */
-  function applyHeaderFooter({ part, variant, sectionIndex, sectionCount, create, text, activate = false, mode, paragraphIndex, paragraphCount, oldText, inheritedBy = [], pageNumber = false }) {
+  function applyHeaderFooter({ part, variant, sectionIndex, sectionCount, create, text, lines, activate = false, mode, paragraphIndex, paragraphCount, oldText, inheritedBy = [], pageNumber = false, format = null }) {
+    // GH #316: merges `format`'s run-level keys into `props` and its `alignment` (if any) onto the
+    // paragraph object -- the SAME shape header-footer.cjs's own plan()/normalizeWanted produces.
+    // fontSize is stored DOUBLED (half-points), the SAME convention format_text's own write already uses
+    // (line ~355 below, `p.props.fontSize = format.fontSize * 2`) -- formatOf()/runFormat()'s pointSize()
+    // halves it back on read, so the paragraph-level `format.fontSize` a caller asked for round-trips.
+    const applyFmt = target => {
+      if (!format) return;
+      // GH #317: tabs are PARAGRAPH-level (like alignment), stored on the target directly, never
+      // merged into `props` (which models RUN-level properties only).
+      const { alignment, fontSize, tabs, ...runFmt } = format;
+      target.props = { ...target.props, ...runFmt, ...(fontSize !== undefined ? { fontSize: fontSize * 2 } : {}) };
+      if (alignment !== undefined) target.alignment = alignment;
+      if (tabs !== undefined) target.tabs = tabs;
+    };
     // H-07a: the sections inheriting the part (the later ones up to the first with its own) -- exactly the named ones
     const inheritsOk = () => { const aff = []; for (let j = sectionIndex + 1; j < liveDoc.sections.length && !liveDoc.sections[j][part][variant]; j += 1) aff.push(j); return JSON.stringify(aff) === JSON.stringify(inheritedBy); };
     const secs = liveDoc.sections;
@@ -739,7 +811,8 @@ function createFakeDocxDriver(store, script = {}) {
         if (nonEmpty.length !== 1) return;
         nonEmpty[0].text = text;
       } else target.text = text;
-      if (f === 'hf-para-drop-format') { target.props = { ...PLAIN }; target.alignment = 'left'; delete target.style; }
+      applyFmt(target);
+      if (f === 'hf-para-drop-format') { target.props = { ...PLAIN }; target.alignment = 'left'; delete target.style; delete target.tabs; }
       if (f === 'hf-para-drop-inline') target.inline = [];
       if (f === 'hf-para-touch-table' && Array.isArray(own.tables) && own.tables.length) own.tables[0].rows[0][0] = `${own.tables[0].rows[0][0]} (edited)`;
       dirty = true;
@@ -757,13 +830,19 @@ function createFakeDocxDriver(store, script = {}) {
     const f = faultActive() ? script.fault : null;
     if (f === 'ignore') return;
     const other = part === 'header' ? 'footer' : 'header';
-    const fresh = t => ({ nonPlain: false, paras: [{ text: t, props: { ...PLAIN }, alignment: 'left' }] });
+    const fresh = t => { const p0 = { text: t, props: { ...PLAIN }, alignment: 'left' }; applyFmt(p0); return { nonPlain: false, paras: [p0] }; };
     if (f === 'hf-into-other-kind') sec[other][variant] = fresh(text);
     else if (f === 'hf-wrong-section') { const j = sectionIndex + 1 < secs.length ? sectionIndex + 1 : sectionIndex - 1; if (secs[j]) secs[j][part][variant] = fresh(text); }
     else if (f === 'hf-wrong-variant') sec[part].even = fresh(text);
     else if (f === 'hf-leftover-paragraph') sec[part][variant] = { nonPlain: false, paras: [{ text: '', props: { ...PLAIN }, alignment: 'left' }, { text, props: { ...PLAIN }, alignment: 'left' }] };
     else if (f === 'hf-append') sec[part][variant] = { nonPlain: false, paras: [{ text: `${(sec[part][variant] || fresh('')).paras.map(x => x.text).join(' ')} ${text}`.trim(), props: { ...PLAIN }, alignment: 'left' }] };
-    else sec[part][variant] = pageNumber && f !== 'hf-page-number-missing' ? { nonPlain: false, paras: [{ text: '', runs: [{ text }, { text: '' }], inline: ['pgNum'], props: { ...PLAIN }, alignment: 'left' }] } : fresh(text);
+    else if (pageNumber && f !== 'hf-page-number-missing') { const p0 = { text: '', runs: [{ text }, { text: '' }], inline: ['pgNum'], props: { ...PLAIN }, alignment: 'left' }; applyFmt(p0); sec[part][variant] = { nonPlain: false, paras: [p0] }; }
+    // GH #317 "lines": N paragraphs, EACH its own text and the SAME format (the fake models the
+    // real mechanism's end state -- one reset paragraph + Push per further line -- not the Push
+    // calls themselves, the SAME level of abstraction `fresh()` already uses for the single-text case)
+    else if (f === 'hf-lines-drop-a-line' && Array.isArray(lines) && lines.length > 1) sec[part][variant] = { nonPlain: false, paras: lines.slice(0, -1).map(t => { const p0 = { text: t, props: { ...PLAIN }, alignment: 'left' }; applyFmt(p0); return p0; }) };
+    else if (Array.isArray(lines)) sec[part][variant] = { nonPlain: false, paras: lines.map(t => { const p0 = { text: t, props: { ...PLAIN }, alignment: 'left' }; applyFmt(p0); return p0; }) };
+    else sec[part][variant] = fresh(text);
     if (f === 'hf-body-change' && live.length) live[0].text = `${live[0].text} (edited)`;
     if (f === 'hf-other-section' && secs.length > 1) { const j = sectionIndex === 0 ? 1 : 0; secs[j][other][variant] = fresh('CHANGED ELSEWHERE'); }
     if (f === 'hf-other-kind-changed') sec[other][variant] = fresh('CHANGED OTHER KIND');
@@ -1351,7 +1430,8 @@ function createFakeDocxDriver(store, script = {}) {
               // GH #292 S3: the real ToJSON carries the base's styleId; the fake's styleId is 'id:<name>', the driver-resolved basedOnName the name
               name, identity: { name, basedOn: st.basedOn ? `id:${st.basedOn}` : null, next: st.next ? `id:${st.next}` : null, link: st.link ? `id:${st.link}` : null, styleType: st.type === 'character' ? 'characterStyle' : 'paragraphStyle', basedOnName: st.basedOn || null, nextName: st.next || null, linkName: st.link || null }, // GH #292 S5: the measured ToJSON styleType
               text: { bold: field('text', 'bold'), size: convert(field('text', 'size'), 2), color: field('text', 'color'),
-                italic: newField('text', 'italic'), underline: newField('text', 'underline'), strike: newField('text', 'strike'), fontFamily: newField('text', 'fontFamily') },
+                italic: newField('text', 'italic'), underline: newField('text', 'underline'), strike: newField('text', 'strike'), fontFamily: newField('text', 'fontFamily'),
+                language: newField('text', 'language') }, // GH #324: no unit conversion, same 'inherited' fallback as italic/underline/strike/fontFamily
               paragraph: { align: field('paragraph', 'align'), indentLeft: convert(field('paragraph', 'indentLeft'), 20), spacingAfter: convert(field('paragraph', 'spacingAfter'), 20),
                 spacingBefore: convert(newField('paragraph', 'spacingBefore'), 20), indentRight: convert(newField('paragraph', 'indentRight'), 20), indentFirstLine: convert(newField('paragraph', 'indentFirstLine'), 20),
                 keepNext: newField('paragraph', 'keepNext'), keepLines: newField('paragraph', 'keepLines'), pageBreakBefore: newField('paragraph', 'pageBreakBefore') },
@@ -1378,6 +1458,7 @@ function createFakeDocxDriver(store, script = {}) {
       if (!command || command.kind !== 'callCommand' || !command.meta) return { ok: false, dispatched: true };
       const a = command.meta.action;
       if (a === 'rewrite') applyRewrite(command.meta);
+      else if (a === 'rewriteEmptyDocument') applyRewriteEmptyDocument(command.meta);
       else if (a === 'format') (command.meta.matchText !== undefined ? applyRangeFormat : applyFormat)(command.meta);
       else if (a === 'insert') applyInsert(command.meta);
       else if (a === 'delete') applyDelete(command.meta);
@@ -1405,6 +1486,14 @@ function createFakeDocxDriver(store, script = {}) {
       // M5 constraints: a scripted SIDE EFFECT of the write on the live state (a change the command
       // should not have made -- another paragraph, a table, formatting), for the post-write L3 controls
       if (typeof script.sideEffect === 'function') { script.sideEffect({ live, liveDoc, dispatch: calls.dispatch }); dirty = true; }
+      // GH #359 (1) 1/2 review (#ref, point 1): the REAL driver (docx-driver.cjs) now reports the
+      // rewrite commandBody's named no-write reason on `dispatchResult.reason`. This fake has no
+      // commandBody string to run, so a test that needs to prove the reason reaches
+      // appliedOperations[0].uncertainty.dispatchEvidence.reason through the EXECUTOR pipeline
+      // (not just the driver in isolation) scripts it directly here.
+      if (a === 'rewrite' && typeof script.rewriteDispatchReason === 'string') {
+        return { ok: true, dispatched: true, reason: script.rewriteDispatchReason };
+      }
       return { ok: true, dispatched: true };
     },
   };

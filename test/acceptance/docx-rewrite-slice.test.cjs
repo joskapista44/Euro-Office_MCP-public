@@ -340,3 +340,137 @@ test('DOCX observation is LIVE-primary: no package I/O in the slice, every read 
   assert.equal(driver.calls.readPackage, 0);
   assert.equal(m.freshReads, driver.calls.readLive);
 });
+
+// ---- GH #359: a later step's `before`/`after` anchor names a neighbour an EARLIER step of the
+// same task already rewrote -- the anchor was captured from the task's pre-task read_text, but by
+// the time the later step is classified, the fresh observation holds the neighbour's NEW text. ----
+
+/** A second-step selector that anchors on the FIRST step's own (pre-task) target text. */
+function secondStepSelector(paragraphs, before) {
+  const closing = normalizeInventory({ html: htmlOf(paragraphs), paragraphs }).blocks.find(x => x.text === 'Closing paragraph.');
+  return { text: 'Closing paragraph.', kind: closing.kind, before };
+}
+
+test('GH #359: a later rewrite_paragraph anchored on an earlier step\'s own target text still resolves (RED before the fix)', async () => {
+  const SECOND = 'M4 GH359 SECOND';
+  const paragraphs = doc();
+  const task = { id: 'gh359', steps: [
+    { intent: 'rewrite_paragraph', selector: selectorFrom(paragraphs), text: NEW },
+    // s1's `before` names OLD -- s0's OWN pre-task target text, which s0 itself rewrites to NEW.
+    { intent: 'rewrite_paragraph', selector: secondStepSelector(paragraphs, OLD), text: SECOND },
+  ] };
+  const { result, driver } = await run(createStore(paragraphs), task);
+  const [s0, s1] = result.execution.appliedOperations;
+  assert.equal(s0.status, OPERATION_STATUS.APPLIED, 's0 APPLIED');
+  assert.equal(s1.status, OPERATION_STATUS.APPLIED, 's1 APPLIED -- before the fix: FAIL_CLOSED rewrite-terminal-target-not_found');
+  assert.equal(driver.calls.dispatch, 2);
+  assert.equal(result.ok, false, 'no confirmed save on DOCX (a separate open item, unrelated to this fix)');
+});
+
+test('GH #359: the same anchor chained through three sequential steps all resolve', async () => {
+  const S1 = 'M4 GH359 CHAIN TWO';
+  const S2 = 'M4 GH359 CHAIN THREE';
+  const paragraphs = doc();
+  const task = { id: 'gh359-chain', steps: [
+    { intent: 'rewrite_paragraph', selector: { text: 'First body paragraph.', kind: 'paragraph' }, text: S1 },
+    // s1 anchors `before` on s0's own pre-task target text (the paragraph s0 just rewrote).
+    { intent: 'rewrite_paragraph', selector: { text: OLD, kind: 'paragraph', before: 'First body paragraph.' }, text: S2 },
+    // s2 anchors `before` on s1's own pre-task target text (OLD, which s1 just rewrote to S2).
+    { intent: 'rewrite_paragraph', selector: secondStepSelector(paragraphs, OLD), text: NEW },
+  ] };
+  const { result } = await run(createStore(paragraphs), task);
+  assert.deepEqual(result.execution.appliedOperations.map(e => e.status), [OPERATION_STATUS.APPLIED, OPERATION_STATUS.APPLIED, OPERATION_STATUS.APPLIED]);
+});
+
+test('GH #359 NEGATIVE CONTROL: an anchor matching neither the live context nor any earlier step\'s own target text stays FAIL_CLOSED', async () => {
+  const SECOND = 'M4 GH359 SECOND';
+  const paragraphs = doc();
+  const task = { id: 'gh359-neg', steps: [
+    { intent: 'rewrite_paragraph', selector: selectorFrom(paragraphs), text: NEW },
+    { intent: 'rewrite_paragraph', selector: secondStepSelector(paragraphs, 'Some unrelated anchor text, never written by this task'), text: SECOND },
+  ] };
+  const { result, driver } = await run(createStore(paragraphs), task);
+  const [s0, s1] = result.execution.appliedOperations;
+  assert.equal(s0.status, OPERATION_STATUS.APPLIED);
+  assert.equal(s1.status, OPERATION_STATUS.FAILED);
+  assert.equal(s1.evidence.evidence.reason, 'rewrite-terminal-target-not_found');
+  assert.equal(driver.calls.dispatch, 1, 'the second step is refused before any dispatch');
+});
+
+// ---- GH #359 (v2): the MISSING direction. The two tests above cover a later step anchored on an
+// earlier step's own target text -- classify() resolves that case fine, because op.selector (the
+// FULL object, carrying the earlier-only beforeAlt/afterAlt attachAnchorAlternates attaches at
+// planning time) is what the top-level resolution in classify() reads directly. But an EARLIER
+// step's own anchor can equally name a neighbour a LATER step rewrites -- live-measured (a maintainer,
+// kártya 5f96caad #ref): s0's `after` anchor matched P2's pre-task text, s1 (dispatched after
+// s0) then rewrote P2, and L2's wholeTaskChecks -- which re-plans the task against the task's OWN
+// pre-task selectors, with no visibility into which operation ran in which order -- still looked
+// for the ORIGINAL anchor text in the FINAL document and failed, even though both steps APPLIED
+// cleanly. terminalSelector() didn't even carry beforeAlt/afterAlt into the selector it built, and
+// the alternates attached by the default (earlier-only) planOperations() call couldn't have named
+// a later step's text anyway. ----
+
+test('GH #359 v2: an EARLIER step\'s anchor names a neighbour a LATER step rewrites -- L2 still passes', async () => {
+  const REWRITTEN_FIRST = 'M4 GH359V2 FIRST REWRITTEN';
+  const REWRITTEN_TARGET = 'M4 GH359V2 TARGET REWRITTEN';
+  const paragraphs = doc();
+  const task = { id: 'gh359v2-later', steps: [
+    // s0's `after` names OLD -- the pre-task text of s1's OWN target, which s1 (dispatched SECOND)
+    // has not rewritten yet when s0 is classified, but WILL have rewritten by the time L2 runs.
+    { intent: 'rewrite_paragraph', selector: { text: 'First body paragraph.', kind: 'paragraph', after: OLD }, text: REWRITTEN_FIRST },
+    { intent: 'rewrite_paragraph', selector: selectorFrom(paragraphs), text: REWRITTEN_TARGET },
+  ] };
+  const { result, driver } = await run(createStore(paragraphs), task, { saveObserver: true });
+  const [s0, s1] = result.execution.appliedOperations;
+  assert.equal(s0.status, OPERATION_STATUS.APPLIED, 's0 APPLIED at classify/dispatch time (its own anchor matches the still-unwritten live neighbour)');
+  assert.equal(s1.status, OPERATION_STATUS.APPLIED);
+  assert.equal(driver.calls.dispatch, 2);
+  assert.equal(result.execution.wholeTaskVerification.verdict, 'PASS', 'before the v2 fix: FAIL -- s0: final text in its structural context (kind, after) false');
+  assert.equal(result.outcome, 'task-complete');
+  assert.equal(result.ok, true, 'confirmed save (saveObserver) + L2 PASS -- before the v2 fix this was false, outcome whole-task-verification-failed');
+});
+
+test('GH #359 v2: the live 8-paragraph shape -- every neighbour rewritten in the same task, task-start anchors throughout', async () => {
+  const N = 8;
+  const paragraphs = Array.from({ length: N }, (_, i) => ({ text: `RW8 Paragraph ${i + 1}`, props: RICH }));
+  const primary = normalizeInventory({ html: htmlOf(paragraphs), paragraphs });
+  const steps = paragraphs.map((p, i) => {
+    const b = primary.blocks.find(x => x.text === p.text);
+    return { id: `s${i}`, intent: 'rewrite_paragraph', selector: { text: p.text, kind: b.kind, before: b.locator.context.before, after: b.locator.context.after }, text: `RW8 Rewritten ${i + 1}` };
+  });
+  const { result, driver } = await run(createStore(paragraphs), { id: 'gh359v2-rw8', steps }, { saveObserver: true });
+  assert.deepEqual(result.execution.appliedOperations.map(e => e.status), Array(N).fill(OPERATION_STATUS.APPLIED));
+  assert.equal(driver.calls.dispatch, N);
+  assert.equal(result.execution.wholeTaskVerification.verdict, 'PASS', 'before the v2 fix: FAIL on every step whose anchor names a neighbour rewritten later in the same task');
+  assert.equal(result.outcome, 'task-complete');
+  assert.equal(result.ok, true);
+});
+
+test('GH #359 v2 NEGATIVE CONTROL: L2 still rejects a neighbour final text that is neither the original anchor nor produced by any operation of this task', async () => {
+  const REWRITTEN_FIRST = 'M4 GH359V2NEG FIRST REWRITTEN';
+  const REPLACED_BY_FINGERPRINT = 'M4 GH359V2NEG TARGET REPLACED (not via a text selector)';
+  const paragraphs = doc();
+  const primary = normalizeInventory({ html: htmlOf(paragraphs), paragraphs });
+  const targetBlock = primary.blocks.find(x => x.text === OLD);
+  const task = { id: 'gh359v2-neg', steps: [
+    // s0's `after` names OLD, same as the positive test above -- it needs s1's produced text as an
+    // alternate once s1 rewrites that neighbour.
+    { intent: 'rewrite_paragraph', selector: { text: 'First body paragraph.', kind: 'paragraph', after: OLD }, text: REWRITTEN_FIRST },
+    // s1 targets the SAME block by `fingerprint`, not by `text` -- attachAnchorAlternates'
+    // originalTextOf() reads only selector.text/refText, so this operation offers NO alternate for
+    // anyone (its own pre-task identity is unnamed by text), by construction, in either pool.
+    { intent: 'rewrite_paragraph', selector: { fingerprint: targetBlock.locator.fingerprint }, text: REPLACED_BY_FINGERPRINT },
+  ] };
+  const { result, driver } = await run(createStore(paragraphs), task, { saveObserver: true });
+  const [s0, s1] = result.execution.appliedOperations;
+  assert.equal(s0.status, OPERATION_STATUS.APPLIED, 's0 dispatches fine -- its anchor matches the still-original live neighbour at classify time');
+  assert.equal(s1.status, OPERATION_STATUS.APPLIED, 's1 dispatches fine -- a plain fingerprint match, unrelated to s0\'s anchor mechanism');
+  assert.equal(driver.calls.dispatch, 2);
+  assert.equal(result.execution.wholeTaskVerification.verdict, 'FAIL', 's0\'s `after` anchor (OLD) matches neither the final neighbour text nor any alternate -- s1 offered none');
+  const checks = result.execution.wholeTaskVerification.evidence.checks;
+  const anchorCheck = checks.find(c => c.name === 's0: final text in its structural context (kind, after)');
+  assert.ok(anchorCheck, 'the structural-context check for s0 ran');
+  assert.equal(anchorCheck.ok, false);
+  assert.equal(result.ok, false);
+  assert.equal(result.outcome, 'whole-task-verification-failed');
+});

@@ -3,7 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createStore, createFakeDocxDriver } = require('../fakes/fake-docx-driver.cjs');
+const { createStore, createFakeDocxDriver, htmlOf } = require('../fakes/fake-docx-driver.cjs');
+const { normalizeInventory } = require('../../src/adapters/docx/inventory.cjs');
 const D = require('../../src/server/docx-write-tools.cjs');
 const W = require('../../src/server/write-tools.cjs');
 const T = require('../../src/server/tools.cjs');
@@ -47,6 +48,9 @@ function product(script = {}, paragraphs = doc()) {
   const tool = D.createDocxWriteTool({ configSource, gate: createSessionGate(), runtime, createDriver });
   return { store, tool, writes: () => store.saves, opens: () => drivers.reduce((n, d) => n + d.calls.open, 0) };
 }
+/** GH #320: the REAL, computed fingerprint of a named block (inventory.cjs's own decorate()) --
+ * never guessed, the SAME pattern docx-wave1.test.cjs's own direct-family tests already use. */
+const fingerprintOf = (paragraphs, text) => normalizeInventory({ html: htmlOf(paragraphs), paragraphs }).blocks.find(b => b.text === text).locator.fingerprint;
 
 // ---- the step schema (pre-dispatch) --------------------------------------------------------------------------------
 
@@ -58,9 +62,9 @@ test('SCHEMA: the exact-text target with BOTH neighbours is accepted, with the o
   }
 });
 
-test('SCHEMA: every selector key outside {text, before, after, kind, precondition} is UNKNOWN_FIELD, 0 dispatch; a delete step has no `text` of its own', () => {
-  const extras = { heading: 'Heading', level: 1, fingerprint: 'abc', headingPath: [{ level: 1, text: 'Heading' }], contains: true,
-    sectionHeading: 'Heading', paragraphOrdinal: 1, ref: 's0', index: 1, position: 1, offset: 1, paragraphIndex: 1, bookmark: 'b', tableCell: { row: 1 } };
+test('SCHEMA: every selector key outside {text, before, after, kind, fingerprint, sectionHeading, paragraphOrdinal, precondition} is UNKNOWN_FIELD, 0 dispatch; a delete step has no `text` of its own', () => {
+  const extras = { heading: 'Heading', level: 1, headingPath: [{ level: 1, text: 'Heading' }], contains: true,
+    ref: 's0', index: 1, position: 1, offset: 1, paragraphIndex: 1, bookmark: 'b', tableCell: { row: 1 } };
   for (const [k, val] of Object.entries(extras)) {
     const v = D.validateDocxWriteRequest(req([{ intent: 'delete_paragraph', selector: { text: BETA, before: ALPHA, after: GAMMA, [k]: val } }]));
     assert.equal(v.code, 'UNKNOWN_FIELD', `${k}: ${v.code}`);
@@ -70,13 +74,12 @@ test('SCHEMA: every selector key outside {text, before, after, kind, preconditio
     const v = D.validateDocxWriteRequest(req([{ ...BETA_DEL(), [k]: val }]));
     assert.equal(v.code, 'UNKNOWN_FIELD', `step ${k}: ${v.code}`);
   }
-  for (const sel of [{ heading: 'Heading', level: 1 }, { fingerprint: 'abc' }]) assert.equal(D.validateDocxWriteRequest(req([{ intent: 'delete_paragraph', selector: sel }])).code, 'UNKNOWN_FIELD');
+  assert.equal(D.validateDocxWriteRequest(req([{ intent: 'delete_paragraph', selector: { heading: 'Heading', level: 1 } }])).code, 'UNKNOWN_FIELD');
 });
 
-test('SCHEMA: text, before and after are ALL required; empty (= document edge), over-80 and non-string neighbours are REFUSED_SHAPE', () => {
+test('SCHEMA: text, before and after are ALL required; over-80 and non-string neighbours are REFUSED_SHAPE (an empty neighbour = the document edge is accepted, GH #321)', () => {
   const bad = [
     { before: ALPHA, after: GAMMA }, { text: BETA, after: GAMMA }, { text: BETA, before: ALPHA }, { text: BETA },
-    { text: BETA, before: '', after: GAMMA }, { text: BETA, before: ALPHA, after: '' }, { text: BETA, before: '', after: '' },
     { text: BETA, before: 'x'.repeat(81), after: GAMMA }, { text: BETA, before: ALPHA, after: 'y'.repeat(81) },
     { text: BETA, before: 5, after: GAMMA }, { text: BETA, before: ALPHA, after: GAMMA, kind: 'table' }, { text: '', before: ALPHA, after: GAMMA },
   ];
@@ -101,7 +104,7 @@ test('SCHEMA: a delete task is that ONE step -- next to any other step (or a sec
 test('ALLOWLIST: every OTHER routed docx intent is still REFUSED_NOT_ALLOWLISTED pre-dispatch, even next to a valid delete', () => {
   const others = D.docxRoutedIntents();
   for (const i of W.DOCX_WRITE_ALLOWLIST) others.delete(i);
-  assert.equal(others.size, 0); // release 3 trim + GH #266/#269e/#268d: every previously-withheld intent (define_style, modify_style, set_numbering, set_list_type, add_footnote, add_endnote, add_link, add_bookmark, resolve_comment, reply_comment, add_comment_on_match, set_image_size, set_image_wrap) is now released -- the array is current, nothing withheld
+  assert.equal(others.size, 0); // GH #308: insert_table joined the allowlist too -- the array is current, nothing withheld
   for (const intent of others) {
     const v = D.validateDocxWriteRequest(req([BETA_DEL(), { intent }]));
     assert.equal(v.code, 'REFUSED_NOT_ALLOWLISTED', `${intent}: ${v.code}`);
@@ -110,13 +113,54 @@ test('ALLOWLIST: every OTHER routed docx intent is still REFUSED_NOT_ALLOWLISTED
   }
 });
 
-test('SCHEMA: the published inputSchema carries the delete step with text / before / after required', () => {
+test('SCHEMA: the published inputSchema carries the delete step; text/before/after are required only on the text branch (DOCX_CONSTRAINTS_ALL, tested above), GH #320 fingerprint + sectionHeading/paragraphOrdinal are released selector fields too', () => {
   const items = D.inputSchema().properties.task.properties.steps.items;
   const d = items.oneOf.find(s => s.properties.intent.const === 'delete_paragraph');
   assert.deepEqual(d.required, ['intent', 'selector']);
-  assert.deepEqual(d.properties.selector.required, ['text', 'before', 'after']);
+  assert.equal(d.properties.selector.required, undefined);
+  assert.deepEqual(Object.keys(d.properties.selector.properties).sort(), ['after', 'before', 'fingerprint', 'kind', 'paragraphOrdinal', 'precondition', 'sectionHeading', 'text'].sort());
   assert.equal(d.properties.selector.properties.before.maxLength, 80);
   assert.match(D.createDocxWriteTool({}).description, /delete_paragraph/);
+});
+
+// ---- GH #320: fingerprint + sectionHeading/paragraphOrdinal selector branches (the SAME two rewrite_paragraph already has) ----
+
+test('SCHEMA: a fingerprint selector alone is accepted; combined with before/after it is REFUSED_SHAPE (field-contract: they would be ignored beside a non-text branch -- the resolver only reads before/after on the text branch)', () => {
+  assert.equal(D.validateDocxWriteRequest(req([{ intent: 'delete_paragraph', selector: { fingerprint: 'abc123' } }])).ok, true);
+  const v = D.validateDocxWriteRequest(req([{ intent: 'delete_paragraph', selector: { fingerprint: 'abc123', before: ALPHA, after: GAMMA } }]));
+  assert.equal(v.code, 'REFUSED_SHAPE', JSON.stringify(v));
+  assert.equal(v.dispatched, false);
+});
+
+test('SCHEMA: sectionHeading + paragraphOrdinal alone passes the schema, but is ALWAYS refused one layer further in, named -- a delete changes its section\'s own paragraph count, so an ordinal selector on the deleting step itself is not retry-safe (adapter.cjs ordinalAfterStructuralStep; insert_paragraph_* is the one count-changing intent exempted from this, delete_paragraph deliberately is not)', async () => {
+  const v = D.validateDocxWriteRequest(req([{ intent: 'delete_paragraph', selector: { sectionHeading: 'Heading', paragraphOrdinal: 1 } }]));
+  assert.equal(v.code, 'REFUSED_SHAPE', JSON.stringify(v));
+  assert.match(v.reason, /ordinal-selector-on-count-changing-step/);
+  assert.equal(v.dispatched, false);
+  const p = product();
+  const seq = texts(p.store);
+  const r = await p.tool.handler(req([{ intent: 'delete_paragraph', selector: { sectionHeading: 'Heading', paragraphOrdinal: 1 } }]));
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.deepEqual(texts(p.store), seq);
+  assert.equal(p.writes(), 0);
+  assert.equal(p.opens(), 0, 'refused before any session opens');
+});
+
+test('FINGERPRINT TARGET: deletes the paragraph identified by its fingerprint instead of its text; the surviving neighbours close up; an ambiguous fingerprint (two paragraphs it matches) fails closed, 0 writes; a RETRY is refused, not SATISFIED -- a fingerprint-only selector carries no surviving-context proof (documented in paragraph.cjs, same safety posture as the text branch without before/after)', async () => {
+  const p = product();
+  const betaFp = fingerprintOf(doc(), BETA);
+  const r = await p.tool.handler(req([{ intent: 'delete_paragraph', selector: { fingerprint: betaFp } }]));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const t = texts(p.store);
+  assert.equal(t.includes(BETA), false);
+  assert.equal(t.indexOf(GAMMA), t.indexOf(ALPHA) + 1, 'the former neighbours are adjacent');
+  const retry = await p.tool.handler(req([{ intent: 'delete_paragraph', selector: { fingerprint: betaFp } }]));
+  assert.equal(retry.ok, false, JSON.stringify(retry));
+  const q = product();
+  const twinFp = fingerprintOf(doc(), TWIN); // TWIN occurs twice, same section, same text -> same fingerprint
+  const amb = await q.tool.handler(req([{ intent: 'delete_paragraph', selector: { fingerprint: twinFp } }]));
+  assert.equal(amb.ok, false, JSON.stringify(amb));
+  assert.equal(q.writes(), 0);
 });
 
 // ---- the product handler, end to end on the fake transport ---------------------------------------------------------------
@@ -234,17 +278,57 @@ test('EDITOR FAULT never reads as APPLIED: the command silently does nothing -> 
 
 test('PRE-DISPATCH refusals never open a session: a refused delete task opens zero drivers', async () => {
   const p = product();
-  for (const steps of [[del(BETA, '', GAMMA)], [{ intent: 'delete_paragraph', selector: { text: BETA } }], [BETA_DEL(), BETA_DEL()], [{ intent: 'delete_paragraph', selector: { heading: 'Heading', level: 1 } }]]) {
+  for (const steps of [[{ intent: 'delete_paragraph', selector: { text: BETA } }], [BETA_DEL(), BETA_DEL()], [{ intent: 'delete_paragraph', selector: { heading: 'Heading', level: 1 } }]]) {
     const r = await p.tool.handler(req(steps));
     assert.equal(r.dispatched, false);
   }
   assert.equal(p.opens(), 0);
 });
 
+// ---- GH #321: the document edge ('' = no neighbour on that side) ---------------------------------------------------------------
+const EDGE_DOC = () => [{ text: ALPHA, props: RICH }, { text: BETA, props: PLAIN }, { text: GAMMA, props: RICH }];
+
+test('GH #321 SCHEMA: an empty before / after (the document edge) passes the schema, both empty too (the adapter decides)', () => {
+  for (const sel of [{ text: GAMMA, before: BETA, after: '' }, { text: ALPHA, before: '', after: BETA }, { text: ALPHA, before: '', after: '' }]) {
+    assert.equal(D.validateDocxWriteRequest(req([{ intent: 'delete_paragraph', selector: sel }])).ok, true, JSON.stringify(sel));
+  }
+});
+
+test('GH #321: the LAST paragraph (after: \'\') and the FIRST (before: \'\') are deleted -- APPLIED, L1 / whole-task PASS, nothing else changed', async () => {
+  for (const [sel, gone] of [[del(GAMMA, BETA, ''), GAMMA], [del(ALPHA, '', BETA), ALPHA]]) {
+    const p = product({}, EDGE_DOC());
+    const r = await p.tool.handler(req([sel]));
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.deepEqual(r.operations.map(o => [o.status, o.l1]), [['APPLIED', 'PASS']]);
+    assert.equal(r.wholeTask, 'PASS');
+    assert.deepEqual(texts(p.store), [ALPHA, BETA, GAMMA].filter(t => t !== gone));
+    const retry = await p.tool.handler(req([sel]));
+    assert.equal(retry.noOp, true, 'the retry is SATISFIED with zero new writes');
+  }
+});
+
+test('GH #321: a WRONG edge is refused BEFORE any write (it used to apply and save, then report ok:false)', async () => {
+  for (const sel of [del(BETA, ALPHA, ''), del(BETA, '', GAMMA)]) {   // BETA is in the middle: neither edge is true
+    const p = product({}, EDGE_DOC());
+    const r = await p.tool.handler(req([sel]));
+    assert.equal(r.ok, false, JSON.stringify(r));
+    assert.equal(p.writes(), 0, `${JSON.stringify(sel.selector)}: zero writes`);
+    assert.deepEqual(texts(p.store), [ALPHA, BETA, GAMMA]);
+  }
+});
+
+test('GH #321: both sides empty (the document\'s only paragraph) stays refused, zero writes', async () => {
+  const p = product({}, [{ text: ALPHA, props: RICH }]);
+  const r = await p.tool.handler(req([del(ALPHA, '', '')]));
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(p.writes(), 0);
+  assert.deepEqual(texts(p.store), [ALPHA]);
+});
+
 // ---- the release gate ------------------------------------------------------------------------------------------------------
 
 test('GATE: the DOCX allowlist is exactly the accepted set (both halves agree); a one-sided change withholds only docx_execute_task', () => {
-  assert.deepEqual([...W.DOCX_WRITE_ALLOWLIST], ['rewrite_paragraph', 'insert_paragraph_before', 'insert_paragraph_after', 'delete_paragraph', 'move_paragraph_before', 'move_paragraph_after', 'apply_list', 'set_list_level', 'indent_list_item', 'outdent_list_item', 'remove_list', 'replace_table_cell', 'format_text', 'insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap']);
+  assert.deepEqual([...W.DOCX_WRITE_ALLOWLIST], ['rewrite_paragraph', 'insert_paragraph_before', 'insert_paragraph_after', 'delete_paragraph', 'move_paragraph_before', 'move_paragraph_after', 'apply_list', 'set_list_level', 'indent_list_item', 'outdent_list_item', 'remove_list', 'replace_table_cell', 'format_text', 'insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap', 'insert_table', 'insert_section_break', 'insert_image', 'insert_paragraphs', 'insert_shape', 'insert_chart', 'delete_image', 'replace_image']);
   assert.deepEqual([...W.DOCX_WRITE_ALLOWLIST], [...T.ACCEPTED_DOCX_WRITE_ALLOWLIST]);
   assert.deepEqual(T.writeReleaseGate(), { ok: true, violations: [] });
   const xlsx = [...T.ACCEPTED_XLSX_WRITE_ALLOWLIST];

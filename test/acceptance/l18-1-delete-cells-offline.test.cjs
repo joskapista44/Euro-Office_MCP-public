@@ -52,7 +52,7 @@ function obs(sheets, { dependents = [], rulesBySheet = {}, objects = {}, filterR
 // ---- 1. RED-first: today, before this patch, delete_cells is an unknown intent -----------------------------
 
 test('RED/GREEN: delete_cells is now a KNOWN intent -- validateWriteRequest accepts a well-formed step (the "before this patch" shape was REFUSED_UNKNOWN_INTENT)', () => {
-  const task = { id: 't', steps: [{ intent: 'delete_cells', id: 's', sheet: 'P', range: 'C2:D3', shift: 'up', anchor: { column: 'C', value: 'now-below' } }] };
+  const task = { id: 't', steps: [{ intent: 'delete_cells', id: 's', sheet: 'P', range: 'C2:D3', shift: 'up', anchor: { column: 'C', value: 'now-below' }, witness: { column: 'D', value: 'first-removed' } }] };
   // RED, reproduced structurally (not re-run against the old code): an intent absent from the allowlist/schema
   // refuses UNKNOWN_INTENT/REFUSED_NOT_ALLOWLISTED before this patch -- the GREEN is that it no longer does.
   const v = W.validateWriteRequest({ fileId: '123', task });
@@ -74,7 +74,10 @@ test('delete_cells is released: allowlist + accepted set + schema + constraints 
 
 // ---- 2. plan(): field/shape validation --------------------------------------------------------------------
 
-const baseStep = (over = {}) => ({ intent: 'delete_cells', id: 's', sheet: 'P', range: 'C2:D3', shift: 'up', anchor: { column: 'C', value: 'x' }, ...over });
+// owner decision A (2026-11-02): + the required witness -- the FIRST REMOVED cell (up: D2 in lane D; left: C3 in lane row 3)
+const baseStep = (over = {}) => ({ intent: 'delete_cells', id: 's', sheet: 'P', range: 'C2:D3', shift: 'up', anchor: { column: 'C', value: 'x' }, witness: { column: 'D', value: 'w' }, ...over });
+const LEFT_WITNESS = { row: 3, value: 'w' };
+const W_CELL = { v: 'w', f: '' };
 
 test('plan: an unknown field is refused, named', () => {
   const p = DC.plan({ ...baseStep(), extra: 1 }, 0);
@@ -120,7 +123,7 @@ test('plan: a well-formed UP step builds the expected operation shape (shift/ban
 });
 
 test('plan: a well-formed LEFT step builds the expected operation shape', () => {
-  const p = DC.plan({ ...baseStep(), shift: 'left', anchor: { row: 2, value: 'x' } }, 0);
+  const p = DC.plan({ ...baseStep(), shift: 'left', anchor: { row: 2, value: 'x' }, witness: LEFT_WITNESS }, 0);
   assert.equal(p.ok, true);
   assert.deepEqual(p.operation.shift, { sheet: 'P', axis: 'cols', at: 3, count: -2 });
   assert.deepEqual(p.operation.band, { lo: 2, hi: 3 });
@@ -137,15 +140,16 @@ test('plan: must be the only step of its task (SOLE_STEP via the adapter\'s own 
 
 const upOp = () => DC.plan(baseStep(), 0).operation;
 
-test('classify: SATISFIED (retry-safe, zero writes) when the anchor is ALREADY at its terminal position', () => {
+// owner decision A (2026-11-02): the after-shape is no longer SATISFIED -- matching data does not prove THIS delete ran
+test('classify: the anchor ALREADY at its terminal position with the witness gone is refused as unprovable (never SATISFIED), zero writes', () => {
   const p = obs({ P: { C2: { v: 'x', f: '' }, D2: { v: 'd', f: '' } } });
   const c = DC.classify(p, upOp());
-  assert.equal(c.state, 'SATISFIED');
-  assert.equal(c.evidence.proof, 'fresh-live-anchor-at-its-terminal-position');
+  assert.equal(c.state, 'FAIL_CLOSED');
+  assert.equal(c.evidence.reason, 'xlsx-delete-cells-prior-execution-unprovable');
 });
 
 test('classify: APPLY when the anchor is at its pre-shift ("now") position and nothing refuses', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' }, D4: { v: 'd', f: '' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, D4: { v: 'd', f: '' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'APPLY');
 });
@@ -160,21 +164,21 @@ test('classify: FAIL_CLOSED, named, when the anchor is at neither position (a re
 test('classify: FAIL_CLOSED when the anchor value is not found at all, or found more than once', () => {
   const none = DC.classify(obs({ P: { C4: { v: 'other', f: '' } } }), upOp());
   assert.equal(none.evidence.reason, 'xlsx-delete-cells-anchor-not-found');
-  const two = DC.classify(obs({ P: { C4: { v: 'x', f: '' }, C9: { v: 'x', f: '' } } }), upOp());
+  const two = DC.classify(obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, C9: { v: 'x', f: '' } } }), upOp());
   assert.equal(two.evidence.reason, 'xlsx-delete-cells-anchor-not-unique');
 });
 
 // ---- 4. classify(): the merge guard -- the card's own key finding (full-cover vs partial) -------------------
 
 test('classify: a merge ENTIRELY inside the block does NOT refuse (measured DELETED_WITH_BLOCK -- it goes with the block)', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' }, C2: { v: 'm', f: '', merge: 'C2:D2' }, D2: { v: '', f: '', merge: 'C2:D2' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, C2: { v: 'm', f: '', merge: 'C2:D2' }, D2: { v: 'w', f: '', merge: 'C2:D2' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'APPLY');
 });
 
 test('classify: a merge that only PARTIALLY overlaps the block is refused, named (the measured TRUNCATED finding -- the DS silently shrinks it otherwise)', () => {
   // C3:D4 straddles the block's bottom edge (block is C2:D3) -- round 5's exact measured case.
-  const p = obs({ P: { C4: { v: 'x', f: '' }, C3: { v: 'm', f: '', merge: 'C3:D4' }, D3: { v: '', f: '', merge: 'C3:D4' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, C3: { v: 'm', f: '', merge: 'C3:D4' }, D3: { v: '', f: '', merge: 'C3:D4' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'FAIL_CLOSED');
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-merge-partial-overlap');
@@ -185,36 +189,36 @@ test('classify: a merge that only PARTIALLY overlaps the block is refused, named
 // completely unseen (overlapsBlock is false: the block's rows 2-3 never reach row 6). The shift then tears it
 // apart exactly like a block-straddling merge does (B6 stays, C6 shifts up into the block's own band).
 test('classify: a merge BEYOND the block, in the shift path, crossing the band edge is refused, named -- zero\'s #ref finding (B6:C6, block C2:D3 up)', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' }, B6: { v: 'm', f: '', merge: 'B6:C6' }, C6: { v: '', f: '', merge: 'B6:C6' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, B6: { v: 'm', f: '', merge: 'B6:C6' }, C6: { v: '', f: '', merge: 'B6:C6' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'FAIL_CLOSED');
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-merge-crosses-band');
 });
 
 test('classify: a merge ENTIRELY WITHIN the band, in the shift path, is ALSO refused -- unmeasured whether it shifts intact (C6:D6, block C2:D3 up)', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' }, C6: { v: 'm', f: '', merge: 'C6:D6' }, D6: { v: '', f: '', merge: 'C6:D6' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, C6: { v: 'm', f: '', merge: 'C6:D6' }, D6: { v: '', f: '', merge: 'C6:D6' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'FAIL_CLOSED');
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-merge-crosses-band');
 });
 
 test('classify: a merge in the shift path but ENTIRELY OUTSIDE the band is inert -- never refused (A6:A7, block C2:D3 up)', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' }, A6: { v: 'm', f: '', merge: 'A6:A7' }, A7: { v: '', f: '', merge: 'A6:A7' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, A6: { v: 'm', f: '', merge: 'A6:A7' }, A7: { v: '', f: '', merge: 'A6:A7' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'APPLY');
 });
 
-const leftOp = () => DC.plan({ ...baseStep(), shift: 'left', anchor: { row: 2, value: 'x' } }, 0).operation;
+const leftOp = () => DC.plan({ ...baseStep(), shift: 'left', anchor: { row: 2, value: 'x' }, witness: LEFT_WITNESS }, 0).operation;
 
 test('classify: the LEFT mirror of the shift-path merge finding -- a merge beyond the block\'s columns, crossing the band\'s row edge, is refused, named (F1:F2, block C2:D3 left)', () => {
-  const p = obs({ P: { E2: { v: 'x', f: '' }, F1: { v: 'm', f: '', merge: 'F1:F2' }, F2: { v: '', f: '', merge: 'F1:F2' } } });
+  const p = obs({ P: { E2: { v: 'x', f: '' }, C3: W_CELL, F1: { v: 'm', f: '', merge: 'F1:F2' }, F2: { v: '', f: '', merge: 'F1:F2' } } });
   const c = DC.classify(p, leftOp());
   assert.equal(c.state, 'FAIL_CLOSED');
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-merge-crosses-band');
 });
 
 test('classify: LEFT -- a shift-path merge entirely outside the band (rows 2-3) is inert (F4:F5, block C2:D3 left)', () => {
-  const p = obs({ P: { E2: { v: 'x', f: '' }, F4: { v: 'm', f: '', merge: 'F4:F5' }, F5: { v: '', f: '', merge: 'F4:F5' } } });
+  const p = obs({ P: { E2: { v: 'x', f: '' }, C3: W_CELL, F4: { v: 'm', f: '', merge: 'F4:F5' }, F5: { v: '', f: '', merge: 'F4:F5' } } });
   const c = DC.classify(p, leftOp());
   assert.equal(c.state, 'APPLY');
 });
@@ -222,27 +226,27 @@ test('classify: LEFT -- a shift-path merge entirely outside the band (rows 2-3) 
 // ---- 5. classify(): the blanket dependent guard (names/rules/charts/pivots/AutoFilter -- NEM-MERT) ----------
 
 test('classify: a defined name reaching the sheet refuses, named, blanket (not measured for a block-shift)', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' } } }, { dependents: [{ kind: 'name', sheets: ['P'], host: null, name: 'N' }] });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL } }, { dependents: [{ kind: 'name', sheets: ['P'], host: null, name: 'N' }] });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'FAIL_CLOSED');
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-dependent-not-measured');
 });
 
 test('classify: a validation/CF rule hosted on the sheet refuses, named, blanket', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' } } }, { rulesBySheet: { P: [{ kind: 'validation', range: 'A1' }] } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL } }, { rulesBySheet: { P: [{ kind: 'validation', range: 'A1' }] } });
   const c = DC.classify(p, upOp());
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-dependent-not-measured');
 });
 
 test('classify: a chart or pivot hosted on the sheet refuses, named, blanket', () => {
-  const chart = DC.classify(obs({ P: { C4: { v: 'x', f: '' } } }, { objects: { P: { charts: [{}] } } }), upOp());
+  const chart = DC.classify(obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL } }, { objects: { P: { charts: [{}] } } }), upOp());
   assert.equal(chart.evidence.reason, 'xlsx-delete-cells-dependent-not-measured');
-  const pivot = DC.classify(obs({ P: { C4: { v: 'x', f: '' } } }, { objects: { P: { pivots: [{}] } } }), upOp());
+  const pivot = DC.classify(obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL } }, { objects: { P: { pivots: [{}] } } }), upOp());
   assert.equal(pivot.evidence.reason, 'xlsx-delete-cells-dependent-not-measured');
 });
 
 test('classify: an AutoFilter on the sheet refuses, named, blanket', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' } } }, { filterReads: { P: { range: 'A1:B5' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL } }, { filterReads: { P: { range: 'A1:B5' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-dependent-not-measured');
 });
@@ -250,34 +254,34 @@ test('classify: an AutoFilter on the sheet refuses, named, blanket', () => {
 // ---- 6. classify(): the formula-shape guard (bare same-sheet cell reference ONLY) ----------------------------
 
 test('classify: a bare same-sheet cell formula in the shift path is ACCEPTED (the measured C5=\'=C4+1\' shape)', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' }, C9: { v: 7, f: '=C4+1' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, C9: { v: 7, f: '=C4+1' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'APPLY');
 });
 
 test('classify: a RANGE-shaped formula on the same sheet refuses, named (not the measured bare-cell shape)', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' }, C9: { v: 7, f: '=SUM(C1:C3)' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, C9: { v: 7, f: '=SUM(C1:C3)' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-formula-shape-not-measured');
 });
 
 test('classify: a formula on ANOTHER sheet reaching INTO the shifting sheet refuses, named -- the earlier draft of this guard, scoped to one sheet only, would have missed this', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' } }, Q: { A1: { v: 9, f: '=P!C4' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL }, Q: { A1: { v: 9, f: '=P!C4' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.evidence.reason, 'xlsx-delete-cells-formula-shape-not-measured');
   assert.ok(c.evidence.cells.includes('Q!A1'), JSON.stringify(c.evidence));
 });
 
 test('classify: a formula on another sheet NOT reaching the shifting sheet at all does not refuse', () => {
-  const p = obs({ P: { C4: { v: 'x', f: '' } }, Q: { A1: { v: 9, f: '=Q!B1' }, B1: { v: 1, f: '' } } });
+  const p = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL }, Q: { A1: { v: 9, f: '=Q!B1' }, B1: { v: 1, f: '' } } });
   const c = DC.classify(p, upOp());
   assert.equal(c.state, 'APPLY');
 });
 
 test('classify: #REF! (C) -- a broken formula on ANOTHER sheet does not refuse; ON the shifting sheet it refuses, named xlsx-ref-on-target-unmeasured', () => {
-  const elsewhere = obs({ P: { C4: { v: 'x', f: '' } }, Q: { A1: { v: '#REF!', f: '= #REF!*2' } } }, { broken: [{ kind: 'formula', host: 'Q', name: 'A1', text: '= #REF!*2' }] });
+  const elsewhere = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL }, Q: { A1: { v: '#REF!', f: '= #REF!*2' } } }, { broken: [{ kind: 'formula', host: 'Q', name: 'A1', text: '= #REF!*2' }] });
   assert.equal(DC.classify(elsewhere, upOp()).state, 'APPLY');
-  const here = obs({ P: { C4: { v: 'x', f: '' }, H1: { v: '#REF!', f: '=#REF!A1' } } }, { broken: [{ kind: 'formula', host: 'P', name: 'H1', text: '=#REF!A1' }] });
+  const here = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, H1: { v: '#REF!', f: '=#REF!A1' } } }, { broken: [{ kind: 'formula', host: 'P', name: 'H1', text: '=#REF!A1' }] });
   const c = DC.classify(here, upOp());
   assert.notEqual(c.state, 'APPLY');
   assert.match(JSON.stringify(c), /xlsx-ref-on-target-unmeasured/);
@@ -288,7 +292,7 @@ test('classify: #REF! (C) -- a broken formula on ANOTHER sheet does not refuse; 
 const wrap = p => ({ primary: p });
 
 test('verifyPrimitive: an out-of-band formula pointing AT a cell inside the deleted block correctly becomes #REF! (measured: G1 "=C3" -> "=#REF!")', () => {
-  const before = obs({ P: { C4: { v: 'x', f: '' }, G1: { v: 0, f: '=C3' } } });
+  const before = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, G1: { v: 0, f: '=C3' } } });
   const after = obs({ P: { C2: { v: 'x', f: '' }, G1: { v: '#REF!', f: '=#REF!' } } });
   const r = DC.verifyPrimitive(upOp(), wrap(before), wrap(after));
   assert.equal(r.ok, true, JSON.stringify(r.evidence));
@@ -296,21 +300,21 @@ test('verifyPrimitive: an out-of-band formula pointing AT a cell inside the dele
 
 test('verifyPrimitive: an out-of-band formula pointing AT a cell BEHIND the block correctly re-points with the shift (measured: a shift-path formula outside the band, e.g. a row-1 cell referencing into the band from outside it, is NOT this shape -- but a same-sheet cell reference whose target is in-band and survives DOES move)', () => {
   // G1 = "=C4" (C4 is in-band, behind the block -- survives the shift, lands at C2): the reference must follow.
-  const before = obs({ P: { C4: { v: 'x', f: '' }, G1: { v: 'x', f: '=C4' } } });
+  const before = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, G1: { v: 'x', f: '=C4' } } });
   const after = obs({ P: { C2: { v: 'x', f: '' }, G1: { v: 'x', f: '=C2' } } });
   const r = DC.verifyPrimitive(upOp(), wrap(before), wrap(after));
   assert.equal(r.ok, true, JSON.stringify(r.evidence));
 });
 
 test('verifyPrimitive: an out-of-band formula pointing at a cell OUTSIDE the band entirely never changes', () => {
-  const before = obs({ P: { C4: { v: 'x', f: '' }, G1: { v: 5, f: '=A1' }, A1: { v: 5, f: '' } } });
+  const before = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, G1: { v: 5, f: '=A1' }, A1: { v: 5, f: '' } } });
   const after = obs({ P: { C2: { v: 'x', f: '' }, G1: { v: 5, f: '=A1' }, A1: { v: 5, f: '' } } });
   const r = DC.verifyPrimitive(upOp(), wrap(before), wrap(after));
   assert.equal(r.ok, true, JSON.stringify(r.evidence));
 });
 
 test('verifyPrimitive: FAILS when a measured cross-reference did NOT update as the shift implies', () => {
-  const before = obs({ P: { C4: { v: 'x', f: '' }, G1: { v: 0, f: '=C3' } } });
+  const before = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, G1: { v: 0, f: '=C3' } } });
   const after = obs({ P: { C2: { v: 'x', f: '' }, G1: { v: 0, f: '=C3' } } }); // wrong: should be #REF! now
   const r = DC.verifyPrimitive(upOp(), wrap(before), wrap(after));
   assert.equal(r.ok, false);
@@ -320,7 +324,7 @@ test('verifyPrimitive: FAILS when a measured cross-reference did NOT update as t
 test('verifyPrimitive: the in-band shift-path formula (measured C5="=C4+1" -> lands at C3 as "=C2+1") re-points correctly', () => {
   // C4 doubles as the operation's own anchor cell (upOp()'s anchor.value is 'x') -- its landing at C2
   // is what wholeTaskChecks/classify's retry-safety reads, same as every other case in this file.
-  const before = obs({ P: { C4: { v: 'x', f: '' }, C5: { v: 34, f: '=C4+1' } } });
+  const before = obs({ P: { C4: { v: 'x', f: '' }, D2: W_CELL, C5: { v: 34, f: '=C4+1' } } });
   const after = obs({ P: { C2: { v: 'x', f: '' }, C3: { v: 34, f: '=C2+1' } } });
   const r = DC.verifyPrimitive(upOp(), wrap(before), wrap(after));
   assert.equal(r.ok, true, JSON.stringify(r.evidence));
@@ -333,7 +337,7 @@ test('lower: UP produces GetRange(block).Delete(\'up\'), LEFT produces Delete(\'
   assert.equal(up.kind, 'callCommand');
   assert.match(up.body, /GetRange\("C2:D3"\)\.Delete\('up'\)/);
   require('node:assert').doesNotThrow(() => new Function(up.body)); // the generated body itself is valid JS
-  const left = DC.lower(DC.plan({ ...baseStep(), shift: 'left', anchor: { row: 2, value: 'x' } }, 0).operation);
+  const left = DC.lower(DC.plan({ ...baseStep(), shift: 'left', anchor: { row: 2, value: 'x' }, witness: LEFT_WITNESS }, 0).operation);
   assert.match(left.body, /GetRange\("C2:D3"\)\.Delete\('left'\)/);
 });
 
@@ -361,6 +365,8 @@ test('L-18/1 LIVE harness verdict: a synthetic GREEN run passes; the pre-release
   // must accept this shape, not just a single-op one.
   const seedAp = (n = 1) => ({ ok: true, persistence: 'FORCESAVE_CONFIRMED', ops: Array.from({ length: n }, () => ({ status: 'APPLIED' })) });
   const satisfied = () => ({ ok: true, persistence: null, ops: [{ status: 'SATISFIED' }] });
+  // owner decision A (2026-11-02): the GREEN retry is the named unprovable refusal
+  const unprovable = () => ({ ok: false, persistence: null, ops: [{ status: 'FAILED', failure: { reason: 'xlsx-delete-cells-prior-execution-unprovable' } }] });
   const namedFail = reason => ({ ok: false, persistence: null, ops: [{ status: 'FAILED', failure: { reason } }] });
   // the pre-fix answer on the shared copy: LEFT refused workbook-wide because of UP's G1 "=#REF!"
   const blockedFail = axis => ({ ok: false, persistence: null, ops: [{ status: 'FAILED', failure: { reason: h.LEFT.preFixReason, unobservable: [{ axis, why: 'UNOBSERVABLE:broken-reference', host: UP_SHEET }] } }] });
@@ -368,12 +374,12 @@ test('L-18/1 LIVE harness verdict: a synthetic GREEN run passes; the pre-release
   const green = () => {
     const o = { SHEET_NAMES: { UP: UP_SHEET }, SEEDS: { a: seedAp(9) }, MERGE_SEEDS: { a: ap() }, PAIRS: {}, PAIRS2: {}, MERGE_IN: {}, MERGE_SPAN: {}, MERGE_BAND: {}, NG_SHEET: {}, READ: {}, READ2: {}, CLEANUP: { gone: true }, CLEANUP2: { gone: true }, FIXTURE_MUTATED: 'NO' };
     for (const p of h.POS) {
-      o.PAIRS[p.key] = { first: ap(), second: satisfied() }; o.READ[p.key] = readOf(p.want || p.want2);
+      o.PAIRS[p.key] = { first: ap(), second: unprovable() }; o.READ[p.key] = readOf(p.want || p.want2);
     }
     // LEFT's own happy path, on the second, clean copy (+ #ref).
-    o.PAIRS2.LEFT = { first: ap(), second: satisfied() };
+    o.PAIRS2.LEFT = { first: ap(), second: unprovable() };
     o.READ2.LEFT = readOf(h.LEFT.want2);
-    o.MERGE_IN = { first: ap(), second: satisfied() };
+    o.MERGE_IN = { first: ap(), second: unprovable() };
     o.READ.MERGE_IN = readOf(h.MERGE_IN.want);
     o.MERGE_SPAN = namedFail(h.MERGE_SPAN.reason);
     o.READ.MERGE_SPAN = readOf(h.MERGE_SPAN.keep);
@@ -389,7 +395,11 @@ test('L-18/1 LIVE harness verdict: a synthetic GREEN run passes; the pre-release
   assert.equal(h.verdict(red).PASS, false, 'the pre-release build is RED');
   assert.equal(h.verdict(red).outcome, 'DS_NOT_RELEASED');
   const stillApplying = green(); stillApplying.PAIRS.UP.second = ap();
-  assert.ok(h.verdict(stillApplying).failed.includes('UP_retry_satisfied'), 'a second APPLIED is now WRONG, not right (retry must be SATISFIED)');
+  assert.ok(h.verdict(stillApplying).failed.includes('UP_retry_unprovable'), 'a second APPLIED is WRONG (retry must be refused as unprovable)');
+  const satisfiedRetry = green(); satisfiedRetry.PAIRS.UP.second = satisfied();
+  assert.ok(h.verdict(satisfiedRetry).failed.includes('UP_retry_unprovable'), 'decision A: a SATISFIED retry is the false success, not a pass');
+  const mergeInSatisfied = green(); mergeInSatisfied.MERGE_IN.second = satisfied();
+  assert.ok(h.verdict(mergeInSatisfied).failed.includes('MERGE_IN_retry_unprovable'));
   // #REF! (C): the pre-fix workbook-wide refusal of LEFT (UP's G1 on ANOTHER sheet) is now RED, on LEFT's own check
   const preFix = green(); preFix.PAIRS.LEFT = { first: blockedFail(`formula:${UP_SHEET}:G1`), second: blockedFail(`formula:${UP_SHEET}:G1`) };
   assert.ok(h.verdict(preFix).failed.includes('LEFT_applied'), 'a #REF! on ANOTHER sheet must no longer block LEFT');
@@ -418,7 +428,7 @@ test('L-18/1 LIVE harness verdict: a synthetic GREEN run passes; the pre-release
   const notCleanedUp = green(); notCleanedUp.CLEANUP = { gone: false };
   assert.ok(h.verdict(notCleanedUp).failed.includes('cleanup'));
   const left2StillApplying = green(); left2StillApplying.PAIRS2.LEFT.second = ap();
-  assert.ok(h.verdict(left2StillApplying).failed.includes('LEFT_retry_satisfied2'), 'LEFT\'s OWN happy path (2nd copy): a second APPLIED is wrong, retry must be SATISFIED');
+  assert.ok(h.verdict(left2StillApplying).failed.includes('LEFT_retry_unprovable2'), 'LEFT\'s OWN happy path (2nd copy): a second APPLIED is wrong, the retry must be refused as unprovable');
   const left2WrongShift = green(); left2WrongShift.READ2.LEFT.C2 = { v: 'WRONG', f: '' };
   assert.ok(h.verdict(left2WrongShift).failed.includes('LEFT_saved2'));
   const notCleanedUp2 = green(); notCleanedUp2.CLEANUP2 = { gone: false };

@@ -53,11 +53,91 @@ const runtimeIdOf = r => `${r.documentServerVersion}|${r.patchVersion}`;
 const XLSX_RUNTIME_17 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/17' });
 
 /**
- * M11.5a.2 .. GH #326/#327 (owner owner channel, DS9346 RETIRED, docs/DS9346-RUNTIME-RETIREMENT.md; widened again
- * for GH #326/#327): the ACCEPTED runtimes -- an EXPLICIT list, never a range or a wildcard. xlsx now carries TWO
- * entries (/16 + /17, compatibility-first); docx is unaffected, still the SOLE accepted runtime.
+ * GH #300 L1 / #298 D (owner GO, order A: read_tables before read_hyperlinks): /18 = /17 + TWO new Bridge READ capabilities
+ * (sheet.tables.read/v1, sheet.hyperlinks.read/v1); every /17 capability (including every WRITE handler) stays
+ * byte-identical on it (test/acceptance/ds935-bridge18-hyperlinks-tables-read.test.cjs "the /18 block = the /17
+ * block + exactly the builder's substitutions"). Widened into the GENERAL accepted list only (compatibility-
+ * first, same as /17's own introduction) -- the six capability-specific Bridge-WRITE-gate lists
+ * (XLSX_B05/B10/B03/B22/B23/B24_BRIDGE_WRITE_RUNTIME_IDS) are NOT widened here: no WRITE handler is touched by
+ * this unit, so their own byte-identity warrant (test/static/b03..b24-write-handler-identity.test.cjs) stays
+ * scoped to /16 + /17 until a future unit actually proves /18 byte-identical on them too. *
+ * WIDENED (/18 production cutover prerequisite): /18 IS now proven byte-identical on every pre-existing handler --
+ * test/static/ds935-bridge18-write-handler-identity.test.cjs extracts EVERY /17 handler (+ the bridge-local helpers
+ * it calls) from rev17-candidate and rev18-candidate and requires them equal, so the six lists below carry /18 too.
+ * Without this a DS /16|/17 -> /18 apply would turn all six Bridge-WRITE families FAIL_CLOSED in production.
  */
-const ACCEPTED_RUNTIMES = Object.freeze({ xlsx: Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]), docx: Object.freeze([RUNTIMES.docx]) });
+const XLSX_RUNTIME_18 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/18' });
+
+/**
+ * GH #332-#335 (Bridge /19, owner-approved design docs/DS-9.3.5-BRIDGE19-TABLE-WRITE-DESIGN.md): /19 = /18 + ONE new Bridge WRITE
+ * capability, sheet.table.write/v1; every /18 capability (including every WRITE handler) stays byte-identical on it
+ * (test/static/ds935-bridge19-write-handler-identity.test.cjs). Widened into the GENERAL accepted list and the six existing
+ * Bridge-WRITE-gate lists on that warrant (compatibility-first: a DS /18 -> /19 apply must not turn the existing Bridge-WRITE
+ * families FAIL_CLOSED); the NEW capability's own list (XLSX_B25_BRIDGE_WRITE_RUNTIME_*) is /19 ONLY -- on /16../18 the capability
+ * does not exist and the product refuses, named, before it touches the editor.
+ */
+const XLSX_RUNTIME_19 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/19' });
+/** GH #354/#355: /21 = /19 + the /20 READs + sheet.printSettings.write/v2 (Layout history 16-18); in the GENERAL accepted list and the seven Bridge-WRITE lists on the byte-identity warrant (test/static/ds935-bridge21-write-handler-identity.test.cjs). */
+const XLSX_RUNTIME_21 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/21' });
+/** GH #338-#342: /22 = /21 + sheet.protection.write/v1 + sheet.cellProtection.write/v1; in the GENERAL accepted list and the eight Bridge-WRITE lists on the byte-identity warrant (test/static/ds935-bridge22-write-handler-identity.test.cjs). */
+const XLSX_RUNTIME_22 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/22' });
+/** GH #356/#357: /23 = /22 + sheet.printPageCount.read/v1 (no write, no installer); in the GENERAL accepted list and the nine Bridge-WRITE lists on the byte-identity warrant (test/static/ds935-bridge23-write-handler-identity.test.cjs). */
+const XLSX_RUNTIME_23 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/23' });
+/** GH #338-#342 (docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md): /24 = /23 + workbook.protection.read/v1 +
+ * workbook.protection.write/v1 + sheet.table.write/v1's totalsRow accepting value:false; in the GENERAL accepted
+ * list and the nine pre-existing Bridge-WRITE lists on the byte-identity warrant
+ * (test/static/ds935-bridge24-write-handler-identity.test.cjs). */
+const XLSX_RUNTIME_24 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/24' });
+/** W2 regression fix (internal tracker): /25 = /24 + ONE handler-body change only, to workbook.protection.read/v1 (the engine's `v === null` shape -- an empty <workbookProtection/> element -- now answers {lockStructure:false}, the OOXML default, instead of the generic protection-flag-not-boolean refusal /24 gave it); no capability added or removed, every other handler byte-identical (test/static/ds935-bridge25-write-handler-identity.test.cjs). In the GENERAL accepted list and the ten pre-existing Bridge-WRITE lists on the byte-identity warrant. */
+const XLSX_RUNTIME_25 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/25' });
+/** Review fix (internal tracker, f0451f47): /26 = /25 + ONE guard change in TWO existing handlers -- worksheet.copy/v1 and
+ * sheet.table.write/v1 switch their workbook-protection check from `asc_isProtectedWorkbook() !== false` to the SAME
+ * `wbModel.getWorkbookProtection(lockStructure)` getter workbook.protection.read/v1 already reads (true -> workbook-protected,
+ * null/false -> continue, anything else -> workbook-protection-unreadable); no capability added or removed, every other handler
+ * (including the totalsRow value:false acceptance inside sheet.table.write/v1 itself) byte-identical
+ * (test/acceptance/ds935-bridge26-worksheet-copy-table-write-protection.test.cjs). In the GENERAL accepted list and every
+ * pre-existing Bridge-WRITE list on the byte-identity warrant. */
+const XLSX_RUNTIME_26 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/26' });
+const XLSX_RUNTIME_27 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/27' });
+
+/**
+ * GH #361/#363 pre-install readiness gate: /28 = /27 + TWO new Bridge READ capabilities
+ * (sheet.table.autoFilter.criteria.read/v1 GH #361, sheet.cells.compiledStyle.read/v1 GH #363); every /27
+ * handler (incl. every WRITE handler) proven byte-identical on it by test/static/ds935-bridge28-table-
+ * autofilter-criteria-write-handler-identity.test.cjs's WARRANT test. Widened into the GENERAL accepted list
+ * AND into every pre-existing Bridge-WRITE list the warrant covers, in the SAME commit the byte-identity
+ * proof lands -- the /18 precedent did this in two separate steps (general list first, the six WRITE lists
+ * only once their own byte-identity warrant existed later), and the staging window between those two steps
+ * is exactly the outage class this gate exists to close for /28 before install.
+ * NAMING: unlike every prior candidate (/25, /26, /27 all advertise a clean "/NN" patchVersion even while
+ * their directory is named "revNN-candidate"), the /28 candidate's manifest ORIGINALLY baked its directory
+ * suffix into the patchVersion string itself ("euro-office-bridge-v1/9.3.5.0/28-table-autofilter-criteria-
+ * candidate"). Fixed at the source (documentserver-patches/9.3.5.0/euro-office-bridge-v1/rev28-table-
+ * autofilter-criteria-candidate/build-rev28-table-autofilter-criteria.py's NEW_PATCH_VERSION + plan-rev28-
+ * table-autofilter-criteria.py's LAYER), bridge-block.js and manifest-mechanism-proof.json regenerated; the
+ * DIRECTORY NAME is unchanged. XLSX_RUNTIME_28 below carries the now-clean "/28" string.
+ */
+const XLSX_RUNTIME_28 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/28' });
+
+/**
+ * GH #365 option C U1 (owner GO): /29 = /28 + ONE new Bridge
+ * READ capability, sheet.veryHidden.read/v1; every /28 handler (incl. every WRITE handler) proven
+ * byte-identical on it by test/static/ds935-bridge29-veryhidden-write-handler-identity.test.cjs's
+ * WARRANT test. Widened into the GENERAL accepted list AND into every pre-existing Bridge-WRITE
+ * list the warrant covers, in the SAME unit the byte-identity proof lands (the /28 precedent's own
+ * discipline, to close the staging-window outage class before install). XLSX_B29_BRIDGE_WRITE_RUNTIME_*
+ * is the ONE deliberate exclusion (same reason as for /28: its "B29" is an unrelated Bridge-write
+ * sequence label, a coincidence of numbering with this DS revision's own "/29").
+ */
+const XLSX_RUNTIME_29 = Object.freeze({ documentServerVersion: '9.3.5', patchVersion: 'euro-office-bridge-v1/9.3.5.0/29' });
+
+/**
+ * M11.5a.2 .. GH #326/#327 (owner owner channel, DS9346 RETIRED, docs/DS9346-RUNTIME-RETIREMENT.md; widened again
+ * for GH #326/#327, then for GH #300 L1 / #298 D): the ACCEPTED runtimes -- an EXPLICIT list, never a range or a
+ * wildcard. xlsx now carries THREE entries (/16 + /17 + /18, compatibility-first); docx is unaffected, still the
+ * SOLE accepted runtime.
+ */
+const ACCEPTED_RUNTIMES = Object.freeze({ xlsx: Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]), docx: Object.freeze([RUNTIMES.docx]) });
 const XLSX_RUNTIME_ID = runtimeIdOf(RUNTIMES.xlsx);
 const DOCX_RUNTIME_ID = runtimeIdOf(RUNTIMES.docx);
 const DOCX_RUNTIME_IDS = Object.freeze(ACCEPTED_RUNTIMES.docx.map(runtimeIdOf));
@@ -69,18 +149,45 @@ const XLSX_RUNTIME_IDS = Object.freeze(ACCEPTED_RUNTIMES.xlsx.map(runtimeIdOf));
  * so every WRITE handler stays byte-identical on it (test/static/b03..b24-write-handler-identity.test.cjs still
  * enforce byte-identity, now over the two-entry list). The three DOCX lists are untouched (word has no /17).
  */
-const XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
 const XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
-const XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
 const XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
-const XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
 const XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
-const XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
 const XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
-const XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
 const XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
-const XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17]);
+const XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.xlsx, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
 const XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+// GH #332-#335: sheet.table.write/v1 exists on /19 ONLY
+const XLSX_B25_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
+const XLSX_B25_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B25_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+// GH #354/#355: sheet.printSettings.write/v2 (header/footer margin, page order) exists on /21 ONLY
+const XLSX_B26_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
+const XLSX_B26_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B26_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+// GH #338-#342: sheet.protection.write/v1 + sheet.cellProtection.write/v1 exist on /22 ONLY
+const XLSX_B27_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
+const XLSX_B27_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B27_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+// GH #338-#342 (docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md): workbook.protection.read/v1 +
+// workbook.protection.write/v1 exist on /24 ONLY (the capabilities do not exist on /16../23) -- the next free
+// Bridge-write label after /22+/23's shipped XLSX_B27_BRIDGE_WRITE_RUNTIME_IDS.
+const XLSX_B28_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29]);
+const XLSX_B28_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B28_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
+// GH #346 unit 2 (owner decision (a): no new /28 candidate -- the normalising WRITE lands in the SAME /27 as the
+// READ fix): chart.series.dataPoint.style.write/v1 exists on /27 ONLY (the capability does not exist on /16..26).
+// The next free Bridge-write label after /24's shipped XLSX_B28_BRIDGE_WRITE_RUNTIME_IDS. NOT yet wired to any
+// adapter family -- the MCP-level dataPoint target release is a separate unit (3), out of this card's scope.
+// DELIBERATELY NOT WIDENED to the GH #361/#363 /28 pre-install readiness gate:
+// this label's "B29" is an internal Bridge-write-capability sequence number, UNRELATED to the DS revision
+// number "/28" -- a pure coincidence of numbering. The byte-identity warrant (ds935-bridge28-table-autofilter-
+// criteria-write-handler-identity.test.cjs) DOES prove chart.series.dataPoint.style.write/v1 unchanged on /28
+// too (it is one of the /27 handlers the warrant covers), but the capability stays unwired to any adapter
+// family either way, so widening this list carries no product benefit and no product risk; left /27-only to
+// avoid implying this label gates something live. Revisit together with unit 3.
+const XLSX_B29_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([XLSX_RUNTIME_27]);
+const XLSX_B29_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(XLSX_B29_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
 
 const DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES = Object.freeze([RUNTIMES.docx]);
 const DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS = Object.freeze(DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES.map(runtimeIdOf));
@@ -135,4 +242,4 @@ function classifyHandshake(r, expected) {
   return { ok: true, runtimeId: runtimeIdOf(m), manifest: m };
 }
 
-module.exports = { BRIDGE_MAJOR, RUNTIMES, XLSX_RUNTIME_17, ACCEPTED_RUNTIMES, XLSX_RUNTIME_ID, XLSX_RUNTIME_IDS, XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS, DOCX_RUNTIME_ID, DOCX_RUNTIME_IDS, DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES, DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS, DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES, DOCX_B21_BRIDGE_READ_RUNTIME_IDS, DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_ENTRIES, DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_IDS, DOCX_GH293L7_BRIDGE_RUNTIME_ENTRIES, DOCX_GH293L7_BRIDGE_RUNTIME_IDS, runtimeIdOf, cacheKeyOf, HANDSHAKE_BODY, classifyHandshake };
+module.exports = { BRIDGE_MAJOR, RUNTIMES, XLSX_RUNTIME_17, XLSX_RUNTIME_18, XLSX_RUNTIME_19, XLSX_RUNTIME_21, XLSX_RUNTIME_22, XLSX_RUNTIME_23, XLSX_RUNTIME_24, XLSX_RUNTIME_25, XLSX_RUNTIME_26, XLSX_RUNTIME_27, XLSX_RUNTIME_28, XLSX_RUNTIME_29, ACCEPTED_RUNTIMES, XLSX_RUNTIME_ID, XLSX_RUNTIME_IDS, XLSX_B05_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B05_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B10_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B03_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B03_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B22_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B22_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B23_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B23_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B24_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B24_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B25_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B25_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B26_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B26_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B27_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B27_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B28_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B28_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B29_BRIDGE_WRITE_RUNTIME_ENTRIES, XLSX_B29_BRIDGE_WRITE_RUNTIME_IDS, DOCX_RUNTIME_ID, DOCX_RUNTIME_IDS, DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES, DOCX_B18_BRIDGE_WRITE_RUNTIME_IDS, DOCX_B21_BRIDGE_READ_RUNTIME_ENTRIES, DOCX_B21_BRIDGE_READ_RUNTIME_IDS, DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_ENTRIES, DOCX_GH292S4_BRIDGE_WRITE_RUNTIME_IDS, DOCX_GH293L7_BRIDGE_RUNTIME_ENTRIES, DOCX_GH293L7_BRIDGE_RUNTIME_IDS, runtimeIdOf, cacheKeyOf, HANDSHAKE_BODY, classifyHandshake };

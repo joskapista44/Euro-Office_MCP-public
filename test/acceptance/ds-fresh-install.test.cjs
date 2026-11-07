@@ -4,6 +4,14 @@
  * M12 DS Bridge fresh install (documentserver-patches/9.3.4.60/install_bridge.py): one block inserted before one
  * anchor, accepted only when the result hash is the plan's output hash. Synthetic bundles; the real-bundle run is
  * docs/evidence/m12-2/ds-fresh-install-20261012.txt.
+ *
+ * GH #362 4th unit: the plan's "blocks" list may ALSO carry REPLACE steps ({"old", "new"}, no "file"), alongside
+ * the existing INSERT steps -- see install_bridge.py's own module docstring and plan_result() comment for the
+ * exact rule (replace steps run FIRST, in plan order, each against the then-current buffer; "old" must occur
+ * EXACTLY ONCE, else REPLACE_OLD_NOT_UNIQUE). All tests below are synthetic, same convention as the rest of this
+ * file; the REAL 9.3.5.0 cell bundle run (euro-office-bridge-v1/rev27-xlnm-print-titles-candidate/plan-rev27-
+ * xlnm-fix.py, against the operator's own unpatched sdk-all.js) is reported in the card comment, not here --
+ * that file is not a repo fixture, and this suite stays offline/deterministic.
  */
 
 const test = require('node:test');
@@ -104,4 +112,73 @@ test('a block with its own anchor goes before that anchor; a missing or repeated
     const x = run(d, path.join(d, 'in.js'), '--check');
     assert.equal(x.status, 2, bad); assert.match(x.stdout, /STATUS=ANCHOR_NOT_UNIQUE/, bad);
   }
+});
+
+test('GH #362: a REPLACE step ({old,new}, no file) with "old" occurring exactly once -- PATCHABLE, --apply writes the replaced bytes', () => {
+  const d = tmp();
+  const bundle = 'x;OLD_TEXT;y;';
+  const out = 'x;NEW_TEXT;y;';
+  const plan = { cell: { input_sha256: sha(bundle), anchor: 'ANCHOR();', blocks: [{ old: 'OLD_TEXT;', new: 'NEW_TEXT;' }], output_sha256: sha(out), patchVersion: 'test/replace-1' } };
+  fs.writeFileSync(path.join(d, 'plan.json'), JSON.stringify(plan));
+  fs.writeFileSync(path.join(d, 'in.js'), bundle);
+  const c = run(d, path.join(d, 'in.js'), '--check');
+  assert.equal(c.status, 0, c.stderr); assert.match(c.stdout, /STATUS=PATCHABLE/);
+  const a = run(d, path.join(d, 'in.js'), '--apply', '--output', path.join(d, 'o.js'));
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(fs.readFileSync(path.join(d, 'o.js'), 'utf8'), out);
+});
+
+test('GH #362: a REPLACE step\'s "old" occurring ZERO times -- REPLACE_OLD_NOT_UNIQUE, nothing written (0 is "not exactly one", same as 2+)', () => {
+  const d = tmp();
+  const bundle = 'x;y;'; // no OLD_TEXT at all
+  const plan = { cell: { input_sha256: sha(bundle), anchor: 'ANCHOR();', blocks: [{ old: 'OLD_TEXT;', new: 'NEW_TEXT;' }], output_sha256: 'deadbeef'.repeat(8), patchVersion: 'test/replace-0' } };
+  fs.writeFileSync(path.join(d, 'plan.json'), JSON.stringify(plan));
+  fs.writeFileSync(path.join(d, 'in.js'), bundle);
+  const c = run(d, path.join(d, 'in.js'), '--check');
+  assert.equal(c.status, 2); assert.match(c.stdout, /STATUS=REPLACE_OLD_NOT_UNIQUE/);
+  const a = run(d, path.join(d, 'in.js'), '--apply', '--output', path.join(d, 'o.js'));
+  assert.equal(a.status, 2); assert.ok(!fs.existsSync(path.join(d, 'o.js')));
+});
+
+test('GH #362: a REPLACE step\'s "old" occurring TWICE -- REPLACE_OLD_NOT_UNIQUE, nothing written', () => {
+  const d = tmp();
+  const bundle = 'OLD_TEXT;x;OLD_TEXT;';
+  const plan = { cell: { input_sha256: sha(bundle), anchor: 'ANCHOR();', blocks: [{ old: 'OLD_TEXT;', new: 'NEW_TEXT;' }], output_sha256: 'deadbeef'.repeat(8), patchVersion: 'test/replace-2' } };
+  fs.writeFileSync(path.join(d, 'plan.json'), JSON.stringify(plan));
+  fs.writeFileSync(path.join(d, 'in.js'), bundle);
+  const c = run(d, path.join(d, 'in.js'), '--check');
+  assert.equal(c.status, 2); assert.match(c.stdout, /STATUS=REPLACE_OLD_NOT_UNIQUE/);
+});
+
+test('GH #362: a REPLACE step AND an INSERT step in the SAME plan -- the replace runs first, then the insertion, in ONE input_sha256 -> output_sha256 chain', () => {
+  const d = tmp();
+  const bundle = 'x;OLD_TEXT;ANCHOR();y;';
+  fs.writeFileSync(path.join(d, 'block.js'), 'BRIDGE();');
+  const out = 'x;NEW_TEXT;BRIDGE();ANCHOR();y;';
+  const plan = { cell: { input_sha256: sha(bundle), anchor: 'ANCHOR();', blocks: [{ old: 'OLD_TEXT;', new: 'NEW_TEXT;' }, { file: 'block.js', sha256: sha('BRIDGE();') }], output_sha256: sha(out), patchVersion: 'test/replace+insert' } };
+  fs.writeFileSync(path.join(d, 'plan.json'), JSON.stringify(plan));
+  fs.writeFileSync(path.join(d, 'in.js'), bundle);
+  const a = run(d, path.join(d, 'in.js'), '--apply', '--output', path.join(d, 'o.js'));
+  assert.equal(a.status, 0, a.stdout + a.stderr);
+  assert.equal(fs.readFileSync(path.join(d, 'o.js'), 'utf8'), out);
+});
+
+test('GH #362: idempotent --check -- a plan with a replace step reports ALREADY_PATCHED on its own output, never re-replaces', () => {
+  const d = tmp();
+  const bundle = 'x;OLD_TEXT;y;';
+  const out = 'x;NEW_TEXT;y;';
+  const plan = { cell: { input_sha256: sha(bundle), anchor: 'ANCHOR();', blocks: [{ old: 'OLD_TEXT;', new: 'NEW_TEXT;' }], output_sha256: sha(out), patchVersion: 'test/replace-idempotent' } };
+  fs.writeFileSync(path.join(d, 'plan.json'), JSON.stringify(plan));
+  fs.writeFileSync(path.join(d, 'done.js'), out);
+  const c = run(d, path.join(d, 'done.js'), '--check');
+  assert.equal(c.status, 0); assert.match(c.stdout, /STATUS=ALREADY_PATCHED/);
+});
+
+test('GH #362: a plan with ZERO replace steps behaves byte-identically to before this feature (the replace pass is a no-op on an empty list)', () => {
+  // the SAME fixture `setup()` already uses elsewhere in this file -- re-run here, named, to pin that adding the
+  // replace-step feature did not change insert-only behaviour.
+  const { d, out } = setup();
+  const a = run(d, path.join(d, 'in.js'), '--apply', '--output', path.join(d, 'o.js'));
+  assert.equal(a.status, 0, a.stderr);
+  assert.equal(fs.readFileSync(path.join(d, 'o.js'), 'utf8'), out);
 });

@@ -1,0 +1,133 @@
+"sheet.printSettings.read/v2": function (args) {
+var base = EO_BRIDGE_CAPS["sheet.printSettings.read/v1"](args);
+if (!base || base.ok !== true) return base;
+var ws = Api.GetSheet(args.sheet);
+if (!ws) return { ok: false, reason: "sheet-not-found" };
+var m;
+try { m = ws.worksheet; } catch (e) { return { ok: false, reason: "model-missing" }; }
+var ppo = m ? m.PagePrintOptions : null;
+if (!ppo || typeof ppo.asc_getPageMargins !== "function" || typeof ppo.asc_getPageSetup !== "function") return { ok: false, reason: "model-missing" };
+var pm = ppo.asc_getPageMargins();
+if (!pm || typeof pm.asc_getHeader !== "function" || typeof pm.asc_getFooter !== "function") return { ok: false, reason: "margin-getters-missing" };
+var hm = pm.asc_getHeader();
+var fm = pm.asc_getFooter();
+var mmOk = function (v) { return v === null || (typeof v === "number" && isFinite(v) && v >= 0); };
+if (!mmOk(hm)) return { ok: false, reason: "headerMargin-not-number" };
+if (!mmOk(fm)) return { ok: false, reason: "footerMargin-not-number" };
+var ps = ppo.asc_getPageSetup();
+if (!ps) return { ok: false, reason: "model-missing" };
+var po = ps.pageOrder;
+var order;
+if (po === 0) { order = "downThenOver"; } else if (po === 1) { order = "overThenDown"; } else if (po === null) { order = null; } else { return { ok: false, reason: "pageOrder-unexpected" }; }
+base.value.headerMargin = hm;
+base.value.footerMargin = fm;
+base.value.pageOrder = order;
+return base;
+},
+"sheet.autoFilter.colorFilter.read/v1": function (args) {
+if (!argsOk(args, ["sheet"])) return { ok: false, reason: "bad-args" };
+var ws = Api.GetSheet(args.sheet);
+if (!ws) return { ok: false, reason: "sheet-not-found" };
+var af;
+try { af = ws.GetAutoFilter(); } catch (e) { return { ok: false, reason: "autofilter-threw" }; }
+if (!af) return { ok: true, value: { columns: [] } };
+var fs;
+try { fs = af.GetFilters() || []; } catch (e) { return { ok: false, reason: "autofilter-threw" }; }
+if (!Array.isArray(fs)) return { ok: false, reason: "filters-unexpected-shape" };
+var hex6 = function (n) { return ("00000" + (n & 16777215).toString(16).toUpperCase()).slice(-6); };
+var colourOf = function (c) {
+if (c === null || c === void 0) return null;
+if (typeof c !== "object") return void 0;
+if (typeof c.theme === "number") {
+if (c.tint !== null && c.tint !== void 0 && typeof c.tint !== "number") return void 0;
+return { form: "theme", theme: c.theme, tint: typeof c.tint === "number" ? c.tint : null };
+}
+if (typeof c.rgb === "number" && Number.isInteger(c.rgb) && c.rgb >= 0 && c.rgb <= 4294967295) return { form: "rgb", hex: hex6(c.rgb) };
+if (typeof c.indexed === "number" && Number.isInteger(c.indexed) && c.indexed >= 0) return { form: "indexed", indexed: c.indexed };
+return void 0;
+};
+var cols = [];
+for (var i = 0; i < fs.length; i += 1) {
+var col = fs[i] ? fs[i].filter : null;
+if (!col || typeof col.ColId !== "number" || !Number.isInteger(col.ColId) || col.ColId < 0) return { ok: false, reason: "field-unreadable" };
+var cf = col.ColorFilter;
+if (cf === null || cf === void 0) continue;
+if (typeof cf !== "object") return { ok: false, reason: "colorfilter-unexpected-shape" };
+var kind;
+if (cf.CellColor === false) { kind = "fontColor"; } else if (cf.CellColor === null || cf.CellColor === true) { kind = "cellColor"; } else { return { ok: false, reason: "cellcolor-unexpected" }; }
+var dxf = cf.dxf;
+if (!dxf || typeof dxf !== "object") return { ok: false, reason: "colorfilter-dxf-missing" };
+var pf = dxf.fill ? dxf.fill.patternFill : null;
+var slots = kind === "fontColor"
+? [["fontColor", dxf.font ? dxf.font.c : null], ["fgColor", pf ? pf.fgColor : null], ["bgColor", pf ? pf.bgColor : null]]
+: [["fgColor", pf ? pf.fgColor : null], ["bgColor", pf ? pf.bgColor : null]];
+var pick = null;
+var pickSlot = null;
+for (var s = 0; s < slots.length; s += 1) {
+var one = colourOf(slots[s][1]);
+if (one === void 0) return { ok: false, reason: "colour-form-unknown" };
+if (one === null) continue;
+if (pick === null) { pick = one; pickSlot = slots[s][0]; } else if (JSON.stringify(pick) !== JSON.stringify(one)) { return { ok: false, reason: "colour-slots-disagree" }; }
+}
+cols.push({ field: col.ColId + 1, kind: kind, colour: pick, slot: pickSlot });
+}
+return { ok: true, value: { columns: cols } };
+},
+"chart.series.style.read/v1": function (args) {
+if (!args || typeof args !== "object" || typeof args.sheet !== "string" || typeof args.chart !== "string" || typeof args.target !== "string") return { ok: false, reason: "bad-args" };
+var t = args.target;
+var onSeries = t === "series" || t === "dataPoint";
+var onPoint = t === "dataPoint";
+if (!(t === "chart" || t === "plotArea" || t === "title" || t === "legend" || onSeries)) return { ok: false, reason: "unsupported-target" };
+if (onSeries ? !(Number.isInteger(args.series) && args.series >= 0) : args.series !== void 0) return { ok: false, reason: "bad-args" };
+if (onPoint ? !(Number.isInteger(args.point) && args.point >= 0) : args.point !== void 0) return { ok: false, reason: "bad-args" };
+var ws = Api.GetSheet(args.sheet);
+if (!ws) return { ok: false, reason: "sheet-not-found" };
+var charts;
+try { charts = ws.GetAllCharts() || []; } catch (e) { return { ok: false, reason: "charts-threw" }; }
+var api = null;
+for (var i = 0; i < charts.length; i += 1) { var ok = false; try { ok = charts[i].GetName() === args.chart; } catch (e) { ok = false; } if (ok) { api = charts[i]; break; } }
+if (!api) return { ok: false, reason: "chart-not-found" };
+var cs = api.Chart;
+if (!cs || !cs.chart) return { ok: false, reason: "chart-model-missing" };
+var holder;
+if (t === "chart") { holder = cs; } else if (t === "plotArea") { holder = cs.chart.plotArea; } else if (t === "title") { holder = cs.chart.title; } else if (t === "legend") { holder = cs.chart.legend; } else {
+var plot = cs.chart.plotArea;
+var charts2 = plot && plot.charts;
+if (!charts2 || charts2.length !== 1) return { ok: false, reason: "chart-type-not-single" };
+var series = charts2[0].series || [];
+var s = series[args.series];
+if (!s) return { ok: false, reason: "series-index-out-of-range" };
+if (!onPoint) { holder = s; } else {
+if (!Array.isArray(s.dPt)) return { ok: false, reason: "dPt-unexpected-shape" };
+var hits = [];
+for (var d = 0; d < s.dPt.length; d += 1) { if (s.dPt[d] && s.dPt[d].idx === args.point) hits.push(s.dPt[d]); }
+if (hits.length > 1) return { ok: false, reason: "datapoint-ambiguous" };
+holder = hits.length === 1 ? hits[0] : null;
+}
+}
+if (holder === null || holder === void 0) return { ok: true, value: { element: "absent", fill: null, outline: null, outlineWidthEmu: null } };
+var sp = holder.spPr;
+if (sp === null || sp === void 0) return { ok: true, value: { element: "present", fill: null, outline: null, outlineWidthEmu: null } };
+var h2 = function (n) { return ("0" + n.toString(16).toUpperCase()).slice(-2); };
+var paint = function (uf) {
+if (uf === null || uf === void 0) return null;
+var f = uf.fill;
+if (f === null || f === void 0) return null;
+var uc = f.color;
+if (uc === null || uc === void 0) return { form: "other" };
+if (uc.Mods && uc.Mods.Mods && uc.Mods.Mods.length > 0) return void 0;
+var cc = uc.color;
+if (!cc || typeof cc !== "object") return void 0;
+if (typeof cc.id === "number") return { form: "scheme", id: cc.id };
+var rgba = cc.RGBA;
+if (cc.h === void 0 || !rgba || typeof rgba.R !== "number" || typeof rgba.G !== "number" || typeof rgba.B !== "number") return void 0;
+return { form: "rgb", hex: h2(rgba.R) + h2(rgba.G) + h2(rgba.B) };
+};
+var fillV = paint(sp.Fill);
+var ln = sp.ln;
+var outV = ln ? paint(ln.Fill) : null;
+if (fillV === void 0 || outV === void 0) return { ok: false, reason: "sppr-chain-broken" };
+var w = ln && typeof ln.w === "number" ? ln.w : null;
+return { ok: true, value: { element: "present", fill: fillV, outline: outV, outlineWidthEmu: w } };
+},

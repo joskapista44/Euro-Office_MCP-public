@@ -34,7 +34,13 @@ const NOT_ENFORCED_YET = Object.freeze({
   // paragraphOrdinal migrated for rewrite_paragraph and format_text (the intents that keep the section's
   // paragraph count, so an ordinal names the same paragraph on a retry), and -- M5 gate 3, the source
   // proven LIVE (m5-srcdiff run ...61251a) -- for insert_paragraph_before / _after, whose TERMINAL
-  // position is itself an ordinal (paragraph.cjs ordinalTerminal).
+  // position is itself an ordinal (paragraph.cjs ordinalTerminal). Also migrated (this release) for
+  // delete_paragraph: accepted at THIS layer (and schema-released), but adapter.cjs's own
+  // ordinalAfterStructuralStep ALWAYS refuses it (named ordinal-selector-on-count-changing-step) -- a
+  // delete changes its section's paragraph count, so the ordinal would not name the same paragraph on a
+  // retry, the same reason insert_paragraph_* is the one count-changing intent exempted from that guard
+  // and delete_paragraph deliberately is not. The point of migrating it here is the NAMED reason surfacing
+  // from the correct layer, not a new success path.
   selector: Object.freeze({ precondition: 'selector.precondition (on this selector field)', sectionHeading: 'selector.sectionHeading (on this intent)', paragraphOrdinal: 'selector.paragraphOrdinal (on this intent)' }),
 });
 
@@ -55,6 +61,10 @@ const BRANCH_NEUTRAL = Object.freeze(['precondition']);
 const EXPLICITLY_REFUSED = Object.freeze(['index', 'position', 'offset', 'paragraphIndex', 'bookmark', 'tableCell']);
 function branchOf(sel) {
   if (sel.ref !== undefined) return { name: 'ref', keys: ['ref'] };
+  // GH #307: a boolean sentinel, not a resolver key -- kept OUT of RESOLVER_KEYS deliberately, so it
+  // widens nothing else that spreads that array (format_text, insert/delete/move). Only
+  // rewrite_paragraph's own SELECTOR_KEYS entry below names it.
+  if (sel.emptyDocument !== undefined) return { name: 'emptyDocument', keys: ['emptyDocument'] };
   if (sel.sectionHeading !== undefined || sel.paragraphOrdinal !== undefined) return { name: 'sectionHeading', keys: ORDINAL };
   if (sel.fingerprint) return { name: 'fingerprint', keys: ['fingerprint'] };
   if (sel.heading) return { name: 'heading', keys: ['heading', 'level'] };
@@ -92,19 +102,27 @@ const STEP_KEYS = Object.freeze({
   merge_table_cells: [...C, ...D, 'selector', 'endSelector', 'terminalMergedText', 'terminalMergedSpan', 'terminalTableAnchor'],
   split_table_cell: [...C, ...D, 'selector', 'splitRows', 'splitCols', 'terminalTableAnchor'],
   // `selector` stays accepted here so the family keeps refusing it with its own, precise reason.
-  edit_header: [...C, ...D, 'inheritedBy', 'pageNumber', 'paragraph', 'selector', 'section', 'text', 'variant'],
-  edit_footer: [...C, ...D, 'inheritedBy', 'pageNumber', 'paragraph', 'selector', 'section', 'text', 'variant'],
+  // GH #316: `format` -- header-footer.cjs's own plan() is the authority for the accepted keys
+  // (a subset of format_text's TEXT_KEYS + alignment) and their validation (normalizeWanted, reused).
+  // GH #317: `lines` -- a full-part write of N paragraphs, mutually exclusive with `text` and
+  // `paragraph` (header-footer.cjs's own plan() enforces the mutual exclusion and validates each line).
+  edit_header: [...C, ...D, 'format', 'inheritedBy', 'lines', 'pageNumber', 'paragraph', 'selector', 'section', 'text', 'variant'],
+  edit_footer: [...C, ...D, 'format', 'inheritedBy', 'lines', 'pageNumber', 'paragraph', 'selector', 'section', 'text', 'variant'],
 });
 
 // Selector key sets for the families that resolve through the shared resolver and would otherwise
 // ignore an unknown key. list / rich / notes / the table families already accept only exact key
 // sets in their own plan() and are not listed (their refusal is the family's).
 const SELECTOR_KEYS = Object.freeze({
-  rewrite_paragraph: { selector: [...RESOLVER_KEYS, ...ORDINAL, 'precondition'] },
+  // GH #307: `emptyDocument` is scoped to rewrite_paragraph ONLY -- it is a different QUESTION from
+  // every other branch here ("is the whole document empty?", not "which paragraph?"), and format_text
+  // (the only other intent sharing this selector shape) has no meaning on a paragraph with no run to
+  // format. Added to THIS array only, not to RESOLVER_KEYS, so it never reaches format_text's own.
+  rewrite_paragraph: { selector: [...RESOLVER_KEYS, ...ORDINAL, 'precondition', 'emptyDocument'] },
   format_text: { selector: [...WITH_REF, ...ORDINAL, 'precondition'] },
   insert_paragraph_before: { selector: [...WITH_REF, ...ORDINAL, 'precondition'] },
   insert_paragraph_after: { selector: [...WITH_REF, ...ORDINAL, 'precondition'] },
-  delete_paragraph: { selector: [...WITH_REF, 'precondition'] },
+  delete_paragraph: { selector: [...WITH_REF, ...ORDINAL, 'precondition'] },
   move_paragraph_before: { selector: [...WITH_REF, 'precondition'], destinationSelector: WITH_REF },
   move_paragraph_after: { selector: [...WITH_REF, 'precondition'], destinationSelector: WITH_REF },
 });

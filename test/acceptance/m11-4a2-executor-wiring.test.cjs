@@ -33,7 +33,8 @@ test.after(() => { if (process.env.M11_4A2_EVIDENCE) fs.writeFileSync(process.en
 const STEP = Object.freeze({
   write_range: { intent: 'write_range', sheet: 'Budget', range: 'F1:G2', values: [['x', 1], ['y', 2]] },
   insert_rows: { intent: 'insert_rows', sheet: 'Budget', at: 3, count: 2, anchor: { column: 'A', value: 'pear' } },
-  delete_rows: { intent: 'delete_rows', sheet: 'Budget', at: 2, count: 1, anchor: { column: 'A', value: 'pear' } },
+  // owner decision B (2026-11-02): the witness is the first REMOVED row (A2 'apple'), the anchor the first surviving one
+  delete_rows: { intent: 'delete_rows', sheet: 'Budget', at: 2, count: 1, anchor: { column: 'A', value: 'pear' }, witness: { column: 'A', value: 'apple' } },
   rename_sheet: { intent: 'rename_sheet', sheet: 'Budget', name: 'Budget_2026' },
   unmerge_range: { intent: 'unmerge_range', sheet: 'Budget', range: 'C1:D1' },
   set_chart_title: { intent: 'set_chart_title', sheet: 'K', name: 'R1', title: 'Revenue' },
@@ -114,7 +115,7 @@ test('READ_MODE_REGRESSION: xlsx_read / docx_read still ask READ and pass throug
 
 // ---- the six intents: APPLIED, then SATISFIED in a new session with no write ----------------------------------------
 
-test('SIX_INTENTS: first invocation APPLIED (L1/L2/L3 PASS, FORCESAVE_CONFIRMED); second, new session: SATISFIED, write 0', async () => {
+test('SIX_INTENTS: first invocation APPLIED (L1/L2/L3 PASS, FORCESAVE_CONFIRMED); second, new session: SATISFIED (delete_rows: refused as unprovable), write 0', async () => {
   EVIDENCE.intents = {};
   for (const [intent, step] of Object.entries(STEP)) {
     const store = await fresh();
@@ -130,10 +131,19 @@ test('SIX_INTENTS: first invocation APPLIED (L1/L2/L3 PASS, FORCESAVE_CONFIRMED)
     assert.equal(c1.dispatch, 1, intent);
     assert.equal(c1.forceSave, 1, intent);
     const h2 = harness({ store });
+    const settled = JSON.stringify(store.durable);
     const r2 = await h2.tool.handler(req([step]));
     const c2 = h2.calls();
-    assert.equal(r2.ok, true, `${intent} retry: ${JSON.stringify(r2)}`);
-    assert.deepEqual(statuses(r2), ['SATISFIED'], intent);
+    if (intent === 'delete_rows') {
+      // owner decision B (2026-11-02): a delete has no SATISFIED path -- the already-deleted shape is refused, named
+      assert.equal(r2.ok, false, `${intent} retry: ${JSON.stringify(r2)}`);
+      assert.deepEqual(statuses(r2), ['FAILED'], intent);
+      assert.ok(JSON.stringify(r2).includes('xlsx-structure-delete-prior-execution-unprovable'), JSON.stringify(r2).slice(0, 500));
+      assert.equal(JSON.stringify(store.durable), settled, `${intent}: the refused retry changed nothing`);
+    } else {
+      assert.equal(r2.ok, true, `${intent} retry: ${JSON.stringify(r2)}`);
+      assert.deepEqual(statuses(r2), ['SATISFIED'], intent);
+    }
     assert.equal(c2.dispatch, 0, `${intent}: the retry dispatches nothing`);
     assert.equal(c2.forceSave, 0, `${intent}: a no-op starts no save`);
     assert.equal(r2.persistence.state, 'NOT_REQUIRED', intent);
@@ -323,9 +333,9 @@ test('REFUSAL_REGRESSION on the wired path: every M11.4a.1 refusal stops before 
 });
 
 test('SERVED_SURFACE (M11.4b.1): the wired xlsx_execute_task is served; GH #219 3 built docx_execute_task and GH #228 (proposed state) serves it', () => {
-  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   const { tools, registry } = buildServerTools({ config: { schemaVersion: 2, broker: { url: BROKER } }, configIdentity: 'fixture' });
-  assert.deepEqual(Object.keys(tools), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(Object.keys(tools), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   assert.equal(typeof registry.docx_execute_task, 'object', 'GH #219 3 built registry.docx_execute_task; GH #228 (proposed state) also serves it in `tools` (the exposed subset)');
   assert.equal(typeof registry.docx_execute_task.handler, 'function');
 });

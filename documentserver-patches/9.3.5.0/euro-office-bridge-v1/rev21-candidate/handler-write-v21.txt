@@ -1,0 +1,70 @@
+"sheet.printSettings.write/v2": function (args) {
+if (!args || typeof args !== "object" || typeof args.sheet !== "string" || args.sheet === "" || typeof args.setting !== "string") return { ok: false, reason: "bad-args" };
+var s = args.setting;
+if (s !== "headerMargin" && s !== "footerMargin" && s !== "pageOrder") return { ok: false, reason: "unknown-setting" };
+if (!Object.prototype.hasOwnProperty.call(args, "value")) return { ok: false, reason: "bad-args" };
+var v = args.value;
+var target;
+if (s === "pageOrder") {
+if (v === "downThenOver") target = 0;
+else if (v === "overThenDown") target = 1;
+else return { ok: false, reason: "invalid-value" };
+} else {
+if (typeof v !== "number" || !isFinite(v) || v < 0 || v > 500) return { ok: false, reason: "invalid-value" };
+target = v;
+}
+var ws = Api.GetSheet(args.sheet);
+if (!ws) return { ok: false, reason: "sheet-not-found" };
+var m;
+try { m = ws.worksheet; } catch (e) { return { ok: false, reason: "model-missing" }; }
+if (!m || !m.PagePrintOptions || typeof m.getId !== "function") return { ok: false, reason: "model-missing" };
+var ppo = m.PagePrintOptions;
+var X = typeof window !== "undefined" && window ? window.AscCommonExcel : null;
+var C = typeof window !== "undefined" && window ? window.AscCH : null;
+if (!X || !X.g_oUndoRedoLayout || typeof X.UndoRedoData_Layout !== "function") return { ok: false, reason: "layout-history-missing" };
+if (!C || C.historyitem_Layout_HeaderMargin !== 16 || C.historyitem_Layout_FooterMargin !== 17 || C.historyitem_Layout_PageOrder !== 18 || !X.UndoRedoRedoLayout || X.UndoRedoRedoLayout.prototype.__eoLayoutV21 !== true) return { ok: false, reason: "layout-types-not-installed" };
+var H = typeof AscCommon !== "undefined" && AscCommon ? AscCommon.History : null;
+if (!(H && typeof H.Create_NewPoint === "function" && typeof H.StartTransaction === "function" && typeof H.EndTransaction === "function" && typeof H.Add === "function")) return { ok: false, reason: "history-missing" };
+if (typeof H.Is_On === "function" && !H.Is_On()) return { ok: false, reason: "history-off" };
+var holder;
+var getV;
+var setV;
+var type;
+if (s === "pageOrder") {
+holder = typeof ppo.asc_getPageSetup === "function" ? ppo.asc_getPageSetup() : null;
+if (!holder) return { ok: false, reason: "model-missing" };
+getV = function () { return holder.pageOrder; };
+setV = function (x) { holder.pageOrder = x; };
+type = 18;
+} else {
+holder = typeof ppo.asc_getPageMargins === "function" ? ppo.asc_getPageMargins() : null;
+if (!holder) return { ok: false, reason: "model-missing" };
+var g = s === "headerMargin" ? "asc_getHeader" : "asc_getFooter";
+var st = s === "headerMargin" ? "asc_setHeader" : "asc_setFooter";
+if (typeof holder[g] !== "function") return { ok: false, reason: g + "-missing" };
+if (typeof holder[st] !== "function") return { ok: false, reason: st + "-missing" };
+getV = function () { return holder[g](); };
+setV = function (x) { holder[st](x); };
+type = s === "headerMargin" ? 16 : 17;
+}
+var old = getV();
+if (old === target) return { ok: true, value: { applied: [], satisfied: true } };
+var bad = null;
+var set = false;
+H.Create_NewPoint();
+H.StartTransaction();
+try {
+setV(target);
+set = true;
+H.Add(X.g_oUndoRedoLayout, type, m.getId(), null, new X.UndoRedoData_Layout(old, target));
+} catch (e) {
+if (set) { try { setV(old); } catch (e2) { } }
+bad = { ok: false, reason: set ? "history-add-threw" : "setter-threw" };
+} finally {
+H.EndTransaction();
+}
+if (bad) return bad;
+if (getV() !== target) return { ok: false, reason: "no-effect" };
+try { if (m.workbook && m.workbook.handlers && typeof m.workbook.handlers.trigger === "function") m.workbook.handlers.trigger("onChangePageSetupProps", m.getId()); } catch (e) { }
+return { ok: true, value: { applied: [s] } };
+},

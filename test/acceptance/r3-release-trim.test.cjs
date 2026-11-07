@@ -14,12 +14,12 @@ const T = require('../../src/server/tools.cjs');
  * Nothing stays withheld on this line.
  */
 
-const RELEASED_EXTRA = ['insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap'];
+const RELEASED_EXTRA = ['insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap', 'insert_table', 'insert_section_break', 'insert_image', 'insert_paragraphs', 'insert_shape', 'insert_chart', 'delete_image', 'replace_image'];
 const WITHHELD = [];
 
 test('TRIM: the allowlist is exactly the trimmed set and the four tables (both allowlists, published schemas, constraints) are the same ordered list', () => {
   const a = [...W.DOCX_WRITE_ALLOWLIST];
-  assert.equal(a.length, 38);
+  assert.equal(a.length, 46);
   for (const i of RELEASED_EXTRA) assert.ok(a.includes(i), i);
   assert.deepEqual([...T.ACCEPTED_DOCX_WRITE_ALLOWLIST], a);
   assert.deepEqual(Object.keys(D.DOCX_STEP_SCHEMAS), a);
@@ -34,7 +34,7 @@ test('TRIM: no intent stays withheld on this line (the _ALL tables still code ev
     assert.ok(!W.DOCX_WRITE_ALLOWLIST.includes(i) && !T.ACCEPTED_DOCX_WRITE_ALLOWLIST.includes(i), `${i} not allowlisted`);
     assert.equal(D.DOCX_STEP_SCHEMAS[i], undefined, `${i} not published`);
   }
-  assert.equal(Object.keys(D.DOCX_STEP_SCHEMAS_ALL).length, 38);
+  assert.equal(Object.keys(D.DOCX_STEP_SCHEMAS_ALL).length, 46);
 });
 
 test('TRIM (RED/GREEN): every withheld intent is REFUSED_NOT_ALLOWLISTED pre-dispatch, dispatched:false, and no tool/handler path opens a driver', async () => {

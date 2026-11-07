@@ -89,7 +89,7 @@ const REAL_INTENTS = Object.freeze({
   pivots: ['create_pivot'], 'pivots-v2': ['create_pivot'], 'shape-text': ['set_shape_text'], 'chart-point-labels': ['set_chart_point_data_label'], 'shape-rotation': ['set_shape_rotation'], 'sheet-visibility': ['set_sheet_visibility'], sort: ['sort_range'], page: ['set_page_layout'],
   structure: ['insert_rows', 'delete_rows', 'insert_columns', 'delete_columns'],
   numbering: ['set_numbering'], 'page-setup': ['set_page_setup'], 'table-format': ['format_table'], comments: ['resolve_comment'],
-  'delete-cells': ['delete_cells'],
+  'delete-cells': ['delete_cells'], 'tables-write': ['create_table'],
 });
 
 // Six families keep their allowlist as a LOCAL (often per-intent, conditional) variable instead of
@@ -102,6 +102,9 @@ const MANUAL_FIELDS = Object.freeze([
   { family: 'cf', intent: 'delete_conditional_format', fields: ['sheet', 'range', 'rule'] },
   { family: 'filter', intent: 'filter_range', fields: ['sheet', 'range', 'field', 'value', 'values', 'and'] },
   { family: 'filter', intent: 'clear_filter', fields: ['sheet', 'range'] },
+  // fa7244ac/2: set_autofilter_range / remove_autofilter -- SAME sheet/range shape as clear_filter (filter.cjs plan())
+  { family: 'filter', intent: 'set_autofilter_range', fields: ['sheet', 'range'] },
+  { family: 'filter', intent: 'remove_autofilter', fields: ['sheet', 'range'] },
   { family: 'freeze', intent: 'freeze_panes', fields: ['sheet', 'rows', 'columns'] },
   { family: 'freeze', intent: 'unfreeze_panes', fields: ['sheet'] },
   { family: 'names', intent: 'set_print_area', fields: ['sheet', 'range', 'areas', 'replaces'] },

@@ -20,7 +20,7 @@ const rt = require('../../src/server/read-tools.cjs');
 const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver.cjs');
 const { fakeBroker, FILE } = require('../fakes/read-editors.cjs');
 
-const LONG = 'x'.repeat(300);
+const LONG = 'x'.repeat(1100); // GH #364 raised RUN_MAP_CHAR_CEILING 256 -> 1024; must stay PAST the new ceiling
 const book = () => [
   { name: 'S', cells: {
     // three runs, document order, NOT merged across the gap even though run 1 and run 3 share the same font

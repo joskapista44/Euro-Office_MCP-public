@@ -31,6 +31,12 @@ const pivots = require('./families/pivots.cjs');
 const pivotRefresh = require('./families/pivot-refresh.cjs');
 const arrayFormula = require('./families/array-formula.cjs');
 const comments = require('./families/comments.cjs');
+const hyperlinksWrite = require('./families/hyperlinks-write.cjs');
+const tablesWrite = require('./families/tables-write.cjs');
+const tableStructure = require('./families/table-structure.cjs'); // GH #336 / #337
+const tableProps = require('./families/table-props.cjs'); // GH #332-#335
+const protectionWrite = require('./families/protection-write.cjs'); // GH #338-#342
+const workbookProtectionWrite = require('./families/workbook-protection-write.cjs'); // GH #338-#342 remainder (W3, Bridge /24)
 
 /**
  * THE XLSX adapter -- one surface toward the M0 section 5 contract (M6).
@@ -65,7 +71,7 @@ const comments = require('./families/comments.cjs');
 // family builds on
 const write = Object.freeze({ ...cells, verifyPreservation: cells.writePreservation });
 
-const FAMILIES = Object.freeze({ write_range: write, clear_range: clear, ...Object.fromEntries(sheets.INTENTS.map(i => [i, sheets])), ...Object.fromEntries(merge.INTENTS.map(i => [i, merge])), layout_range: layout, format_range: format, ...Object.fromEntries(formatRun.INTENTS.map(i => [i, formatRun])), ...Object.fromEntries(freeze.INTENTS.map(i => [i, freeze])), ...Object.fromEntries(structure.INTENTS.map(i => [i, structure])), ...Object.fromEntries(deleteCells.INTENTS.map(i => [i, deleteCells])), ...Object.fromEntries(range.INTENTS.map(i => [i, range])), ...Object.fromEntries(names.INTENTS.map(i => [i, names])), sort_range: sort, ...Object.fromEntries(validation.INTENTS.map(i => [i, validation])), ...Object.fromEntries(cf.INTENTS.map(i => [i, cf])), ...Object.fromEntries(filter.INTENTS.map(i => [i, filter])), ...Object.fromEntries(charts.INTENTS.map(i => [i, charts])), ...Object.fromEntries(drawingsInsert.INTENTS.map(i => [i, drawingsInsert])), set_page_layout: page, ...Object.fromEntries(print.INTENTS.map(i => [i, print])), ...Object.fromEntries(pivots.INTENTS.map(i => [i, pivots])), ...Object.fromEntries(pivotRefresh.INTENTS.map(i => [i, pivotRefresh])), ...Object.fromEntries(arrayFormula.INTENTS.map(i => [i, arrayFormula])), ...Object.fromEntries(shapeTextFamily.INTENTS.map(i => [i, shapeTextFamily])), ...Object.fromEntries(chartPointLabels.INTENTS.map(i => [i, chartPointLabels])), ...Object.fromEntries(shapeRotation.INTENTS.map(i => [i, shapeRotation])), ...Object.fromEntries(sheetVisibility.INTENTS.map(i => [i, sheetVisibility])), ...Object.fromEntries(comments.INTENTS.map(i => [i, comments])) });
+const FAMILIES = Object.freeze({ write_range: write, clear_range: clear, ...Object.fromEntries(sheets.INTENTS.map(i => [i, sheets])), ...Object.fromEntries(merge.INTENTS.map(i => [i, merge])), layout_range: layout, format_range: format, ...Object.fromEntries(formatRun.INTENTS.map(i => [i, formatRun])), ...Object.fromEntries(freeze.INTENTS.map(i => [i, freeze])), ...Object.fromEntries(structure.INTENTS.map(i => [i, structure])), ...Object.fromEntries(deleteCells.INTENTS.map(i => [i, deleteCells])), ...Object.fromEntries(range.INTENTS.map(i => [i, range])), ...Object.fromEntries(names.INTENTS.map(i => [i, names])), sort_range: sort, ...Object.fromEntries(validation.INTENTS.map(i => [i, validation])), ...Object.fromEntries(cf.INTENTS.map(i => [i, cf])), ...Object.fromEntries(filter.INTENTS.map(i => [i, filter])), ...Object.fromEntries(charts.INTENTS.map(i => [i, charts])), ...Object.fromEntries(drawingsInsert.INTENTS.map(i => [i, drawingsInsert])), set_page_layout: page, ...Object.fromEntries(print.INTENTS.map(i => [i, print])), ...Object.fromEntries(pivots.INTENTS.map(i => [i, pivots])), ...Object.fromEntries(pivotRefresh.INTENTS.map(i => [i, pivotRefresh])), ...Object.fromEntries(arrayFormula.INTENTS.map(i => [i, arrayFormula])), ...Object.fromEntries(shapeTextFamily.INTENTS.map(i => [i, shapeTextFamily])), ...Object.fromEntries(chartPointLabels.INTENTS.map(i => [i, chartPointLabels])), ...Object.fromEntries(shapeRotation.INTENTS.map(i => [i, shapeRotation])), ...Object.fromEntries(sheetVisibility.INTENTS.map(i => [i, sheetVisibility])), ...Object.fromEntries(comments.INTENTS.map(i => [i, comments])), ...Object.fromEntries(hyperlinksWrite.INTENTS.map(i => [i, hyperlinksWrite])), ...Object.fromEntries(tablesWrite.INTENTS.map(i => [i, tablesWrite])), ...Object.fromEntries(tableStructure.INTENTS.map(i => [i, tableStructure])), ...Object.fromEntries(tableProps.INTENTS.map(i => [i, tableProps])), ...Object.fromEntries(protectionWrite.INTENTS.map(i => [i, protectionWrite])), ...Object.fromEntries(workbookProtectionWrite.INTENTS.map(i => [i, workbookProtectionWrite])) });
 
 function familyOf(intent) {
   const f = FAMILIES[intent];
@@ -81,8 +87,12 @@ function familyFor(op) {
 // GH #76 MODEL 1 (owner decision 2026-10-18): verifyStoredContent is a task-level field the planner must
 // tolerate (it carries no planning meaning here -- write-tools.cjs reads it after the plan has already run).
 const TASK_FIELDS = Object.freeze(['id', 'steps', 'verifyStoredContent']);
-// GH #326 (U4b): every reason protection-gate.cjs's gate() can return -- preflightDecisive below matches on this.
-const PROTECTION_REFUSAL = /^xlsx-protect(ed-sheet-forbids|ed-locked-cells|ion-unobservable|ed-sheet-intent-not-measured):/;
+// GH #326 (U4b) + GH #338-#342 remainder (W2): every reason protection-gate.cjs's gate() can return --
+// preflightDecisive below matches on this. `ed-workbook-locked-structure` (the new W2 workbook-level
+// refusal) carries no `:<suffix>` at all (unlike the other four) -- the trailing `(:|$)` is therefore
+// REQUIRED, not cosmetic: a plain trailing `:` (as the design draft first proposed) never matches that one
+// reason, since the string ends right after "structure" with no colon to find.
+const PROTECTION_REFUSAL = /^xlsx-protect(ed-sheet-forbids|ed-locked-cells|ion-unobservable|ed-sheet-intent-not-measured|ed-workbook-locked-structure)(:|$)/;
 
 /**
  * Agent task -> common M3 operations. Two writes whose ranges overlap on the same sheet are refused:
@@ -154,7 +164,34 @@ function planOperations(task) {
   // GH #300 K2: a comment's guard reads the sheet's whole comment list (a second comment on a cell is a silent no-op),
   // and its L3 compares every other comment -- another step could change both, so v1 keeps it the only step of its task
   if (operations.length > 1 && operations.some(o => o.family === 'comments')) {
-    return { ok: false, operations: [], detail: 'add_comment must be the only step of its task' };
+    return { ok: false, operations: [], detail: `${operations.find(o => o.family === 'comments').intent} must be the only step of its task` };
+  }
+  // GH #336 / #337: a table row / column insert or delete shifts a band of the sheet and its guard reads the whole workbook's
+  // formulas, so v1 keeps it the only step of its task (table-structure.cjs)
+  // GH #332-#335: a table property write goes through ONE Bridge write and its guard reads the whole workbook's formulas (rename / resize) --
+  // the only step of its task (table-props.cjs)
+  if (operations.length > 1 && operations.some(o => o.family === 'table-props')) {
+    return { ok: false, operations: [], detail: `${operations.find(o => o.family === 'table-props').intent} must be the only step of its task` };
+  }
+  // GH #338-#342: a protection write changes what every other step of the task may do on the sheet (#326) -- the only step of its task
+  if (operations.length > 1 && operations.some(o => o.family === 'protection')) {
+    return { ok: false, operations: [], detail: `${operations.find(o => o.family === 'protection').intent} must be the only step of its task` };
+  }
+  // GH #338-#342 remainder (W3, docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md "Sole-step rule"): the SAME
+  // mechanism as the sheet-level 'protection' family above, task-admission rather than teaching a W2-gated
+  // intent's gate to simulate plan-time lock state across this task's own earlier steps -- a workbook-protection
+  // change mixed with ANYTHING else refuses the WHOLE task, before a single step dispatches. The reason is the
+  // literal, named string (not an English sentence like the siblings above) because the design fixes it as such.
+  if (operations.length > 1 && operations.some(o => o.family === 'workbook-protection')) {
+    return { ok: false, operations: [], detail: 'xlsx-workbook-protection-change-must-be-sole-step' };
+  }
+  if (operations.length > 1 && operations.some(o => o.family === 'table-structure')) {
+    return { ok: false, operations: [], detail: `${operations.find(o => o.family === 'table-structure').intent} must be the only step of its task` };
+  }
+  // GH #300 L2 (CANDIDATE, offline-tested, WITHHELD): a hyperlink step's gate/L3 reads the sheet's whole
+  // hyperlink list too, the SAME reasoning as comments.cjs above -- v1 keeps it the only step of its task
+  if (operations.length > 1 && operations.some(o => o.family === 'hyperlinks')) {
+    return { ok: false, operations: [], detail: `${operations.find(o => o.family === 'hyperlinks').intent} must be the only step of its task` };
   }
   // a copy / move touches two blocks (and a move re-points references): the only step of its task
   if (operations.length > 1 && operations.some(o => o.family === 'range')) {
@@ -253,6 +290,8 @@ function liveScope(task) {
   const runCells = extra('runCells');
   const arrayCells = extra('arrayCells');
   const commentSheets = extra('commentSheets');
+  const hyperlinkSheets = extra('hyperlinkSheets'); // GH #300 L2 (CANDIDATE, WITHHELD): hyperlinks-write.cjs's own liveExtras
+  const tableSheets = extra('tableSheets'); // GH #298 D: tables-write.cjs's own liveExtras (read_tables' axis)
   const sessionUser = ops.some(op => !!liveExtrasOf(op).sessionUser);
   const filterSheets = extra('filterSheets');
   const chartSheets = extra('chartSheets');
@@ -260,11 +299,20 @@ function liveScope(task) {
   const printSheets = extra('printSheets');
   const drawingSheets = extra('drawingSheets');
   const colBreaks = ops.some(op => !!(familyFor(op).liveExtras && familyFor(op).liveExtras(op).colBreaks));
+  const printLayout = ops.some(op => !!(familyFor(op).liveExtras && familyFor(op).liveExtras(op).printLayout)); // GH #354/#355: the /21 print LAYOUT field
   const drawingAnchor = ops.some(op => !!(familyFor(op).liveExtras && familyFor(op).liveExtras(op).drawingAnchor));
+  // GH #346 unit 3: the chart.series.style.read/v1 axes (styles + pointStyles) on request -- charts.cjs liveExtras, dataPoint target only
+  const chartStyle = ops.some(op => !!(familyFor(op).liveExtras && familyFor(op).liveExtras(op).chartStyle));
   // M7 S32: only a task of TIERED_INTENTS steps may be observed in tiers above 45000 used cells
   const tiered = ops.length > 0 && ops.every(op => TIERED_INTENTS.includes(op.intent));
   const panes = ops.some(op => !!(familyFor(op).liveExtras && familyFor(op).liveExtras(op).panes));
+  // GH #344 colour filter WRITE: the colour of a colour filter is only read through the /21 Bridge axis, on request
+  const filterColor = ops.some(op => !!(familyFor(op).liveExtras && familyFor(op).liveExtras(op).filterColor));
   const sheetVisibility = ops.some(op => !!(familyFor(op).liveExtras && familyFor(op).liveExtras(op).sheetVisibility));
+  // GH #338-#342 remainder (W3): protect_workbook / unprotect_workbook need the SAME additive workbook-level read
+  // read_protection's own request already names unconditionally (read-tools.cjs); a write task only pays for it
+  // when one of its ops actually asks, the same per-family liveExtras() opt-in every other axis above uses.
+  const workbookProtection = ops.some(op => !!(familyFor(op).liveExtras && familyFor(op).liveExtras(op).workbookProtection));
   const bounded = tiered ? null : boundedVariant(ops);
   // GH #107 (a): a multi-step task with neither path names its blockers in the refusal (the driver's refusalOf)
   const mixedTask = !tiered && !bounded && ops.length > 1 ? mixedTaskNote(ops) : null;
@@ -275,7 +323,7 @@ function liveScope(task) {
   const protectionTargets = protectionTargetsOf(ops);
   const protectionRanges = protectionTargets.filter(t => t.range !== undefined);
   const protectionSheets = [...new Set(protectionTargets.filter(t => t.range === undefined).map(t => t.sheet))];
-  return { windows: ops.flatMap(op => familyFor(op).windowsOf(op)), formatSheets: extra('formatSheets'), objectSheets: extra('objectSheets'), ...(dependents ? { dependents: true } : {}), ...(noFormulaIndex ? { noFormulaIndex: true } : {}), ...(layoutExtents.length ? { layout: layoutExtents } : {}), ...(styleSheets.length ? { styleSheets } : {}), ...(panes ? { panes: true } : {}), ...(sheetVisibility ? { sheetVisibility: true } : {}), ...(validationRanges.length ? { validationRanges } : {}), ...(cfRanges.length ? { cfRanges } : {}), ...(runCells.length ? { runCells } : {}), ...(arrayCells.length ? { arrayCells } : {}), ...(commentSheets.length ? { commentSheets } : {}), ...(sessionUser ? { sessionUser: true } : {}), ...(filterSheets.length ? { filterSheets } : {}), ...(chartSheets.length ? { chartSheets } : {}), ...(pageSheets.length ? { pageSheets } : {}), ...(printSheets.length ? { printSheets } : {}), ...(drawingSheets.length ? { drawingSheets } : {}), ...(colBreaks ? { colBreaks: true } : {}), ...(drawingAnchor ? { drawingAnchor: true } : {}), ...(protectionRanges.length ? { protectionRanges } : {}), ...(protectionSheets.length ? { protectionSheets } : {}), ...(tiered ? { tiered: true } : {}), ...(bounded ? { boundedVariant: bounded } : {}), ...(mixedTask ? { mixedTask } : {}) };
+  return { windows: ops.flatMap(op => familyFor(op).windowsOf(op)), formatSheets: extra('formatSheets'), objectSheets: extra('objectSheets'), ...(dependents ? { dependents: true } : {}), ...(noFormulaIndex ? { noFormulaIndex: true } : {}), ...(layoutExtents.length ? { layout: layoutExtents } : {}), ...(styleSheets.length ? { styleSheets } : {}), ...(panes ? { panes: true } : {}), ...(sheetVisibility ? { sheetVisibility: true } : {}), ...(validationRanges.length ? { validationRanges } : {}), ...(cfRanges.length ? { cfRanges } : {}), ...(runCells.length ? { runCells } : {}), ...(arrayCells.length ? { arrayCells } : {}), ...(commentSheets.length ? { commentSheets } : {}), ...(hyperlinkSheets.length ? { hyperlinkSheets } : {}), ...(tableSheets.length ? { tableSheets } : {}), ...(sessionUser ? { sessionUser: true } : {}), ...(filterSheets.length ? { filterSheets } : {}), ...(filterColor ? { filterColor: true } : {}), ...(chartSheets.length ? { chartSheets } : {}), ...(chartStyle ? { chartStyle: true } : {}), ...(pageSheets.length ? { pageSheets } : {}), ...(printSheets.length ? { printSheets } : {}), ...(drawingSheets.length ? { drawingSheets } : {}), ...(colBreaks ? { colBreaks: true } : {}), ...(printLayout ? { printLayout: true } : {}), ...(drawingAnchor ? { drawingAnchor: true } : {}), ...(protectionRanges.length ? { protectionRanges } : {}), ...(protectionSheets.length ? { protectionSheets } : {}), ...(workbookProtection ? { workbookProtection: true } : {}), ...(tiered ? { tiered: true } : {}), ...(bounded ? { boundedVariant: bounded } : {}), ...(mixedTask ? { mixedTask } : {}) };
 }
 
 /** The protection gate's own (sheet[, range]) read targets, deduped by sheet+range -- shared by liveScope and
@@ -405,9 +453,13 @@ const xlsxAdapter = {
    * refusal reason, merge_range / sort_range still disqualify (unchanged) -- only the two reasons named above widen.
    */
   preflightDecisive(earlier, op, evidence) {
-    // GH #326 (U4b): a protection-gate refusal is decisive REGARDLESS of `earlier` -- no intent in this
-    // product sets or clears sheet protection (grep: nothing under families/ touches sheetProtection), so no
-    // earlier step of the SAME task can ever cure it. The whole task is refused before the first dispatch.
+    // GH #326 (U4b): a protection-gate refusal is decisive REGARDLESS of `earlier`. This is load-bearing,
+    // not vacuous -- it is what refuses a task like [write_range(unlocked), format_range(forbidden)] before
+    // write_range dispatches, instead of leaving that first write applied and the task half-done. The
+    // premise it relies on: `earlier` can never itself be a protection-state change, because planOperations()
+    // keeps protect_sheet / unprotect_sheet / set_cell_protection the ONLY step of their own task (families/
+    // protection-write.cjs's intents) -- so a protection refusal evaluated here was already true at planning,
+    // and no earlier step (none of which can set or clear protection) could have cured it since.
     if (evidence && PROTECTION_REFUSAL.test(evidence.reason || '')) return true;
     if (!op || !['write_range', 'unmerge_range', 'set_chart_title'].includes(op.intent)) return false;
     const area = evidence && evidence.reason === 'xlsx-write-into-merged-area-refused' && typeof evidence.mergeArea === 'string' ? parseRange(evidence.mergeArea) : null;

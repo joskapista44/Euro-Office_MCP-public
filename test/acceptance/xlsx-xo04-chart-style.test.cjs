@@ -69,15 +69,15 @@ test('receipt: the "chart" target (bare Fill/SetOutLine) is named chart-style-ch
   assert.deepEqual(mapped.operations[0].semanticsNotProven, ['chart-style-chart-fill', 'chart-style-chart-outline']);
 });
 
-test('receipt: series/dataPoint targets are named the same way, index-qualified operation unaffected', async () => {
+test('receipt: the series target is named the same way, index-qualified operation unaffected', async () => {
+  // GH #346 AUTO-REPAIR Egyseg 3: `dataPoint` LEFT this WRITE-ONLY, bare-setter class -- it now
+  // goes through the idx-correct Bridge write (B29, /27-ONLY) and is read-and-compare verifiable
+  // (never semanticsNotProven). Its own acceptance tests live in
+  // test/acceptance/xlsx-gh346-dpt-write-mcp-release.test.cjs, not here.
   const store = createStore(book([mine()]));
   const a = await run(store, style({ target: 'series', fill: '#808080', seriesIndex: 0 }));
   assert.equal(a.result.ok, true, JSON.stringify(a.result.execution.appliedOperations[0].evidence));
   assert.deepEqual(a.mapped.operations[0].semanticsNotProven, ['chart-style-series-fill']);
-  const store2 = createStore(book([mine()]));
-  const b = await run(store2, style({ target: 'dataPoint', fill: undefined, outline: { width: 1, color: '#000000' }, seriesIndex: 1, dataPointIndex: 2 }));
-  assert.equal(b.result.ok, true, JSON.stringify(b.result.execution.appliedOperations[0].evidence));
-  assert.deepEqual(b.mapped.operations[0].semanticsNotProven, ['chart-style-datapoint-outline']);
 });
 
 for (const [name, t, why, b] of [
@@ -166,7 +166,12 @@ test('the command body: a false return from the setter fails closed, named by WH
   assert.deepEqual(new Function('Api', charts.lower(op2).body)(Api2), { ok: false, stage: 'style-outline-rejected' });
 });
 
-test('the command body: series (indexed) -- extra args (seriesIndex, false); dataPoint -- (seriesIndex, dataPointIndex, false)', () => {
+test('the command body: series (indexed) -- extra args (seriesIndex, false)', () => {
+  // GH #346 AUTO-REPAIR Egyseg 3: this test used to ALSO cover dataPoint -- SetDataPointOutLine
+  // (the position-based public setter, GH #346's own root cause) is no longer called anywhere on
+  // the dataPoint path, so there is nothing left to assert about it here. Its own command-body
+  // test (the Bridge-write args shape) lives in
+  // test/acceptance/xlsx-gh346-dpt-write-mcp-release.test.cjs.
   const log = [];
   const existing = [{ GetName: () => 'C1', SetSeriesFill: (...x) => { log.push(['SetSeriesFill', ...x]); return true; } }];
   const ws = { GetName: () => 'K', GetAllCharts: () => existing };
@@ -174,14 +179,29 @@ test('the command body: series (indexed) -- extra args (seriesIndex, false); dat
   const op = planOperations(style({ target: 'series', fill: '#FF0000', seriesIndex: 1 })).operations[0];
   new Function('Api', charts.lower(op).body)(Api);
   assert.deepEqual(log[0], ['SetSeriesFill', [255, 0, 0], 1, false]);
+});
 
-  const log2 = [];
-  const existing2 = [{ GetName: () => 'C1', SetDataPointOutLine: (...x) => { log2.push(['SetDataPointOutLine', ...x]); return true; } }];
-  const ws2 = { GetName: () => 'K', GetAllCharts: () => existing2 };
-  const Api2 = { GetSheet: () => ws2, CreateStroke: (w, f) => [w, f], CreateSolidFill: v => v, CreateRGBColor: (...x) => x };
-  const op2 = planOperations(style({ target: 'dataPoint', fill: undefined, outline: { width: 1, color: '#000000' }, seriesIndex: 2, dataPointIndex: 3 })).operations[0];
-  new Function('Api', charts.lower(op2).body)(Api2);
-  assert.deepEqual(log2[0], ['SetDataPointOutLine', [12700, [0, 0, 0]], 2, 3, false]);
+test('RED CONTROL: a dataPoint-style command body never calls SetDataPointFill/SetDataPointOutLine, even if the fake editor provides them (GH #346 AUTO-REPAIR Egyseg 3 -- the public, position-based setter is COMPLETELY removed from this path, not just unused by convention)', () => {
+  const calls = [];
+  const existing = [{ GetName: () => 'C1', SetDataPointFill: (...x) => { calls.push('SetDataPointFill'); return true; }, SetDataPointOutLine: (...x) => { calls.push('SetDataPointOutLine'); return true; } }];
+  const ws = { GetName: () => 'K', GetAllCharts: () => existing };
+  const Api = { GetSheet: () => ws, CreateSolidFill: v => v, CreateRGBColor: (...x) => x, CreateStroke: (w, f) => [w, f] };
+  const op = planOperations(style({ target: 'dataPoint', fill: '#FF0000', outline: { width: 1, color: '#000000' }, seriesIndex: 2, dataPointIndex: 3 })).operations[0];
+  const { body, meta } = charts.lower(op);
+  assert.equal(meta.bridgeDataPointStyleWrite, true);
+  assert.doesNotMatch(body, /SetDataPointFill/);
+  assert.doesNotMatch(body, /SetDataPointOutLine/);
+  // the body references the Bridge gate/write/fail helpers instead, and never Api.GetSheet/GetAllCharts at all
+  // (the handler resolves sheet+chart server-side, the SAME shape gapOverlap/seriesOrder/markerSymbol/lineStyle use).
+  assert.match(body, /__eoDataPointStyleGate/);
+  assert.match(body, /__eoDataPointStyleWrite/);
+  // the shared callCommand trailer every set_chart_style target goes through still does its own
+  // Api.GetSheet(name)/ws.GetName() identity check BEFORE `${call}` -- but dataPoint's own branch
+  // never ALSO calls GetAllCharts (the chart-identity lookup every OTHER target's `call` repeats
+  // in-body): the bridge handler resolves sheet+chart server-side, the SAME shape
+  // gapOverlap/seriesOrder/markerSymbol/lineStyle already use.
+  assert.doesNotMatch(body, /GetAllCharts/);
+  assert.equal(calls.length, 0, 'neither setter was ever invoked');
 });
 
 test('the command body: the "chart" target calls the BARE Fill/SetOutLine names', () => {

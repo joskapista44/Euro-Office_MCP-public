@@ -30,7 +30,7 @@ The accepted read operations and write intents of this release are listed in [CA
 - Node.js 22 (the release is built, tested and accepted on 22; `package.json` `engines` keeps the floor at 20)
 - Nextcloud with the Euro-Office integration app, reachable over HTTPS
 - Euro-Office Document Server **9.3.5.0** with this project's Document Server blocks installed
-  ([`documentserver-patches/`](documentserver-patches/)): the cell (XLSX) Bridge `euro-office-bridge-v1/9.3.5.0/17` and the
+  ([`documentserver-patches/`](documentserver-patches/)): the cell (XLSX) Bridge `euro-office-bridge-v1/9.3.5.0/29` and the
   word (DOCX) Bridge `euro-office-bridge-word-v1/9.3.5.0/5`; against the cell `/16` Bridge every
   XLSX write is refused (the protected-sheet guard reads through `/17`), and any other Document Server build or
   Bridge revision is refused until revalidated

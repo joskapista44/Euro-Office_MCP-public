@@ -58,7 +58,7 @@ async function noDirectFetch(fn) {
 const accepted = f => Object.entries(OPERATIONS[f]).filter(([, o]) => o.status === STATUS.ACCEPTED).map(([k]) => k);
 const byStatus = s => ['xlsx', 'docx'].flatMap(f => Object.entries(OPERATIONS[f]).filter(([, o]) => o.status === s).map(([k]) => `${f}:${k}`));
 
-test('INVENTORY: the accepted READ allowlist, every catalogue row carries evidence, the 77 routed intents are WRITE', () => {
+test('INVENTORY: the accepted READ allowlist, every catalogue row carries evidence, the 79 routed intents are WRITE', () => {
   // X-O05/4: read_charts PARTIAL -> ACCEPTED (effectiveLabels, per-point, via chart.dataLabels.effective.read/v1) --
   // conditional on this round's LIVE acceptance; revert this line too if that run does not PASS.
   // X-O08 (/14): read_drawings PARTIAL -> ACCEPTED too (parent/kind/name/pos/width/height/rotation/flip: M7 S2b;
@@ -78,13 +78,17 @@ test('INVENTORY: the accepted READ allowlist, every catalogue row carries eviden
   // GH #269b: read_comments NOT_MEASURED -> ACCEPTED (g269bv2 LIVE PASS): the main document's comments, the range anchor a named gap.
   // GH #227: read_section_flags INTERNAL -> ACCEPTED -- titlePage/evenAndOdd through the SAME B21 Bridge
   // READ (docx.section.variantState.read/v1) the write-side header/footer family already runtime-gates.
-  assert.deepEqual(accepted('xlsx'), ['workbook_overview', 'read_range', 'read_validations', 'read_charts', 'read_pivots', 'read_drawings', 'read_conditional_formats', 'read_layout', 'read_freeze_panes', 'read_sheet_state', 'read_page_setup', 'read_filter', 'read_comments', 'read_print_area', 'read_defined_names', 'read_runs']);
+  // GH #363 2nd unit: read_effective_fill (NEW) -> ACCEPTED -- the per-cell CF-EVALUATED fill, through the
+  // DS Bridge candidate sheet.cells.compiledStyle.read/v1 (rev28-table-autofilter-criteria-candidate,
+  // extended; NOT installed anywhere, degrades to CAPABILITY_MISSING); bounded to 200 cells.
+  assert.deepEqual(accepted('xlsx'), ['workbook_overview', 'read_range', 'read_validations', 'read_charts', 'read_pivots', 'read_drawings', 'read_conditional_formats', 'read_effective_fill', 'read_layout', 'read_freeze_panes', 'read_sheet_state', 'read_page_setup', 'read_filter', 'read_comments', 'read_tables', 'read_hyperlinks', 'read_protection', 'read_print_area', 'read_defined_names', 'read_runs', 'read_array_formulas', 'read_print_rendering']);
   assert.deepEqual(accepted('docx'), ['read_text', 'read_formatting', 'read_tables', 'read_headers_footers', 'read_page_setup', 'read_bookmarks', 'read_numbering', 'read_styles', 'read_notes', 'read_images', 'read_comments', 'read_section_flags']);
   assert.equal(byStatus(STATUS.PARTIAL).length, 1); // GH #268b release flip: PARTIAL 2 -> 1; L-08 + X-O08: 6 -> 4; GH #140 U2: 4 -> 3; GH #225: 3 -> 2; GH #226 3: read_notes 2 -> 1; GH #268b: read_images NOT_MEASURED -> PARTIAL 1 -> 2 (the release flip is a separate commit)
-  assert.equal(byStatus(STATUS.NOT_MEASURED).length, 1); // GH #269b: read_comments 2 -> 1; GH #268b: 3 -> 2
+  assert.equal(byStatus(STATUS.NOT_MEASURED).length, 0); // GH #269b: read_comments 2 -> 1; GH #268b: 3 -> 2; GH #356/#357: read_print_rendering 1 -> 0
   assert.equal(byStatus(STATUS.INTERNAL).length, 0); // GH #227: 1 -> 0, the last INTERNAL docx op released
   for (const f of ['xlsx', 'docx']) for (const [k, o] of Object.entries(OPERATIONS[f])) assert.ok(o.evidence && o.evidence.length > 3, `${f}:${k} evidence`);
-  assert.equal(writeIntents().size, 77);
+  // fa7244ac/3: set_autofilter_range / remove_autofilter join XLSX_CANDIDATES (write-tools.cjs/tools.cjs), 77 -> 79
+  assert.equal(writeIntents().size, 79);
   for (const f of ['xlsx', 'docx']) for (const k of Object.keys(OPERATIONS[f])) assert.equal(writeIntents().has(k), false, `${k} is not a write intent`);
 });
 
@@ -326,8 +330,8 @@ const REFUSALS = [
   // operation left, so the PARTIAL-refusal path is exercised on docx only below.
   // GH #225: read_numbering ALSO moved PARTIAL -> ACCEPTED -- read_table_grid is the one that stays.
   ['PARTIAL intent (docx)', 'docx', { fileId: FILE, operation: 'read_table_grid' }, 'REFUSED_PARTIAL'],
-  // GH #269b: read_comments moved NOT_MEASURED -> ACCEPTED -- read_print_rendering (xlsx) is the NOT_MEASURED row left.
-  ['NOT_MEASURED intent', 'xlsx', { fileId: FILE, operation: 'read_print_rendering' }, 'REFUSED_NOT_MEASURED'],
+  // GH #269b: read_comments moved NOT_MEASURED -> ACCEPTED.
+  // GH #356/#357: read_print_rendering moved NOT_MEASURED -> ACCEPTED (Bridge /23 G1 LIVE PASS) -- it was the LAST NOT_MEASURED operation, so no live REFUSED_NOT_MEASURED example remains; the generic `REFUSED_${op.status}` mechanism (checkOperation) is unchanged and would fire again the moment any operation is next marked NOT_MEASURED.
   // GH #227: read_section_flags moved INTERNAL -> ACCEPTED -- it was the LAST docx:INTERNAL operation
   // (byStatus(STATUS.INTERNAL).length is now 0, see INVENTORY above), so no live REFUSED_INTERNAL
   // example remains; the generic `REFUSED_${op.status}` mechanism (checkOperation) is unchanged and
@@ -381,9 +385,9 @@ test('M11.4b.1 exposure (GH #228 proposed state): tools/list = product_status + 
   // M11.4a.1 built xlsx_execute_task; M11.4b.1 released it. GH #219 3 built docx_execute_task
   // too (same shape, same gate) but left it withheld; GH #228 (PROPOSED, owner decision pending) serves it:
   // `tools` (the exposed subset below) now carries all five.
-  assert.deepEqual(Object.keys(registry).sort(), ['docx_execute_task', 'docx_read', 'product_status', 'xlsx_execute_task', 'xlsx_read']);
-  assert.deepEqual(Object.keys(tools), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
-  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(Object.keys(registry).sort(), ['document_create', 'docx_execute_task', 'docx_read', 'product_status', 'xlsx_execute_task', 'xlsx_read']);
+  assert.deepEqual(Object.keys(tools), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
+  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   assert.deepEqual(TOOL_ROWS.filter(r => r.EXPOSE_IN_PRODUCT_MCP !== 'YES').map(r => r.TOOL).sort(), []);
 
   const input = new PassThrough();
@@ -399,7 +403,7 @@ test('M11.4b.1 exposure (GH #228 proposed state): tools/list = product_status + 
   input.end();
   await done;
   const byId = Object.fromEntries(lines.map(m => [m.id, m]));
-  assert.deepEqual(byId[1].result.tools.map(x => x.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(byId[1].result.tools.map(x => x.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   assert.equal(byId[2].error, undefined, 'xlsx_execute_task is callable (an empty task is refused by its own schema)');
   assert.equal(byId[2].result.structuredContent.ok, false);
   assert.equal(byId[3].error, undefined, 'docx_execute_task is callable (an empty call is refused by its own schema, pre-dispatch)');

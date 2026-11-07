@@ -51,7 +51,8 @@ function observe(b, request) {
   assert.equal(tier.tier, 'tiered', 'the stand-in is above the 45000-cell bound');
   const p = run(readQuery(request.windows, { usedRanges: false }), b);
   const payload = tieredPayload(p, run(digestQuery(request.windows, { formulaIndex: formulaIndexWanted(request) }), b), tier, { build: 'test', fileId: null });
-  const deps = request.dependents ? { dependents: { names: [], validations: { S: [] } }, conditional: { S: [] }, objects: { S: { charts: [], pivots: [], names: [] } } } : {};
+  // GH #362 2nd unit: hiddenNames: [] -- the names-family hidden-collision gate's "observed, none" branch.
+  const deps = request.dependents ? { dependents: { names: [], hiddenNames: [], validations: { S: [] } }, conditional: { S: [] }, objects: { S: { charts: [], pivots: [], names: [] } } } : {};
   return normalizeInventory({ ...payload, ...deps, objects: deps.objects || payload.objects });
 }
 

@@ -119,6 +119,16 @@ const { createSessionGate } = require('./session-gate.cjs');
 // SAME six-original-target discipline: never SATISFIED on retry, always named in the receipt's
 // semanticsNotProven (charts.cjs's own styleNotProven), served ONLY on DS /15 (B24, /15-ONLY --
 // UNLIKE every other Bxx-WRITE family here, no earlier runtime carries either capability).
+// GH #346 AUTO-REPAIR Egyseg 3 (see docs/GH346-DPT-AUTO-REPAIR-DESIGN-20261104.md Dontesi pont
+// 5): + `dataPoint`, the ONE target the
+// X-O04/11 comment above named as staying "WRITE_ONLY and internal" -- SUPERSEDED for this one
+// target only (plotArea/title/legend/chart/series stay write-only/internal, unchanged). The
+// idx-correct Bridge write chart.series.dataPoint.style.write/v1 (B29, /27-ONLY, Egyseg 2,
+// landed `fbb08b5b`) replaces the position-based public setter entirely (GH #346's own root
+// cause: the engine's own SetDataPointFill/SetDataPointOutLine address `oSeries.dPt` by ARRAY
+// POSITION, never by idx). UNLIKE markerSymbol/lineStyle above, `dataPoint` IS read-and-compare
+// verifiable (chart.series.style.read/v1's own /27+ `effective`/`duplicated` fields, Egyseg 1) --
+// never semanticsNotProven, same as marker/gridlines/gapOverlap/seriesOrder.
 const XLSX_WRITE_ALLOWLIST = Object.freeze(['write_range', 'insert_rows', 'delete_rows', 'rename_sheet', 'unmerge_range', 'set_chart_title', 'format_range',
   'merge_range', 'sort_range', 'add_conditional_format', 'set_print_area', 'layout_range',
   'freeze_panes', 'unfreeze_panes', 'set_validation', 'clear_validation', 'delete_conditional_format',
@@ -185,8 +195,9 @@ const XLSX_WRITE_ALLOWLIST = Object.freeze(['write_range', 'insert_rows', 'delet
   // GH #137 U2 (same #141 roadmap GO as #138/#139; "productize BOTH sides together" -- the READ mirror,
   // read_runs, released first in U1): + format_run -- the format-run.cjs family's own 5-axis per-run font
   // write inside one cell (X-F04, already adapter-complete and LIVE-measured: the family's own L1 run-map +
-  // L3 control, RUN_MAP_CHAR_CEILING 256 chars TEMPORARY, pending a LIVE timing measurement -- raising it is
-  // NOT part of this release). Scope is EXACTLY the 5 measured axes (bold, italic, name, size, color);
+  // L3 control, RUN_MAP_CHAR_CEILING -- GH #364's LIVE timing measurement raised this from the prior
+  // TEMPORARY 256 to 1024 chars (docs/GH364-RUN-FORMAT-CHAR-CEILING-SOURCE-CONTRACT-20261105.md).
+  // Scope is EXACTLY the 5 measured axes (bold, italic, name, size, color);
   // X-F05's whole-cell effects (underline, strikeout, subscript, superscript) are format_range's own,
   // unrelated capability and stay out. Already in TIERED_INTENTS (adapter.cjs, pre-existing -- this release
   // does not add it there); not SOLE_STEP (a single-cell write, the same class as write_range on one cell).
@@ -224,6 +235,18 @@ const XLSX_WRITE_ALLOWLIST = Object.freeze(['write_range', 'insert_rows', 'delet
   // step field; no reliable identity -> not dispatched. A commented cell is refused (a second AddComment is a silent
   // no-op, K1/K2 LIVE probes); L1 is read_comments' own read. The only step of its task.
   'add_comment',
+  // GH #348 / #349 (standing EURO-MCP GO): + edit_comment (public ApiComment.SetText) and delete_comment (public ApiComment.Delete) on
+  // a comment loaded from a saved file (comments.cjs; LIVE design probe docs/evidence/gh348-probe-live-20261030.json). Only the SESSION
+  // user's own comment (uid = the session uid) is edited / deleted -- another author's is refused before the write, named
+  // (xlsx-comment-foreign-author); a delete on a cell with no comment is SATISFIED (the stale-handle Delete returns true, so a retry
+  // is decided from the fresh read). Each is the only step of its task.
+  'edit_comment',
+  'delete_comment',
+  // GH #350 / #351 (standing EURO-MCP GO): + reply_to_comment (public ApiComment.AddReply, the SESSION author) and set_comment_resolved
+  // (public ApiComment.SetSolved) (comments.cjs; LIVE design probe docs/evidence/gh350-gh351-probe-live-20261030.json). A retry is decided
+  // from the fresh read (a same-text reply by the session user / the flag already at the target -> SATISFIED, named). Each the only step.
+  'reply_to_comment',
+  'set_comment_resolved',
   // GH #302 G4 (owner GO 2026-10-26 block 2): + set_shape_text, and insert_shape's optional `text` -- the public
   // GetContent() paragraph write (shape-text.cjs; LIVE design probe docs/evidence/gh302-g4-shape-text-probe-20261026.json),
   // verified by read_drawings' text (drawing.text.read/v1)
@@ -240,7 +263,57 @@ const XLSX_WRITE_ALLOWLIST = Object.freeze(['write_range', 'insert_rows', 'delet
   // design probe docs/evidence/gh303-r1-sheet-visibility-probe-20261026.json), verified by read_sheet_state's visibility.
   // The engine hides the LAST visible sheet too (measured), so that refusal is ours (read + dispatch); the only step of
   // its task (two hides each judged on the same pre-task read could leave no visible sheet).
-  'set_sheet_visibility']);
+  'set_sheet_visibility',
+  // GH #300 L2 (owner decision 2026-10-27, "2: A ... 3: A" -- full READ/WRITE symmetry on top of L1 read_hyperlinks):
+  // + set_hyperlink / remove_hyperlink -- hyperlinks-write.cjs's v1 scope: single cell; GH #352 adds the INTERNAL link (location) (address
+  // required, a location-only/internal write is refused, named -- never guessed into an untested shape). The public
+  // ApiWorksheet.SetHyperlink / ApiRange.ClearHyperlinks, the SAME callCommand path every other write family uses
+  // (no DS Bridge WRITE handler needed). An occupied cell with a DIFFERENT hyperlink is refused, named
+  // (xlsx-hyperlink-cell-occupied), the same conservative posture as add_comment's own occupied-cell refusal. The
+  // READ mirror is read_hyperlinks (L1, already released). LIVE-ACCEPTED: test/live/release-gh300-l2-hyperlink-
+  // write-product.live.cjs.
+  'set_hyperlink', 'remove_hyperlink',
+  // GH #298 D (owner decision 2026-10-27, "3: A" -- read_tables first, then create_table): + create_table -- the PUBLIC
+  // ApiWorksheet.FormatAsTable through callCommand (tables-write.cjs), verified by read_tables (Bridge /18, released).
+  // The engine stores an overlapping table and a table over a merge (GH #298 matrix ST-12), so overlap with a
+  // table / pivot, a merge, a single row and a blank / formula / duplicate header are refused before the write, named.
+  // LIVE-ACCEPTED: test/live/release-gh298-d-create-table-product.live.cjs.
+  'create_table',
+  // GH #336 / #337 (standing EURO-MCP GO): + insert_table_rows / delete_table_rows / insert_table_columns / delete_table_columns --
+  // the PUBLIC ApiRange.Insert / Delete over the table's FULL width / FULL height (table-structure.cjs; baseline
+  // docs/evidence/gh336-gh337-baseline-20261030.json). `at` is the 1-based data row / column INSIDE the table; the retry guard is the table's
+  // current size. Refused before the write, named: a structured reference to the table anywhere, a header-less / totals-row table, deleting
+  // every data row / column, a formula the delete would break, a merge / table / pivot in the shifted band, a dependent the reader cannot place.
+  // Each is the only step of its task.
+  'insert_table_rows', 'delete_table_rows', 'insert_table_columns', 'delete_table_columns',
+  // GH #332-#335 (standing EURO-MCP GO; Bridge /19 sheet.table.write/v1, owner-approved design docs/DS-9.3.5-BRIDGE19-TABLE-WRITE-DESIGN.md):
+  // + set_table_style / set_table_flag / set_table_totals_row / rename_table / resize_table -- ONE property of ONE table per call through
+  // the editor's own table actions (table-props.cjs; the public API has no table setter, PUBLIC-FIRST probe). Served ONLY on a /19 runtime:
+  // elsewhere the plan is FAIL_CLOSED, named, without a dispatch. Refused before the write, named: rename / resize while a structured
+  // reference to the table exists, a header-less table (totals), a totals row with no room or content under the table, a resize that
+  // moves the origin / changes the width / overlaps a table / covers data. NOT offered: header row OFF, totals OFF. Each is the only step.
+  'set_table_style', 'set_table_flag', 'set_table_totals_row', 'rename_table', 'resize_table',
+  // GH #354/#355 (Bridge /21): the print LAYOUT intents -- sheet.printSettings.write/v2, /21 only (print.B26_BRIDGE_WRITE_RUNTIMES);
+  // the READ mirror is read_page_setup's print.headerMargin / footerMargin / pageOrder (sheet.printSettings.read/v2)
+  'set_header_footer_margin', 'set_page_order',
+  // GH #338-#342 (Bridge /22, standing EURO-MCP GO; design docs/DS-9.3.5-BRIDGE22-SHEET-PROTECTION-WRITE-DESIGN.md): PASSWORDLESS
+  // protect_sheet (forbids = the exact mirror of the protection read) / unprotect_sheet, and set_cell_protection (xf locked / hidden of a
+  // range of an UNPROTECTED sheet) -- /22 only (protection-write.B27_BRIDGE_WRITE_RUNTIMES); a credential-protected sheet is refused, never
+  // changed. Each is the only step of its task.
+  'protect_sheet', 'unprotect_sheet', 'set_cell_protection',
+  // GH #338-#342 remainder (Bridge /24, standing EURO-MCP GO; design docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md
+  // "W3"): PASSWORDLESS workbook-level structure lock on/off -- /24 only (workbook-protection-write.B28_BRIDGE_WRITE_RUNTIMES).
+  // unprotect_workbook on a currently locked workbook is refused credential-unobservable, never changed. Each is the
+  // only step of its task.
+  'protect_workbook', 'unprotect_workbook',
+  // fa7244ac/3 (internal tracker; e65eda2d LANDED + LIVE PASS on the adapter path, test/live/xlsx-fa7244ac2-autofilter-product.live.cjs):
+  // + set_autofilter_range / remove_autofilter -- filter.cjs's two AutoFilter-OBJECT shapes, both the SAME bare
+  // SetAutoFilter() call the engine toggles (fa7244ac/2, Q1/Q3 MEASURED). set_autofilter_range applies only when the
+  // sheet has no AutoFilter yet (an existing one on the same range with active criteria, or on a different range, is
+  // refused named, never silently cleared); remove_autofilter takes the stored <autoFilter> element away entirely
+  // (stronger than clear_filter's ShowAllData), SATISFIED as a no-op when none exists. Same sheet/range shape as
+  // clear_filter, no criteria fields. Table-backed AutoFilter behaviour stays UNMEASURED, out of this release.
+  'set_autofilter_range', 'remove_autofilter']);
 // X-N01 (owner decision: number format is a CAPABILITY, value and number format are separate semantics):
 // format_range is released with its PUBLIC numberFormat key ONLY (SetNumberFormat / GetNumberFormat, W4a); every other
 // format key stays behind the temporary direct-internal boundary B05-WRITE and is refused before dispatch, named.
@@ -274,7 +347,7 @@ const FORMAT_RANGE_RELEASED_KEYS = Object.freeze(['numberFormat', 'border', 'fil
 // GH #228 (RELEASED, owner GO 2026-10-19 -- docs/GH228-DOCX-WRITE-RELEASE-GATE-PROPOSAL.md): the DOCX WRITE allowlist is exactly
 // rewrite_paragraph. It is mirrored by tools.cjs's ACCEPTED_DOCX_WRITE_ALLOWLIST, and the per-format release gate withholds
 // docx_execute_task (never xlsx_execute_task) if the two ever differ. BEFORE the owner's GO this list is `[]`.
-const DOCX_WRITE_ALLOWLIST = Object.freeze(['rewrite_paragraph', 'insert_paragraph_before', 'insert_paragraph_after', 'delete_paragraph', 'move_paragraph_before', 'move_paragraph_after', 'apply_list', 'set_list_level', 'indent_list_item', 'outdent_list_item', 'remove_list', 'replace_table_cell', 'format_text', 'insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap']); // GH #229/#230/#231: + format_text; GH #233: + the two insert intents; GH #234: + delete_paragraph; GH #235: + the two move intents; GH #236: + apply_list, set_list_level (set_list_type WITHHELD: on a shared numbering it ends DISPATCHED_OUTCOME_UNKNOWN and the DS persists the unsaved edit -- LIVE g236v1 ROUND6 + guncprobe, 2026-10-19); GH #237: + indent_list_item, outdent_list_item, remove_list; GH #249: + replace_table_cell // RELEASE 3 TRIM (2026-10-19) withheld these eight pending their own LIVE PASS; all eight are since RE-ADDED, each on its own LIVE PASS: define_style (GH #264, g3tri gh264), modify_style (GH #265, g3tri gh265), set_numbering (GH #248, g3tri gh248), set_list_type (GH #236b, g3tri gh236b), add_footnote + add_endnote (GH #267 B, g267v2 incl. R6 through the released handler), add_link (GH #266, release 3, g266v2), add_bookmark (GH #266, release 4, g266v3 ROUND8/8B) -- the array above is current; nothing in it is withheld -- release 4: + resolve_comment, reply_comment, add_comment_on_match (GH #269c/#269d/#269e; handler LIVE PASS g269cv2 / g269dv1 / g269ev1)
+const DOCX_WRITE_ALLOWLIST = Object.freeze(['rewrite_paragraph', 'insert_paragraph_before', 'insert_paragraph_after', 'delete_paragraph', 'move_paragraph_before', 'move_paragraph_after', 'apply_list', 'set_list_level', 'indent_list_item', 'outdent_list_item', 'remove_list', 'replace_table_cell', 'format_text', 'insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap', 'insert_table', 'insert_section_break', 'insert_image', 'insert_paragraphs', 'insert_shape', 'insert_chart', 'delete_image', 'replace_image']); // GH #229/#230/#231: + format_text; GH #233: + the two insert intents; GH #234: + delete_paragraph; GH #235: + the two move intents; GH #236: + apply_list, set_list_level (set_list_type WITHHELD: on a shared numbering it ends DISPATCHED_OUTCOME_UNKNOWN and the DS persists the unsaved edit -- LIVE g236v1 ROUND6 + guncprobe, 2026-10-19); GH #237: + indent_list_item, outdent_list_item, remove_list; GH #249: + replace_table_cell // RELEASE 3 TRIM (2026-10-19) withheld these eight pending their own LIVE PASS; all eight are since RE-ADDED, each on its own LIVE PASS: define_style (GH #264, g3tri gh264), modify_style (GH #265, g3tri gh265), set_numbering (GH #248, g3tri gh248), set_list_type (GH #236b, g3tri gh236b), add_footnote + add_endnote (GH #267 B, g267v2 incl. R6 through the released handler), add_link (GH #266, release 3, g266v2), add_bookmark (GH #266, release 4, g266v3 ROUND8/8B) -- release 4: + resolve_comment, reply_comment, add_comment_on_match (GH #269c/#269d/#269e; handler LIVE PASS g269cv2 / g269dv1 / g269ev1) -- GH #308: + insert_table, added under the standing DOCX WRITE release GO (an allowlist entry is provisional on its own RELEASE-ACCEPTANCE harness passing before landing) -- *** the probe behind this candidate had its own LIVE PASS, but the RELEASE-ACCEPTANCE harness (test/live/docx-gh308-insert-table-product.live.cjs) has NOT been run by its author *** -- GH #313: + insert_section_break, added under the same standing DOCX WRITE release GO (an allowlist entry is provisional on its own RELEASE-ACCEPTANCE harness passing before landing) -- *** the probe behind this candidate had its own LIVE PASS, but the RELEASE-ACCEPTANCE harness (test/live/docx-gh313-insert-section-break-product.live.cjs) has NOT been run by its author *** -- GH #306: + insert_image -- its own RELEASE-ACCEPTANCE harness (test/live/docx-gh306-insert-image-product.live.cjs) has SINCE been run, LIVE PASS 5/5, LANDED (main 9094cb5c1, deployed 1.1.0-9094cb5c1a84) -- GH #322: + insert_paragraphs, added under the same standing DOCX WRITE release GO (provisional on its own RELEASE-ACCEPTANCE harness passing before landing) -- *** the probe behind this candidate had its own LIVE PASS (commit 48afe5074, routes A/B/C), but the RELEASE-ACCEPTANCE harness has NOT yet been written/run *** -- GH #309: + insert_shape under the same standing GO (probe rounds 1+2 LIVE PASS; its RELEASE-ACCEPTANCE harness docx-gh309-insert-shape-product.live.cjs LIVE PASS 6/6, gh271 insert_shape round PASS)
 
 // The temporary direct-internal boundaries (M10 legacy set, M11.5 migrates them): refused by name, never routed here.
 // GH #138 U4 (2026-10-17): the 8 print.cjs B10 entries REMOVED -- M11.5b.4 already migrated the family's write
@@ -323,10 +396,25 @@ const CELL_VALUE = Object.freeze({ anyOf: [
 // position -- the matching `values` cell carries the value instead); external [book] refs / parse failures stay
 // with the "alone" planner call in validateWriteRequest, not duplicated here.
 const MAX_FORMULA = 8192; // = the write_range planner formula ceiling (cells.cjs)
-const COMMENT_MAX_TEXT = require('../adapters/xlsx/families/comments.cjs').MAX_TEXT; // GH #300 K2: = the comments family's own ceiling
+// GH #300 K2: the comment text. The comments family's own ceiling (comments.cjs MAX_TEXT = 2000, LIVE-measured at
+// exactly 2000) is enforced by the family's plan(), NOT by a schema `maxLength`: llama.cpp's JSON-schema-to-grammar
+// converter rejects a `maxLength` of 2000 inside a step alternative ("failed to parse grammar", Loki, MEASURED
+// 2026-11-01: 1999 -> 200, 2000 -> 400), and lowering the bound to 1999 would refuse a LIVE-proven 2000-char text.
+// Gate: test/static/tool-schema-grammar-safe-maxlength.test.cjs.
+const COMMENT_TEXT = Object.freeze({ type: 'string', minLength: 1, description: 'at most 2000 characters (the plan refuses a longer text, named)' });
 // GH #302 G4: a shape's paragraph list (shape-text.cjs MAX_PARAGRAPHS / MAX_CHARS)
 const SHAPE_TEXT = Object.freeze({ type: 'array', minItems: 1, maxItems: require('../adapters/xlsx/shape-text.cjs').MAX_PARAGRAPHS, items: { type: 'string', maxLength: require('../adapters/xlsx/shape-text.cjs').MAX_CHARS } });
-const FORMULA_CELL = Object.freeze({ anyOf: [{ type: 'string', minLength: 1, maxLength: MAX_FORMULA, pattern: '^=' }, { type: 'null' }] });
+// '=' first, then anything -- the same set as the bare '^=' it replaces (`.` + the four line terminators `.` skips
+// under 'u' = every code point), but anchored at both ends: llama.cpp's tool-schema grammar converter refuses a
+// pattern that does not start with '^' and end with '$' ("JSON schema conversion failed", HTTP 400 on every request).
+const FORMULA_PATTERN = '^=(.|[\\n\\r\\u2028\\u2029])*$';
+// JS `\s` (with 'u') spelled out: llama.cpp copies a [...] class into its grammar verbatim, and its grammar parser
+// knows no \s escape ("failed to parse grammar"). The C0 whitespace (\t \n \v \f \r) is already inside every
+// \u0000-\u001f range these classes carry, so only the rest of the set is listed.
+const WS_NON_C0 = ' \\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff';
+// an absolute http(s) URL or a mailto: address, no whitespace or C0 control -- shared with docx-write-tools.cjs LINK_URL
+const LINK_URL_PATTERN = `^(https?://[^${WS_NON_C0}/?#\\u0000-\\u001f]+[^${WS_NON_C0}\\u0000-\\u001f]*|mailto:[^${WS_NON_C0}\\u0000-\\u001f]+)$`;
+const FORMULA_CELL = Object.freeze({ anyOf: [{ type: 'string', minLength: 1, maxLength: MAX_FORMULA, pattern: FORMULA_PATTERN }, { type: 'null' }] });
 
 const COLUMN_LETTER = Object.freeze({ type: 'string', pattern: '^[A-Z]{1,3}$' });
 const COLUMNS_SPAN = Object.freeze({ type: 'string', pattern: '^[A-Z]{1,3}(:[A-Z]{1,3})?$' });
@@ -364,7 +452,7 @@ const FORMAT_BORDER = Object.freeze({ type: 'object', properties: {
 // xlsx font-name limit, MEASURED by the L-02/1 LIVE probe: a 100-character name reads 100 in the session and is cut to 31 AFTER the reopen, so a
 // longer name is refused here instead of being silently shortened. No control character and no leading / trailing white space (the value reaches
 // the editor as a JSON string literal, never as code).
-const FONT_NAME = Object.freeze({ type: 'string', minLength: 1, maxLength: 31, pattern: '^[^\\u0000-\\u001f\\u007f\\s]([^\\u0000-\\u001f\\u007f]{0,29}[^\\u0000-\\u001f\\u007f\\s])?$' });
+const FONT_NAME = Object.freeze({ type: 'string', minLength: 1, maxLength: 31, pattern: `^[^\\u0000-\\u001f\\u007f${WS_NON_C0}]([^\\u0000-\\u001f\\u007f]{0,29}[^\\u0000-\\u001f\\u007f${WS_NON_C0}])?$` });
 // L-02/2 (owner GO 2026-10-14, inventory row L-02): + underline and strikeout -- the PUBLIC range-level SetUnderline / SetStrikeout writes, read
 // back on the public GetCharacters(1, len).GetFont() reader (format-font-effects.cjs, X-F05; the family already planned, wrote and verified them).
 // underline: the five MEASURED types (S21 probes + the product path m7-f05-live1); strikeout: a boolean (true reads true, false reads null -- the same
@@ -401,14 +489,14 @@ const FORMAT_ALIGN = Object.freeze({ type: 'object', properties: {
 // additionalProperties false on every variant. A value-level detail the planner itself checks (bounds, exact hex
 // parsing, the 'xl3Arrows' engine defect) stays with the "alone" planner call, not duplicated here -- the enum
 // lists below already exclude the one measured-unsupported icon set by omission.
-const CF_OPERAND = Object.freeze({ anyOf: [{ type: 'string', minLength: 1, maxLength: 1024, pattern: '^(?!=).+$' }, { type: 'number' }] });
+const CF_OPERAND = Object.freeze({ anyOf: [{ type: 'string', minLength: 1, maxLength: 1024, pattern: '^[^=\\n\\r\\u2028\\u2029].*$' }, { type: 'number' }] });
 const cfRule = (type, properties = {}, required = []) => Object.freeze({
   type: 'object', properties: Object.freeze({ type: { const: type }, ...properties }), required: Object.freeze(['type', ...required]), additionalProperties: false,
 });
 const CF_RULE = Object.freeze({ anyOf: [
   cfRule('cellValue', { operator: { enum: ['greater', 'less', 'equal'] }, formula1: CF_OPERAND, fill: HEX_COLOR }, ['operator', 'formula1']),
   cfRule('cellValue', { operator: { enum: ['between', 'notBetween'] }, formula1: CF_OPERAND, formula2: CF_OPERAND, fill: HEX_COLOR }, ['operator', 'formula1', 'formula2']),
-  cfRule('expression', { formula: { type: 'string', minLength: 2, maxLength: 1024, pattern: '^=' }, fill: HEX_COLOR }, ['formula', 'fill']),
+  cfRule('expression', { formula: { type: 'string', minLength: 2, maxLength: 1024, pattern: FORMULA_PATTERN }, fill: HEX_COLOR }, ['formula', 'fill']),
   cfRule('aboveAverage', { above: { type: 'boolean' }, numStdDev: { enum: [0, 1] } }, ['above']),
   cfRule('top10', { rank: { type: 'integer', minimum: 1, maximum: 1000 }, percent: { type: 'boolean' }, bottom: { type: 'boolean' } }, ['rank', 'percent', 'bottom']),
   cfRule('unique', { dupe: { const: false } }),
@@ -418,6 +506,12 @@ const CF_RULE = Object.freeze({ anyOf: [
 ] });
 
 // W1d: a chart name (set_chart_title already used this pattern inline; rename_chart/set_chart_axis_title reuse it)
+// GH #336 / #337: an Excel table name (letters, digits, underscore, dot; may not start with a digit), and the integer fields of a table row / column step
+const TABLE_NAME = Object.freeze({ type: 'string', pattern: '^[A-Za-z_\\\\][A-Za-z0-9_.]{0,254}$' });
+const TABLE_INDEX = Object.freeze({ type: 'integer', minimum: 1, maximum: 1000000 });
+const TABLE_COUNT = Object.freeze({ type: 'integer', minimum: 1, maximum: 100 });
+const TABLE_STYLE = Object.freeze({ type: 'string', pattern: '^TableStyle(Light([1-9]|1[0-9]|2[01])|Medium([1-9]|1[0-9]|2[0-8])|Dark([1-9]|10|11))$' });
+const TABLE_FLAG = Object.freeze({ enum: Object.freeze(['rowStripes', 'columnStripes', 'firstColumn', 'lastColumn']) });
 const CHART_NAME = Object.freeze({ type: 'string', pattern: '^[A-Za-z_][A-Za-z0-9_. -]{0,99}$' });
 const CHART_TITLE = Object.freeze({ type: 'string', minLength: 1, maxLength: 255, pattern: '^[^\\r\\n]+$' });
 // GH #140 U3: one of create_pivot's rows/columns/sum fields -- a source header name, one line (pivots.cjs oneLine());
@@ -445,13 +539,15 @@ const VALIDATION_ITEM = Object.freeze({ type: 'string', minLength: 1, maxLength:
 // 'HH:MM' | 'HH:MM:SS' text instead -- the family's own timeRule() owns the authoritative shape and min <= max
 // check (this schema only accepts the right JS type per field, never re-derives the ordering).
 // L-22d: type 'date' takes ISO 'YYYY-MM-DD' text; calendar validity, the 1900-03-01 floor and the unambiguous-read-back rule are the family's dateRule().
-const VALIDATION_BOUND = Object.freeze({ anyOf: [{ type: 'number' }, { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$' }, { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }] });
+const VALIDATION_BOUND = Object.freeze({ anyOf: [{ type: 'number' }, { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$' }, { type: 'string', pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' }] });
 // L-22b/e: type 'custom' takes `formula` instead of operator/min/max/value -- a '=' prefix only here; the
 // bare-same-sheet-reference shape (relative/mixed/absolute all accepted since L-22e) and its reference
 // classification are the family's own bareSameSheetRefProblem(), never re-derived at this schema/constraints
 // layer (the SAME split as time's day-fraction order, above).
-const VALIDATION_FORMULA = Object.freeze({ type: 'string', minLength: 2, maxLength: 1024, pattern: '^=' });
+const VALIDATION_FORMULA = Object.freeze({ type: 'string', minLength: 2, maxLength: 1024, pattern: FORMULA_PATTERN });
 
+// GH #338-#342: the 15 sheet.protection.read/v1 flags, in the read order (protection-write.cjs FLAGS)
+const PROTECTION_FLAGS = Object.freeze(['objects', 'scenarios', 'formatCells', 'formatColumns', 'formatRows', 'insertColumns', 'insertRows', 'insertHyperlinks', 'deleteColumns', 'deleteRows', 'selectLockedCells', 'sort', 'autoFilter', 'pivotTables', 'selectUnlockedCells']);
 const step = (intent, properties, required) => Object.freeze({
   type: 'object',
   properties: Object.freeze({ intent: { const: intent }, id: ID, ...properties }),
@@ -459,24 +555,36 @@ const step = (intent, properties, required) => Object.freeze({
   additionalProperties: false,
 });
 
+// Owner decision B (2026-11-02, owner channel): a DELETE carries a second, required witness of the same shape as the
+// anchor -- the value of the FIRST REMOVED row (column) as it reads NOW (at `at`); the anchor stays the first SURVIVING one
+// (at `at + count`). Together they bracket the block, both read before the first write (structure.cjs classifyDelete).
+const MARK_VALUE = { anyOf: [{ type: 'string', minLength: 1, maxLength: 255 }, { type: 'number' }] };
+const ROW_MARK = { type: 'object', properties: { column: { type: 'string', pattern: '^[A-Z]{1,3}$' }, value: MARK_VALUE },
+  required: ['column', 'value'], additionalProperties: false };
+const COL_MARK = { type: 'object', properties: { row: { type: 'integer', minimum: 1, maximum: 1048576 }, value: MARK_VALUE },
+  required: ['row', 'value'], additionalProperties: false };
+const withWitness = (intent, mark) => (intent.startsWith('delete') ? { witness: mark } : {});
+const markFields = intent => ['sheet', 'at', 'count', 'anchor', ...(intent.startsWith('delete') ? ['witness'] : [])];
+
 const ROWS = (intent) => step(intent, {
   sheet: SHEET_NAME,
   at: { type: 'integer', minimum: 1, maximum: 1048576 },
   count: { type: 'integer', minimum: 1, maximum: 100 },
-  anchor: { type: 'object', properties: { column: { type: 'string', pattern: '^[A-Z]{1,3}$' },
-    value: { anyOf: [{ type: 'string', minLength: 1, maxLength: 255 }, { type: 'number' }] } },
-  required: ['column', 'value'], additionalProperties: false },
-}, ['sheet', 'at', 'count', 'anchor']);
+  anchor: ROW_MARK,
+  ...withWitness(intent, ROW_MARK),
+}, markFields(intent));
 
 // L-04: the column twin of ROWS -- `at` a column letter, the anchor a ROW number plus the value found there
 const COLS = (intent) => step(intent, {
   sheet: SHEET_NAME,
   at: COLUMN_LETTER,
   count: { type: 'integer', minimum: 1, maximum: 100 },
-  anchor: { type: 'object', properties: { row: { type: 'integer', minimum: 1, maximum: 1048576 },
-    value: { anyOf: [{ type: 'string', minLength: 1, maxLength: 255 }, { type: 'number' }] } },
-  required: ['row', 'value'], additionalProperties: false },
-}, ['sheet', 'at', 'count', 'anchor']);
+  anchor: COL_MARK,
+  ...withWitness(intent, COL_MARK),
+}, markFields(intent));
+
+const DELETE_CELLS_MARK = { type: 'object', properties: { column: { type: 'string', pattern: '^[A-Z]{1,3}$' }, row: { type: 'integer', minimum: 1, maximum: 1048576 },
+  value: MARK_VALUE }, required: ['value'], additionalProperties: false };
 
 const STEP_SCHEMAS = Object.freeze({
   write_range: step('write_range', { sheet: SHEET_ADDRESS, range: RANGE,
@@ -567,9 +675,15 @@ const STEP_SCHEMAS = Object.freeze({
   // X-O05/5-C: + markerSymbol/lineStyle (same enum-based release pattern). symbol/dash carry
   // their own measured enum here -- the schema layer, same division gapWidth/overlap already
   // use above; size's range (2..72) is likewise schema-layer, same as outline.width's own bound.
-  set_chart_style: step('set_chart_style', { sheet: SHEET_NAME, name: CHART_NAME, target: { enum: ['marker', 'gridlines', 'gapOverlap', 'seriesOrder', 'markerSymbol', 'lineStyle'] },
+  // GH #346 AUTO-REPAIR Egyseg 3 (see docs/GH346-DPT-AUTO-REPAIR-DESIGN-20261104.md Dontesi
+  // pont 5): + `dataPoint` -- the ONE write-only
+  // original target this release opens, now that the idx-correct Bridge write
+  // (chart.series.dataPoint.style.write/v1, B29, /27-ONLY) replaces the position-based public
+  // setter entirely (GH #346's own root cause). `dataPointIndex` joins `seriesIndex` here (both
+  // required for this ONE target, enforced by CONSTRAINTS.set_chart_style, not the schema).
+  set_chart_style: step('set_chart_style', { sheet: SHEET_NAME, name: CHART_NAME, target: { enum: ['marker', 'gridlines', 'gapOverlap', 'seriesOrder', 'markerSymbol', 'lineStyle', 'dataPoint'] },
     fill: HEX_COLOR, outline: { type: 'object', properties: { width: { type: 'number' }, color: HEX_COLOR }, required: ['width', 'color'], additionalProperties: false },
-    seriesIndex: { type: 'integer', minimum: 0 }, axis: { enum: ['vertical', 'horizontal'] },
+    seriesIndex: { type: 'integer', minimum: 0 }, dataPointIndex: { type: 'integer', minimum: 0 }, axis: { enum: ['vertical', 'horizontal'] },
     gapWidth: { type: 'number', minimum: 0, maximum: 500 }, overlap: { type: 'number', minimum: -100, maximum: 100 },
     order: { type: 'array', items: { type: 'integer', minimum: 0 }, minItems: 1 },
     symbol: { enum: ['circle', 'dash', 'diamond', 'dot', 'none', 'plus', 'square', 'star', 'triangle', 'x'] },
@@ -608,17 +722,21 @@ const STEP_SCHEMAS = Object.freeze({
   delete_chart: step('delete_chart', { sheet: SHEET_NAME, name: CHART_NAME }, ['sheet', 'name']),
   // L-11/2: filter_range (filter.cjs) -- sheet + range + the 1-based column inside the range + EXACTLY ONE criteria (CONSTRAINTS.filter_range names a missing /
   // second one). The measured shapes only: one plain value, two different plain values (xlOr), or two numeric comparisons (xlAnd).
+  // GH #344 (internal tracker, docs/DS-9.3.5-COLOR-FILTER-WRITE-PROPOSAL.md §3): + colour { kind, rgb } -- the sixth,
+  // mutually-exclusive alternative (filter.cjs's own criteriaProblem() enforces "exactly one"); no theme/tint/
+  // indexed input in v1.
   filter_range: step('filter_range', { sheet: SHEET_ADDRESS, range: RANGE, field: { type: 'integer', minimum: 1, maximum: 18278 },
     value: { anyOf: [{ type: 'string', minLength: 1, maxLength: 255 }, { type: 'number' }] },
     // GH #301 D2: values 2..10 (3+ reads back as an xlFilterValues list); top n items; dynamic above / below average
     values: { type: 'array', minItems: 2, maxItems: 10, items: { anyOf: [{ type: 'string', minLength: 1, maxLength: 255 }, { type: 'number' }] } },
-    and: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string', pattern: '^[<>]-?[0-9]+(\\.[0-9]+)?$' } },
+    and: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string', pattern: '^[<>]-?[0-9]+([.][0-9]+)?$' } },
     top: { type: 'integer', minimum: 1, maximum: 500 },
-    dynamic: { enum: ['aboveAverage', 'belowAverage'] } },
+    dynamic: { enum: ['aboveAverage', 'belowAverage'] },
+    colour: { type: 'object', properties: { kind: { enum: ['cellColor', 'fontColor'] }, rgb: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'integer', minimum: 0, maximum: 255 } } }, required: ['kind', 'rgb'], additionalProperties: false } },
   ['sheet', 'range', 'field']),
   // GH #138 U1: set_defined_name / delete_defined_name (names.cjs) -- name + (set) an ABSOLUTE refersTo ('=Sheet!$A$1' / '=Sheet!$A$1:$B$2', quoted
   // sheet names) + optional scope; the identifier grammar, the reserved names and the reference shape are re-checked by the family's plan().
-  set_defined_name: step('set_defined_name', { name: DEFINED_NAME, refersTo: { type: 'string', minLength: 2, maxLength: 300, pattern: '^=' }, scope: SHEET_ADDRESS }, ['name', 'refersTo']),
+  set_defined_name: step('set_defined_name', { name: DEFINED_NAME, refersTo: { type: 'string', minLength: 2, maxLength: 300, pattern: FORMULA_PATTERN }, scope: SHEET_ADDRESS }, ['name', 'refersTo']),
   delete_defined_name: step('delete_defined_name', { name: DEFINED_NAME, scope: SHEET_ADDRESS }, ['name']),
   // L-18/1: delete_cells (delete-cells.cjs) -- the block to delete, the shift direction, and a retry-safety anchor
   // (the SAME { column|row, value } shape structure.cjs's insert/delete_rows/columns already uses, scoped to the
@@ -630,11 +748,11 @@ const STEP_SCHEMAS = Object.freeze({
   // than guessing which occurrence was meant. If the block is at the very end of the sheet's data (nothing
   // below/right to name as an anchor), there is nothing to anchor on at all: the step refuses, named
   // (`xlsx-delete-cells-anchor-not-found`), by design -- this is not a gap to fill later.
+  // Owner decision A (2026-11-02, owner channel): + a required `witness`, the same shape -- the value of the FIRST cell the
+  // delete REMOVES (the block's first row for 'up' / first column for 'left'), in a column/row within the band.
   delete_cells: step('delete_cells', { sheet: SHEET_NAME, range: RANGE, shift: { enum: ['up', 'left'] },
-    anchor: { type: 'object', properties: { column: { type: 'string', pattern: '^[A-Z]{1,3}$' }, row: { type: 'integer', minimum: 1, maximum: 1048576 },
-      value: { anyOf: [{ type: 'string', minLength: 1, maxLength: 255 }, { type: 'number' }] } },
-    required: ['value'], additionalProperties: false } },
-  ['sheet', 'range', 'shift', 'anchor']),
+    anchor: DELETE_CELLS_MARK, witness: DELETE_CELLS_MARK },
+  ['sheet', 'range', 'shift', 'anchor', 'witness']),
   // GH #138 U2: set_print_titles / clear_print_titles (names.cjs planPrint) -- at least one of rows/columns for the set (CONSTRAINTS.set_print_titles);
   // the exact 'n:m' / 'A:B' two-part form, the reserved-name and another-scope rules are re-checked by the family's plan().
   set_print_titles: step('set_print_titles', { sheet: SHEET_ADDRESS, rows: ROWS_SPAN, columns: COLUMNS_SPAN }, ['sheet']),
@@ -669,18 +787,19 @@ const STEP_SCHEMAS = Object.freeze({
   insert_image: step('insert_image', { sheet: SHEET_NAME, name: CHART_NAME,
     at: { type: 'object', properties: { col: { type: 'integer', minimum: 0 }, row: { type: 'integer', minimum: 0 } }, required: ['col', 'row'], additionalProperties: false },
     size: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } }, required: ['width', 'height'], additionalProperties: false },
-    source: { type: 'string', pattern: '^data:image\\/png;base64,[A-Za-z0-9+/]+=*$', maxLength: 1400000 } },
+    source: { type: 'string', pattern: '^data:image/png;base64,[A-Za-z0-9+/]+=*$', maxLength: 1400000 } },
   ['sheet', 'name', 'at', 'size', 'source']),
   // GH #137 U2: format_run (format-run.cjs) -- `runs` is the SAME { start, length, font } shape the family's
-  // own plan() validates (start/length 1-based integers >= 1, maxItems 256 matching RUN_MAP_CHAR_CEILING --
-  // a run cannot be shorter than 1 character, so more than 256 runs could not fit anyway). `font` carries
+  // own plan() validates (start/length 1-based integers >= 1, maxItems 1024 matching RUN_MAP_CHAR_CEILING --
+  // a run cannot be shorter than 1 character, so more than 1024 runs could not fit anyway; GH #364 raised
+  // both this schema cap and RUN_MAP_CHAR_CEILING together from the prior 256). `font` carries
   // ONLY the family's 5 measured axes (bold, italic, name maxLength 100 -- the family's own cap, NOT
   // FORMAT_FONT's 31-char sheet-safe one, since a font name here is never used as a sheet/file name; size
   // [1,409]; color HEX_COLOR). The schema allows an EMPTY font object per run -- this minimal validator has
   // no "at least one of" keyword; the family's own runFontWant() refuses that, named, before dispatch (the
   // SAME split write_range's values/formulas correlation already uses).
   format_run: step('format_run', { sheet: SHEET_NAME, cell: CELL,
-    runs: { type: 'array', minItems: 1, maxItems: 256, items: {
+    runs: { type: 'array', minItems: 1, maxItems: 1024, items: {
       type: 'object',
       properties: { start: { type: 'integer', minimum: 1 }, length: { type: 'integer', minimum: 1 },
         font: { type: 'object', properties: { bold: { type: 'boolean' }, italic: { type: 'boolean' }, name: { type: 'string', minLength: 1, maxLength: 100 }, size: { type: 'number', minimum: 1, maximum: 409 }, color: HEX_COLOR }, additionalProperties: false } },
@@ -741,9 +860,15 @@ const STEP_SCHEMAS = Object.freeze({
     pivotSheet: SHEET_NAME, at: CELL },
   ['name', 'sheet', 'range', 'rows', 'pivotSheet', 'at']),
   // GH #301 D4: write_array_formula (array-formula.cjs) -- one formula over the area, the write_range formula rules
-  write_array_formula: step('write_array_formula', { sheet: SHEET_ADDRESS, range: RANGE, formula: { type: 'string', minLength: 1, maxLength: MAX_FORMULA, pattern: '^=' } }, ['sheet', 'range', 'formula']),
+  write_array_formula: step('write_array_formula', { sheet: SHEET_ADDRESS, range: RANGE, formula: { type: 'string', minLength: 1, maxLength: MAX_FORMULA, pattern: FORMULA_PATTERN } }, ['sheet', 'range', 'formula']),
   // GH #300 K2: add_comment (comments.cjs) -- sheet, ONE cell, the text; NO author field (the session user is the author)
-  add_comment: step('add_comment', { sheet: SHEET_ADDRESS, cell: CELL, text: { type: 'string', minLength: 1, maxLength: COMMENT_MAX_TEXT } }, ['sheet', 'cell', 'text']),
+  add_comment: step('add_comment', { sheet: SHEET_ADDRESS, cell: CELL, text: COMMENT_TEXT }, ['sheet', 'cell', 'text']),
+  // GH #348 / #349: edit_comment (the new text) / delete_comment (no text) -- sheet + ONE cell; NO author field either
+  edit_comment: step('edit_comment', { sheet: SHEET_ADDRESS, cell: CELL, text: COMMENT_TEXT }, ['sheet', 'cell', 'text']),
+  delete_comment: step('delete_comment', { sheet: SHEET_ADDRESS, cell: CELL }, ['sheet', 'cell']),
+  // GH #350 / #351: reply_to_comment (the reply text; NO author field) / set_comment_resolved (a boolean)
+  reply_to_comment: step('reply_to_comment', { sheet: SHEET_ADDRESS, cell: CELL, text: COMMENT_TEXT }, ['sheet', 'cell', 'text']),
+  set_comment_resolved: step('set_comment_resolved', { sheet: SHEET_ADDRESS, cell: CELL, resolved: { type: 'boolean' } }, ['sheet', 'cell', 'resolved']),
   // GH #302 G4: set_shape_text (shape-text family) -- the whole text of one named shape, a paragraph list
   set_shape_text: step('set_shape_text', { sheet: SHEET_NAME, name: CHART_NAME, text: SHAPE_TEXT }, ['sheet', 'name', 'text']),
   // GH #302 G5: set_chart_point_data_label (chart-point-labels family) -- one point's four flags, read_charts' own names
@@ -756,6 +881,59 @@ const STEP_SCHEMAS = Object.freeze({
   set_shape_rotation: step('set_shape_rotation', { sheet: SHEET_NAME, name: CHART_NAME, rotation: { type: 'number', minimum: 0, exclusiveMaximum: 360 } }, ['sheet', 'name', 'rotation']),
   // GH #303 R1: set_sheet_visibility (sheet-visibility family) -- read_sheet_state's own two values
   set_sheet_visibility: step('set_sheet_visibility', { sheet: SHEET_NAME, visibility: { enum: ['visible', 'hidden'] } }, ['sheet', 'visibility']),
+  // GH #300 L2: set_hyperlink / remove_hyperlink (hyperlinks-write.cjs) -- `cell` is ONE A1 cell. GH #353: the schema takes the
+  // RANGE shape too (the pattern used to refuse a range with a nameless error); the family's plan() refuses it, named
+  // (xlsx-hyperlink-range-unsupported -- the engine's SetHyperlink on a range is a silent no-op). GH #352: `address` (external) OR
+  // `location` (internal: "Ref" / "Sheet!Ref" / "'Sheet'!Ref", LIVE-measured 2026-10-30) -- exactly one; both together
+  // and neither are the family's own named refusals (the engine drops a location given next to an address).
+  set_hyperlink: step('set_hyperlink', { sheet: SHEET_ADDRESS, cell: RANGE,
+    // the link target is an absolute http(s) URL or a mailto: address -- the SAME pattern docx_execute_task's add_link
+    // `href` enforces (docx-write-tools.cjs LINK_URL): every other scheme (javascript:, file: incl. UNC shares, data:,
+    // a relative path, a bare host) is refused pre-dispatch, because the engine stores whatever string it is given
+    // NO schema maxLength on address / location / tooltip: the family's plan() enforces its 2000 ceiling (MAX_ADDRESS /
+    // MAX_LOCATION / MAX_TOOLTIP); a schema maxLength of 2000 breaks llama.cpp grammar parsing (see COMMENT_TEXT above)
+    address: { type: 'string', minLength: 8,
+      pattern: LINK_URL_PATTERN,
+      description: 'absolute http:// or https:// URL, or a mailto: address (lower-case scheme), at most 2000 characters; no whitespace or control characters; every other scheme is refused' },
+    location: { type: 'string', minLength: 1, description: 'at most 2000 characters' },
+    tooltip: { type: 'string', minLength: 1, description: 'at most 2000 characters' } }, ['sheet', 'cell']),
+  remove_hyperlink: step('remove_hyperlink', { sheet: SHEET_ADDRESS, cell: RANGE }, ['sheet', 'cell']),
+  // GH #298 D: create_table (tables-write.cjs) -- the range's first row is the header; name / style are not parameters
+  create_table: step('create_table', { sheet: SHEET_ADDRESS, range: RANGE }, ['sheet', 'range']),
+  // GH #336 / #337: the table by NAME; at = the 1-based data row (rows) / column (columns) inside the table; current* = the table's current size (retry guard)
+  insert_table_rows: step('insert_table_rows', { sheet: SHEET_ADDRESS, table: TABLE_NAME, at: TABLE_INDEX, count: TABLE_COUNT, currentRows: TABLE_INDEX }, ['sheet', 'table', 'at', 'count', 'currentRows']),
+  delete_table_rows: step('delete_table_rows', { sheet: SHEET_ADDRESS, table: TABLE_NAME, at: TABLE_INDEX, count: TABLE_COUNT, currentRows: TABLE_INDEX }, ['sheet', 'table', 'at', 'count', 'currentRows']),
+  insert_table_columns: step('insert_table_columns', { sheet: SHEET_ADDRESS, table: TABLE_NAME, at: TABLE_INDEX, count: TABLE_COUNT, currentColumns: TABLE_INDEX }, ['sheet', 'table', 'at', 'count', 'currentColumns']),
+  delete_table_columns: step('delete_table_columns', { sheet: SHEET_ADDRESS, table: TABLE_NAME, at: TABLE_INDEX, count: TABLE_COUNT, currentColumns: TABLE_INDEX }, ['sheet', 'table', 'at', 'count', 'currentColumns']),
+  // GH #332-#335: ONE property of one table by NAME (Bridge /19); header OFF and per-column totals functions are not offered.
+  // GH #335 remainder: totals row value is now a plain boolean at the schema level -- the editor-level OFF round-trip
+  // measured clean on LIVE (docs/evidence/gh335-totals-header-live-1-20261102.json), but the PRODUCT path stays gated:
+  // the Bridge itself refuses value !== true on every revision shipped today (table-props.cjs classify()).
+  set_table_style: step('set_table_style', { sheet: SHEET_ADDRESS, table: TABLE_NAME, style: TABLE_STYLE }, ['sheet', 'table', 'style']),
+  set_table_flag: step('set_table_flag', { sheet: SHEET_ADDRESS, table: TABLE_NAME, flag: TABLE_FLAG, value: { type: 'boolean' } }, ['sheet', 'table', 'flag', 'value']),
+  set_table_totals_row: step('set_table_totals_row', { sheet: SHEET_ADDRESS, table: TABLE_NAME, value: { type: 'boolean' } }, ['sheet', 'table', 'value']),
+  rename_table: step('rename_table', { sheet: SHEET_ADDRESS, table: TABLE_NAME, name: TABLE_NAME }, ['sheet', 'table', 'name']),
+  resize_table: step('resize_table', { sheet: SHEET_ADDRESS, table: TABLE_NAME, ref: RANGE }, ['sheet', 'table', 'ref']),
+  // GH #354: set_header_footer_margin -- slot header | footer, millimetres in the family's own [0, 200] (layoutWant())
+  set_header_footer_margin: step('set_header_footer_margin', { sheet: SHEET_NAME, slot: { enum: ['header', 'footer'] }, value: { type: 'number', minimum: 0, maximum: 200 } },
+  ['sheet', 'slot', 'value']),
+  // GH #355: set_page_order -- the two ST_PageOrder values of the model, in its own words
+  set_page_order: step('set_page_order', { sheet: SHEET_NAME, order: { enum: ['downThenOver', 'overThenDown'] } },
+  ['sheet', 'order']),
+  // GH #338 / #342: protect_sheet -- passwordless; forbids names any of the 15 protection-read flags (true = forbidden), the rest the Excel default
+  protect_sheet: step('protect_sheet', { sheet: SHEET_NAME, forbids: { type: 'object', properties: Object.freeze(Object.fromEntries(PROTECTION_FLAGS.map(f => [f, { type: 'boolean' }]))), additionalProperties: false } },
+  ['sheet']),
+  // GH #339: unprotect_sheet -- passwordless only (a credential-protected sheet is refused)
+  unprotect_sheet: step('unprotect_sheet', { sheet: SHEET_NAME }, ['sheet']),
+  // GH #340 / #341: set_cell_protection -- the xf locked and / or hidden of a range of an unprotected sheet
+  set_cell_protection: step('set_cell_protection', { sheet: SHEET_NAME, range: RANGE, locked: { type: 'boolean' }, hidden: { type: 'boolean' } },
+  ['sheet', 'range']),
+  // GH #338-#342 remainder: protect_workbook / unprotect_workbook -- workbook-scoped, no args at all
+  protect_workbook: step('protect_workbook', {}, []),
+  unprotect_workbook: step('unprotect_workbook', {}, []),
+  // fa7244ac/3: set_autofilter_range / remove_autofilter -- the SAME sheet/range shape as clear_filter, no criteria
+  set_autofilter_range: step('set_autofilter_range', { sheet: SHEET_ADDRESS, range: RANGE }, ['sheet', 'range']),
+  remove_autofilter: step('remove_autofilter', { sheet: SHEET_ADDRESS, range: RANGE }, ['sheet', 'range']),
 });
 
 // ---- the supported-shape constraints a JSON Schema cannot state (each returns null or why) ----
@@ -946,9 +1124,23 @@ const CONSTRAINTS = Object.freeze({
       if (s.dash === undefined && s.smooth === undefined) return 'at least one of dash/smooth is required';
       return null;
     }
-    // target === 'marker' (the only remaining enum value after the five returns above)
+    // GH #346 AUTO-REPAIR Egyseg 3: `dataPoint` is the SAME "own shape, return before the marker
+    // fallback" pattern as markerSymbol/lineStyle above -- indexed TWICE over (seriesIndex AND
+    // dataPointIndex, unlike every other indexed target here), at least one of fill/outline
+    // required (the SAME shape `marker` below already has).
+    if (s.target === 'dataPoint') {
+      if (s.axis !== undefined) return 'axis is only accepted for target gridlines';
+      if (s.gapWidth !== undefined || s.overlap !== undefined || s.order !== undefined) return 'gapWidth/overlap/order are not accepted for target dataPoint';
+      if (s.symbol !== undefined || s.size !== undefined || s.dash !== undefined || s.smooth !== undefined) return 'symbol/size/dash/smooth are not accepted for target dataPoint';
+      if (s.seriesIndex === undefined) return 'seriesIndex is required for target dataPoint';
+      if (s.dataPointIndex === undefined) return 'dataPointIndex is required for target dataPoint';
+      if (s.fill === undefined && s.outline === undefined) return 'at least one of fill/outline is required';
+      return null;
+    }
+    // target === 'marker' (the only remaining enum value after the six returns above)
     if (s.axis !== undefined) return 'axis is only accepted for target gridlines';
     if (s.symbol !== undefined || s.size !== undefined || s.dash !== undefined || s.smooth !== undefined) return 'symbol/size/dash/smooth are only accepted for target markerSymbol/lineStyle';
+    if (s.dataPointIndex !== undefined) return 'dataPointIndex is only accepted for target dataPoint';
     if (s.seriesIndex === undefined) return 'seriesIndex is required for target marker';
     if (s.fill === undefined && s.outline === undefined) return 'at least one of fill/outline is required';
     return null;
@@ -1045,17 +1237,59 @@ const CONSTRAINTS = Object.freeze({
   write_array_formula: s => rangeProblem(s.range),
   // GH #300 K2: the family's own plan() owns the text rules (printable + line breaks, the ceiling)
   add_comment: s => sheetNameProblem(s.sheet),
+  edit_comment: s => sheetNameProblem(s.sheet),
+  delete_comment: s => sheetNameProblem(s.sheet),
+  reply_to_comment: s => sheetNameProblem(s.sheet),
+  set_comment_resolved: s => sheetNameProblem(s.sheet),
   set_shape_text: s => sheetNameProblem(s.sheet),
   set_chart_point_data_label: s => sheetNameProblem(s.sheet),
   set_shape_rotation: s => sheetNameProblem(s.sheet),
   set_sheet_visibility: s => sheetNameProblem(s.sheet),
+  // GH #300 L2: the sheet-name shape only; the family's own plan() owns the single-cell/address-required/
+  // location-vs-address and the occupied-cell rules
+  set_hyperlink: s => sheetNameProblem(s.sheet),
+  remove_hyperlink: s => sheetNameProblem(s.sheet),
+  // GH #298 D: the range and sheet-name shapes; the family's own plan() owns the header-row / ceiling rules
+  create_table: s => rangeProblem(s.range) || sheetNameProblem(s.sheet),
+  // GH #336 / #337: the sheet-name shape; the family's own plan() owns the table-name / index / count / size rules
+  insert_table_rows: s => sheetNameProblem(s.sheet),
+  delete_table_rows: s => sheetNameProblem(s.sheet),
+  insert_table_columns: s => sheetNameProblem(s.sheet),
+  delete_table_columns: s => sheetNameProblem(s.sheet),
+  // GH #332-#335: the sheet-name shape (and the new range's shape); the family's own plan() owns the style / flag / name / ref rules
+  set_table_style: s => sheetNameProblem(s.sheet),
+  set_table_flag: s => sheetNameProblem(s.sheet),
+  set_table_totals_row: s => sheetNameProblem(s.sheet),
+  rename_table: s => sheetNameProblem(s.sheet),
+  resize_table: s => rangeProblem(s.ref) || sheetNameProblem(s.sheet),
+  // GH #354/#355: sheet only -- the schema's enum/number bounds already require the rest; layoutWant() re-checks
+  set_header_footer_margin: s => sheetNameProblem(s.sheet),
+  set_page_order: s => sheetNameProblem(s.sheet),
+  protect_sheet: s => sheetNameProblem(s.sheet),
+  unprotect_sheet: s => sheetNameProblem(s.sheet),
+  set_cell_protection: s => rangeProblem(s.range) || sheetNameProblem(s.sheet) || (s.locked === undefined && s.hidden === undefined ? 'set_cell_protection needs locked and / or hidden' : null),
+  protect_workbook: () => null,
+  unprotect_workbook: () => null,
+  // fa7244ac/3: the SAME shape check as clear_filter -- a plain A1 range with a header row and at least one data row
+  set_autofilter_range(s) {
+    const why = rangeProblem(s.range);
+    if (why) return why;
+    const g = parseRange(s.range);
+    return g.r2 - g.r1 < 1 ? 'range requires a header row and at least one data row' : null;
+  },
+  remove_autofilter(s) {
+    const why = rangeProblem(s.range);
+    if (why) return why;
+    const g = parseRange(s.range);
+    return g.r2 - g.r1 < 1 ? 'range requires a header row and at least one data row' : null;
+  },
 });
 
 // a step that changes the coordinates / sheet graph the other steps would be resolved against: the only step.
 // L-19 C (owner-decision C, 2026-10-17): delete_rows is the one exception -- it may repeat within a task, each
 // step's anchor read against the state the task's own earlier steps already produced (adapter.cjs planOperations
 // carries the same homogeneity rule; the BATCHED_REPEATABLE check right below refuses any OTHER mix).
-const SOLE_STEP = Object.freeze(['insert_rows', 'insert_columns', 'delete_columns', 'rename_sheet', 'create_sheet', 'delete_sheet', 'move_sheet', 'copy_range', 'copy_sheet', 'move_range', 'delete_cells', 'write_array_formula', 'add_comment', 'set_sheet_visibility']);
+const SOLE_STEP = Object.freeze(['protect_sheet', 'unprotect_sheet', 'set_cell_protection', 'protect_workbook', 'unprotect_workbook', 'set_table_style', 'set_table_flag', 'set_table_totals_row', 'rename_table', 'resize_table', 'insert_rows', 'insert_columns', 'delete_columns', 'rename_sheet', 'create_sheet', 'delete_sheet', 'move_sheet', 'copy_range', 'copy_sheet', 'move_range', 'delete_cells', 'write_array_formula', 'add_comment', 'edit_comment', 'delete_comment', 'reply_to_comment', 'set_comment_resolved', 'insert_table_rows', 'delete_table_rows', 'insert_table_columns', 'delete_table_columns', 'set_sheet_visibility']);
 
 // the only intent allowed to repeat within one task (L-19 C): every OTHER step of a multi-step task must be the
 // same intent, or the task is refused -- delete_rows may not share a task with any other intent, including itself
@@ -1286,6 +1520,17 @@ function unobservableOf(o) {
   return { unobservable: list, ...(u.length > MAX_UNOBSERVABLE ? { unobservableTotal: u.length } : {}) };
 }
 
+// The SAME gap again: a structure step's drawing refusal (structure.cjs drawingGuard) names WHICH drawing and WHY
+// (anchor mode / size / rotation / anchor read) only in its `drawings` list ([{ name, why? }]) -- not a scalar, so the
+// public failure carried the bare reason. Carried bounded like the two above: name / why only, why cut to 160 characters.
+const MAX_DRAWINGS = 10;
+function drawingsOf(o) {
+  const u = o && Array.isArray(o.drawings) ? o.drawings.filter(x => x && typeof x === 'object') : [];
+  if (!u.length) return {};
+  const list = u.slice(0, MAX_DRAWINGS).map(x => ({ name: String(x.name === undefined ? '' : x.name), ...(x.why !== undefined && x.why !== null && x.why !== '' ? { why: String(x.why).slice(0, 160) } : {}) }));
+  return { drawings: list, ...(u.length > MAX_DRAWINGS ? { drawingsTotal: u.length } : {}) };
+}
+
 function failureOf(e, verdicts) {
   const ev = e.evidence || {};
   if (e.status === 'SKIPPED_DUE_TO_PRIOR_FAILURE') return { stage: 'NOT_ATTEMPTED', reason: 'skipped-due-to-prior-failure', ...(ev.stoppedAt ? { stoppedAt: ev.stoppedAt } : {}) };
@@ -1294,7 +1539,7 @@ function failureOf(e, verdicts) {
   switch (ev.stage) {
     case 'classification':
       return { stage: 'CLASSIFICATION', reason: nonEmpty(inner.reason, inner.threw ? 'classifier-threw' : null, `classification-${String(ev.state || 'fail-closed').toLowerCase().replace(/_/g, '-')}`),
-        ...pickScalars(inner, ['cell', 'mergeArea', 'formula', 'detail', 'why']), ...unsupportedOf(inner), ...unobservableOf(inner) };
+        ...pickScalars(inner, ['cell', 'mergeArea', 'formula', 'detail', 'why']), ...unsupportedOf(inner), ...unobservableOf(inner), ...drawingsOf(inner) };
     case 'resolve': return { stage: 'TARGET_RESOLUTION', reason: nonEmpty(ev.ambiguity, 'target-resolution-failed'), ...pickScalars(ev, ['detail']) };
     case 'targeting-authority': return { stage: 'TARGETING_AUTHORITY', reason: nonEmpty(ev.gate && ev.gate.outcome, 'targeting-authority-failed') };
     case 'targeting-observation': return { stage: 'TARGETING_OBSERVATION', reason: nonEmpty(ev.outcome, 'targeting-observation-failed') };
@@ -1384,7 +1629,7 @@ async function awaitKeyRotation(configSource, fileId, preKey, { timeoutMs = 1500
  * or `null` when verification was not requested at all -- then the field stays entirely absent
  * (section 1: "no behavior change at all" for a call that does not opt in).
  */
-async function runStoredContentVerify({ v, r, preKey, configSource, createDriver, loadPlaywright, gate, now = Date.now, keyRotation = {} }) {
+async function runStoredContentVerify({ v, r, preKey, configSource, createDriver, loadPlaywright, gate, now = Date.now, keyRotation = {}, timeoutMs, commandTimeoutMs }) {
   if (v.task.verifyStoredContent !== true) return null;
   const preservationScope = (r.preservation && r.preservation.scope) || null;
   const inheritedNotProven = (r.preservation && r.preservation.notProven) || [];
@@ -1403,7 +1648,7 @@ async function runStoredContentVerify({ v, r, preKey, configSource, createDriver
   if (!lease) return unresolved('UNCERTAIN', 'open-failed', now() - t0, skipped);
   let results = []; let incomplete = false;
   try {
-    const driver = createDriver('xlsx', { configSource, loadPlaywright });
+    const driver = createDriver('xlsx', { configSource, loadPlaywright, timeoutMs, commandTimeoutMs });
     lease.track(driver);
     const opened = (await driver.open({ fileId: v.fileId, operation: 'READ' })) || {};
     if (!opened.ok) return unresolved('UNCERTAIN', 'open-failed', now() - t0, skipped);
@@ -1466,13 +1711,16 @@ function semanticsNotProven(checks, id) {
  * GH #293 L7: the items an operation names -- `affectedItems` (a done list-scope numbering write: every item it changed, or covers on a
  * no-op) and `conflictingItems` (a refused write: the other items it would have changed -- co-members, another list on the definition,
  * a label quoting the level). Strings only, as the family named them; absent when the family named none.
+ * GH #349: a SATISFIED step's named `observation` too (delete_comment on a cell with no comment: 'no-comment-at-cell' -- the call cannot
+ * tell an earlier delete from a mistyped cell, the caller can), a string only, absent otherwise.
  */
 function namedItemsOf(e, done) {
   const ev = e.evidence && typeof e.evidence === 'object' ? e.evidence : {};
   const strs = v => (Array.isArray(v) && v.every(x => typeof x === 'string') ? v : null);
   if (done) {
     const a = strs(ev.affectedItems) || strs(ev.evidence && ev.evidence.affectedItems);
-    return a ? { affectedItems: a } : {};
+    const obs = e.status === 'SATISFIED' && typeof ev.observation === 'string' ? { observation: ev.observation } : {};
+    return { ...(a ? { affectedItems: a } : {}), ...obs };
   }
   const inner = ev.evidence && typeof ev.evidence === 'object' ? ev.evidence : {};
   const c = [...new Set([...(strs(inner.coMembers) || []), ...(strs(inner.otherListItems) || []), ...(strs(inner.referencedBy) || [])])];
@@ -1613,7 +1861,7 @@ function warmSessionOptions(reuse, configSource, fileId, lease) {
   };
 }
 
-function createWriteExecution({ configSource, browsersPath, gate = createSessionGate(), runtime = null, loadPlaywright = null, createDriver = productDriver, session = {}, onTiming = null, reuse = null } = {}) {
+function createWriteExecution({ configSource, browsersPath, gate = createSessionGate(), runtime = null, loadPlaywright = null, createDriver = productDriver, session = {}, onTiming = null, reuse = null, timeoutMs, commandTimeoutMs } = {}) {
   const rt = runtime || (loadPlaywright ? { check: () => ({ ok: true }), load: loadPlaywright } : createBrowserRuntime({ browsersPath }));
   return async function execute(v) {
     const verifying = v.task.verifyStoredContent === true;
@@ -1628,7 +1876,7 @@ function createWriteExecution({ configSource, browsersPath, gate = createSession
       if (verifying && configSource && typeof configSource.getEditorConfig === 'function') {
         try { const cfg = await configSource.getEditorConfig({ fileId: v.fileId, operation: 'WRITE' }); preKey = cfg && cfg.document ? cfg.document.key : null; } catch { preKey = null; }
       }
-      const driver = productWriteDriver(createDriver('xlsx', { configSource, loadPlaywright: rt.load }));
+      const driver = productWriteDriver(createDriver('xlsx', { configSource, loadPlaywright: rt.load, timeoutMs, commandTimeoutMs }));
       lease.track(driver);
       const warm = verifying ? null : warmSessionOptions(reuse, configSource, v.fileId, lease);
       const options = { driver, fileId: v.fileId, ...(warm ? { reuse: warm } : {}), ...(session.ready ? { ready: session.ready } : {}), ...(session.persistence ? { persistence: session.persistence } : {}), ...(session.now ? { now: session.now } : {}) };
@@ -1641,7 +1889,7 @@ function createWriteExecution({ configSource, browsersPath, gate = createSession
     }
     // GH #76 MODEL 1: the verify opens its OWN, separate lease on the SAME gate, AFTER the write's session has
     // already closed (design section 2) -- never two sessions on the same file at once.
-    const sv = await runStoredContentVerify({ v, r, preKey, configSource, createDriver, loadPlaywright: rt.load, gate, ...(session.keyRotation ? { keyRotation: session.keyRotation } : {}) });
+    const sv = await runStoredContentVerify({ v, r, preKey, configSource, createDriver, loadPlaywright: rt.load, gate, timeoutMs, commandTimeoutMs, ...(session.keyRotation ? { keyRotation: session.keyRotation } : {}) });
     return applyStoredContentVerify(r, sv);
   };
 }
@@ -1651,7 +1899,7 @@ function createWriteTool(format, { execute = null, ...wiring } = {}) {
   if (format !== 'xlsx') throw new TypeError(`no WRITE handler for ${String(format)} (DOCX_WRITE_ACCEPTED is empty)`);
   const run = execute || createWriteExecution(wiring);
   return {
-    description: `XLSX WRITE task on a Nextcloud file as the calling requester (own credential via the broker): the canonical task { id?, steps }, run by the canonical executor and persisted with a confirmed forcesave. Supported intents: ${XLSX_WRITE_ALLOWLIST.join(', ')}; any other intent or shape is refused before dispatch. Most structural intents (insert/delete rows or columns, and the other identity-changing intents) must be the only step of their task; delete_rows is the one exception and may repeat, provided every step of the task is delete_rows -- give each repeat's at/anchor in the coordinates that will be current once the task's OWN earlier steps have already run, not the task's starting coordinates.`,
+    description: `XLSX WRITE task on a Nextcloud file as the calling requester (own credential via the broker): the canonical task { id?, steps }, run by the canonical executor and persisted with a confirmed forcesave. Supported intents: ${XLSX_WRITE_ALLOWLIST.join(', ')}; any other intent or shape is refused before dispatch. Most structural intents (insert/delete rows or columns, and the other identity-changing intents) must be the only step of their task; delete_rows is the one exception and may repeat, provided every step of the task is delete_rows -- give each repeat's at/anchor/witness in the coordinates that will be current once the task's OWN earlier steps have already run, not the task's starting coordinates. delete_rows / delete_columns require a witness beside the anchor: anchor = the value of the first SURVIVING row/column (now at at + count), witness = the value of the first REMOVED row/column (now at at), same { column|row, value } shape; a sheet that already reads as deleted is refused (xlsx-structure-delete-prior-execution-unprovable), never reported as done. delete_cells likewise requires a witness: anchor = the first SURVIVING cell just past the block, witness = the first REMOVED cell (the block's first row for shift up / first column for shift left), both in a lane within the block's band.`,
     inputSchema: inputSchema(),
     async handler(args) {
       const v = validateWriteRequest(args);
@@ -1667,7 +1915,7 @@ module.exports = {
   mapOpenFailure, createWriteTool, createWriteExecution, productWriteDriver, checkNamesDeep, failureOf, FORMAT_RANGE_RELEASED_KEYS, timingOf,
   // GH #219 2/2 (DOCX WRITE contract): format-neutral primitives, reused as-is by src/server/docx-write-tools.cjs --
   // no behaviour change to any existing xlsx caller (both already existed as module-local functions).
-  check, refuse, FILE_ID, ID, TASK_SCHEMA_KEYS,
+  check, refuse, FILE_ID, ID, TASK_SCHEMA_KEYS, LINK_URL_PATTERN, WS_NON_C0,
   // GH #220 1/2 (DOCX WRITE lifecycle): warmSessionOptions is the GH #100 U4b wiring itself -- a format-neutral
   // function of (reuse, configSource, fileId, lease) only, already used unchanged above for the xlsx path.
   // Exporting it changes nothing here; it lets docx-write-tools.cjs build the SAME warm-session options object

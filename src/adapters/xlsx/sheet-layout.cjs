@@ -57,12 +57,24 @@ function sheetLayout(p, sheet) {
   return { sheet, gaps, filter: f.filter || null, rowBreaks: br.rowBreaks || null, colBreaks: br.colBreaks || null, pane: paneGap.length ? null : pane };
 }
 
+/**
+ * fa7244ac/5 (Q4 MEASURED, c19b1065): the engine's own row insert, when the cut lies strictly within an
+ * existing AutoFilter's DATA rows -- after its header (r1), at or before its last data row (r2) -- extends the
+ * filter's own ref by the inserted count; it does not touch the header or any field's criteria. Not the header
+ * row itself (shift.at <= r1) and not past the last data row (shift.at > r2, where the ref's own fate is NOT
+ * MEASURED): both of those stay refused, unchanged. delete_rows (count < 0) and the other axis (insert_columns /
+ * delete_columns) are untouched by this exception.
+ */
+function autofilterRowInsertWithinData(filter, shift) {
+  return !!filter && shift.axis === 'rows' && shift.count > 0 && filter.r1 < shift.at && shift.at <= filter.r2;
+}
+
 /** The shifted sheet's objects that are not BEFORE the cut on the step's axis (the other axis is never classified). */
 function notBefore(l, shift) {
   const rows = shift.axis === 'rows';
   const before = last => last <= shift.at - 2;
   const hits = [];
-  if (l.filter && !before(rows ? l.filter.r2 : l.filter.c2)) hits.push({ object: 'autofilter', range: l.filter, axis: shift.axis });
+  if (l.filter && !before(rows ? l.filter.r2 : l.filter.c2) && !autofilterRowInsertWithinData(l.filter, shift)) hits.push({ object: 'autofilter', range: l.filter, axis: shift.axis });
   for (const b of rows ? l.rowBreaks : l.colBreaks) if (!before(b.id)) hits.push({ object: rows ? 'row-break' : 'column-break', id: b.id, man: b.man });
   // a pane frozen on the OTHER axis only (0 here) still has its frozen cell at index 0: a step at 1 touches it
   if (l.pane.state === 'frozen' && !before(rows ? l.pane.row0 : l.pane.col0)) hits.push({ object: 'frozen-pane', row0: l.pane.row0, col0: l.pane.col0 });
@@ -86,8 +98,30 @@ function layoutGuard(p, shift) {
   return hits.length ? { reason: 'xlsx-structure-layout-object-not-before-the-cut', objects: hits.slice(0, 20), count: hits.length } : null;
 }
 
-/** L3: every sheet's AutoFilter, row / column breaks and pane equal before and after; an unreadable side differs. */
-function layoutDiffs(b, a) {
+/**
+ * fa7244ac/5: does the sheet's raw AutoFilter read (`{ range, filters }`) differ from before to after EXACTLY the
+ * way the allowed insert_rows exception implies -- same left/right/top edge, the bottom edge grown by shift.count,
+ * every field's criteria byte-identical? Anything else about it changing (a different range entirely, a dropped
+ * or added criterion) is NOT this exception, and layoutDiffs below still flags it.
+ */
+function filterExtendedAsExpected(before, after, shift) {
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object') return false;
+  if (typeof before.range !== 'string' || typeof after.range !== 'string') return false;
+  const g1 = parseRange(before.range.replace(/^.*!/, '').replace(/\$/g, ''));
+  const g2 = parseRange(after.range.replace(/^.*!/, '').replace(/\$/g, ''));
+  if (!g1 || !g2) return false;
+  if (g2.c1 !== g1.c1 || g2.c2 !== g1.c2 || g2.r1 !== g1.r1 || g2.r2 !== g1.r2 + shift.count) return false;
+  return JSON.stringify(before.filters) === JSON.stringify(after.filters);
+}
+
+/**
+ * L3: every sheet's AutoFilter, row / column breaks and pane equal before and after; an unreadable side differs.
+ * `shift` (optional, the structural step that produced `a` from `b`): when it names an insert_rows whose cut lay
+ * strictly within the SAME sheet's own AutoFilter data rows (the layoutGuard exception above), that one sheet's
+ * filter is allowed to differ EXACTLY the way filterExtendedAsExpected proves -- every other sheet, and every
+ * other kind of change to this one, still diffs as before.
+ */
+function layoutDiffs(b, a, shift) {
   if (!b || !a) return [{ axis: 'observation-missing' }];
   const sheets = [...new Set([...(b.sheets || []), ...(a.sheets || [])].map(s => s.name))];
   const diffs = [];
@@ -95,8 +129,14 @@ function layoutDiffs(b, a) {
     const x = sheetLayout(b, n);
     const y = sheetLayout(a, n);
     if (x.gaps.length || y.gaps.length) { diffs.push({ sheet: n, axis: 'unobservable', before: x.gaps, after: y.gaps }); continue; }
-    const fr = s => JSON.stringify(s.filterReads[n]);
-    if (fr(b) !== fr(a)) diffs.push({ sheet: n, axis: 'autofilter' });
+    // fa7244ac/5: inside the relaxed window the filter must match the GROWN shape exactly -- "unchanged" is itself
+    // a diff here, since Q4 measured the engine moving it; outside the window the old "any change diffs" holds.
+    if (shift && n === shift.sheet && autofilterRowInsertWithinData(x.filter, shift)) {
+      if (!filterExtendedAsExpected(b.filterReads[n], a.filterReads[n], shift)) diffs.push({ sheet: n, axis: 'autofilter' });
+    } else {
+      const fr = s => JSON.stringify(s.filterReads[n]);
+      if (fr(b) !== fr(a)) diffs.push({ sheet: n, axis: 'autofilter' });
+    }
     if (JSON.stringify(x.rowBreaks) !== JSON.stringify(y.rowBreaks)) diffs.push({ sheet: n, axis: 'row-breaks' });
     if (JSON.stringify(x.colBreaks) !== JSON.stringify(y.colBreaks)) diffs.push({ sheet: n, axis: 'column-breaks' });
     if (JSON.stringify(x.pane) !== JSON.stringify(y.pane)) diffs.push({ sheet: n, axis: 'pane' });

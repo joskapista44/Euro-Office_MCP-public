@@ -113,7 +113,7 @@ test('faults: a link / bookmark over the WHOLE parent instead of matchText, a lo
 test('lowering: matchText bodies search INSIDE the one parent paragraph, public API only; the whole-unit body has no paragraph search', () => {
   const ranged = rich.commandBody({ action: 'link', targetText: A, matchText: 'beta', url: URL1, tooltip: 'tip' });
   const whole = rich.commandBody({ action: 'link', targetText: A, url: URL1, tooltip: 'tip' });
-  assert.match(ranged, /parents\.length !== 1\) return \[\]/);
+  assert.match(ranged, /const paragraph = exactParagraphOf\(m\.targetText\);/, 'the ONE parent paragraph, by the shared body lookup (GH #311/#312)');
   assert.match(ranged, /paragraph\.Search\(m\.matchText, true\)/);
   assert.match(ranged, /hits\[0\]\.AddHyperlink\(m\.url, m\.tooltip\)/, 'the link is on the RANGE, never the paragraph');
   assert.doesNotMatch(ranged, /paragraph\.AddHyperlink|frame\.evaluate|window\.|private_|asc_/);

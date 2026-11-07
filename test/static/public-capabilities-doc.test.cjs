@@ -23,6 +23,8 @@ const FROM_SCHEMA = {
   docx_read: readOps('docx_read'),
   xlsx_execute_task: writeIntents('xlsx_execute_task'),
   docx_execute_task: writeIntents('docx_execute_task'),
+  // GH #305: the formats document_create accepts
+  document_create: tools.document_create.inputSchema.properties.format.enum,
 };
 
 /** { tool: { count, names } } from "## `tool` -- N ..." headings and their "- `name`" bullets. */
@@ -54,8 +56,8 @@ const mismatches = (doc, truth) => {
   return errs;
 };
 
-test('the exposed tools are exactly the four capability tools plus product_status', () => {
-  assert.deepEqual(Object.keys(tools).sort(), ['docx_execute_task', 'docx_read', 'product_status', 'xlsx_execute_task', 'xlsx_read']);
+test('the exposed tools are exactly the five capability tools plus product_status', () => {
+  assert.deepEqual(Object.keys(tools).sort(), ['document_create', 'docx_execute_task', 'docx_read', 'product_status', 'xlsx_execute_task', 'xlsx_read']);
 });
 
 test('CAPABILITIES.md names exactly the read operations and write intents of the exposed tool schemas', () => {

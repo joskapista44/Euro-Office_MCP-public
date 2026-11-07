@@ -95,7 +95,15 @@ for (const [label, create] of [['XLSX', createEuroOfficeXlsxDriver], ['DOCX', cr
     const d = create({ url: 'https://nc.example', user: 'u', pass: 'p', loadPlaywright: env.loadPlaywright, pollMs: 5 });
     const r = await d.open({ fileId: '1' });
     assert.equal(r.ok, false);
-    assert.equal(r.detail, 'no-ds-event: no onDocumentReady/onError/onWarning/onInfo observed in the wait window');
+    // The XLSX driver now retries ONCE on this exact failure shape (this fake has no sequencing, so the retry sees
+    // the same always-timing-out env and fails the same way -- the SECOND failure is named so it is never
+    // confused with the first). DOCX has no retry (out of scope for this change) and keeps the original,
+    // un-retried message.
+    if (label === 'XLSX') {
+      assert.equal(r.detail, 'no-ds-event: no onDocumentReady/onError/onWarning/onInfo observed in the wait window (after the second attempt)');
+    } else {
+      assert.equal(r.detail, 'no-ds-event: no onDocumentReady/onError/onWarning/onInfo observed in the wait window');
+    }
   }));
 
   test(`${label}: OPEN_FAILED says ds-state-unreadable when the page cannot even be read back (distinct from no-ds-event)`, () => withFakeFetch(async () => {

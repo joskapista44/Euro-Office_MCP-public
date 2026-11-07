@@ -241,5 +241,5 @@ test('STATIC: the same write client REFUSES a receipt with an unknown extra key,
 });
 
 test('B24_BRIDGE_WRITE_RUNTIMES is /16 + /17 (DS9346: the historical /15, /16 9.3.4.60 chain is retired; GH #326/#327 widens again, byte-identical handler proven by b24-write-handler-identity.test.cjs)', () => {
-  assert.deepEqual(B24_BRIDGE_WRITE_RUNTIMES, [RT935, '9.3.5|euro-office-bridge-v1/9.3.5.0/17']);
+  assert.deepEqual(B24_BRIDGE_WRITE_RUNTIMES, [RT935, '9.3.5|euro-office-bridge-v1/9.3.5.0/17', '9.3.5|euro-office-bridge-v1/9.3.5.0/18', '9.3.5|euro-office-bridge-v1/9.3.5.0/19', '9.3.5|euro-office-bridge-v1/9.3.5.0/21', '9.3.5|euro-office-bridge-v1/9.3.5.0/22', '9.3.5|euro-office-bridge-v1/9.3.5.0/23', '9.3.5|euro-office-bridge-v1/9.3.5.0/24', '9.3.5|euro-office-bridge-v1/9.3.5.0/25', '9.3.5|euro-office-bridge-v1/9.3.5.0/26', '9.3.5|euro-office-bridge-v1/9.3.5.0/27', '9.3.5|euro-office-bridge-v1/9.3.5.0/28', '9.3.5|euro-office-bridge-v1/9.3.5.0/29']);
 });

@@ -83,13 +83,13 @@ test('vm: the REAL PROPERTY_QUERY reads a style via its ToJSON() (a STRING) -- t
   const st = r.document.styles.W10VmStyle;
   assert.ok(st, 'the style must be keyed by its NAME, not a styleId');
   assert.deepEqual(st.identity, { name: 'W10VmStyle', basedOn: null, next: null, link: null, styleType: 'paragraph', basedOnName: null, nextName: null, linkName: null });
-  assert.deepEqual(st.text, { bold: true, size: 26, color: '2255AA', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited' }); // GH #292: the further keys, absent here
+  assert.deepEqual(st.text, { bold: true, size: 26, color: '2255AA', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited', language: 'inherited' }); // GH #292/#324: the further keys, absent here
   assert.deepEqual(st.paragraph, { align: 'center', indentLeft: 12, spacingAfter: 6, spacingBefore: 'inherited', indentRight: 'inherited', indentFirstLine: 'inherited', keepNext: 'inherited', keepLines: 'inherited', pageBreakBefore: 'inherited' }); // 240/20, 120/20 twips->pt
 });
 
 test('vm: the SAME fixture with ToJSON returning a plain OBJECT (not a string) reads identically -- the W07-6 guard accepts either shape', () => {
   const r = runPropertyQuery(makeFakeApi({ styleToJsonIsString: false }));
-  assert.deepEqual(r.document.styles.W10VmStyle.text, { bold: true, size: 26, color: '2255AA', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited' });
+  assert.deepEqual(r.document.styles.W10VmStyle.text, { bold: true, size: 26, color: '2255AA', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited', language: 'inherited' });
 });
 
 test('vm: color.auto === true reads "auto", never a guessed hex', () => {
@@ -99,13 +99,13 @@ test('vm: color.auto === true reads "auto", never a guessed hex', () => {
 
 test('vm, NEGATIVE: a key ABSENT from rPr/pPr reads "inherited" -- never a guessed default, never UNOBSERVABLE (a read that succeeded is not a read failure)', () => {
   const r = runPropertyQuery(makeFakeApi({ tojsonPayload: { name: 'W10VmStyle', basedOn: null, styleType: 'paragraph', rPr: {}, pPr: {} } }));
-  assert.deepEqual(r.document.styles.W10VmStyle.text, { bold: 'inherited', size: 'inherited', color: 'inherited', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited' });
+  assert.deepEqual(r.document.styles.W10VmStyle.text, { bold: 'inherited', size: 'inherited', color: 'inherited', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited', language: 'inherited' });
   assert.deepEqual(r.document.styles.W10VmStyle.paragraph, { align: 'inherited', indentLeft: 'inherited', spacingAfter: 'inherited', spacingBefore: 'inherited', indentRight: 'inherited', indentFirstLine: 'inherited', keepNext: 'inherited', keepLines: 'inherited', pageBreakBefore: 'inherited' });
 });
 
 test('vm, NEGATIVE: rPr/pPr themselves absent from ToJSON reads "inherited" too (not a read failure -- the TOP-level shape still parsed)', () => {
   const r = runPropertyQuery(makeFakeApi({ tojsonPayload: { name: 'W10VmStyle', basedOn: null, styleType: 'paragraph' } }));
-  assert.deepEqual(r.document.styles.W10VmStyle.text, { bold: 'inherited', size: 'inherited', color: 'inherited', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited' });
+  assert.deepEqual(r.document.styles.W10VmStyle.text, { bold: 'inherited', size: 'inherited', color: 'inherited', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited', language: 'inherited' });
 });
 
 test('vm, NEGATIVE: a style with no ToJSON method at all reads every field UNOBSERVABLE (a genuine read failure, never "inherited")', () => {
@@ -271,12 +271,23 @@ test('GH #292 S6: both style reads normalize the measured jc names (start / end 
 // GH #292 S1 / S2: the measured ToJSON shapes of the further style keys (docs/evidence/gh292-style-definition-probe-20261021.json)
 test('GH #292 S1 / S2: both style reads read italic / underline / strike / font and space-before / right / first-line (hanging) indent / keep / page-break keys', () => {
   const payload = { name: 'W10VmStyle', basedOn: null, styleType: 'paragraph',
-    rPr: { i: true, u: true, strike: true, rFonts: { ascii: 'Courier New', cs: 'Courier New', eastAsia: 'Courier New', hAnsi: 'Courier New' } },
+    rPr: { i: true, u: true, strike: true, lang: { val: 'hu-HU' }, rFonts: { ascii: 'Courier New', cs: 'Courier New', eastAsia: 'Courier New', hAnsi: 'Courier New' } },
     pPr: { spacing: { before: 240, beforeAutoSpacing: 'off' }, ind: { right: 720, firstLine: -360 }, keepNext: true, keepLines: true, pageBreakBefore: true } };
   for (const read of [api => runPropertyQuery(api).document.styles.W10VmStyle, api => runTargetedQuery(api, ['W10VmStyle']).W10VmStyle]) {
     const st = read(makeFakeApi({ tojsonPayload: payload }));
-    assert.deepEqual(st.text, { bold: 'inherited', size: 'inherited', color: 'inherited', italic: true, underline: true, strike: true, fontFamily: 'Courier New' });
+    assert.deepEqual(st.text, { bold: 'inherited', size: 'inherited', color: 'inherited', italic: true, underline: true, strike: true, fontFamily: 'Courier New', language: 'hu-HU' }); // GH #324: rPr.lang.val
     assert.deepEqual(st.paragraph, { align: 'inherited', indentLeft: 'inherited', spacingAfter: 'inherited', spacingBefore: 12, indentRight: 36, indentFirstLine: -18, keepNext: true, keepLines: true, pageBreakBefore: true });
+  }
+});
+
+// GH #324 (LIVE, probe2.json): rPr.lang is an OBJECT ({ val: <tag> }), unlike bold/size/color's flat
+// keys -- a non-string .val (or the key present but malformed) reads UNOBSERVABLE, never a guess.
+test('GH #324: rPr.lang.val reads the language tag; a malformed lang object reads UNOBSERVABLE, never guessed', () => {
+  for (const [lang, want] of [[{ val: 'en-GB' }, 'en-GB'], [{ val: 123 }, 'UNOBSERVABLE:non-string-lang-val'], ['not-an-object', 'UNOBSERVABLE:non-string-lang-val']]) {
+    const payload = { name: 'W10VmStyle', basedOn: null, styleType: 'paragraph', rPr: { lang }, pPr: {} };
+    for (const read of [api => runPropertyQuery(api).document.styles.W10VmStyle, api => runTargetedQuery(api, ['W10VmStyle']).W10VmStyle]) {
+      assert.equal(read(makeFakeApi({ tojsonPayload: payload })).text.language, want, JSON.stringify(lang));
+    }
   }
 });
 

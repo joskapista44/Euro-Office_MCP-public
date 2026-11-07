@@ -200,11 +200,30 @@ function scopeProblem(p, op) {
   return elsewhere.length ? { reason: 'xlsx-name-exists-in-another-scope', name: op.name, scopes: elsewhere.map(d => d.scopeSheet) } : null;
 }
 
+/**
+ * GH #362 2nd unit: scopedHits/otherScopes above read ONLY p.definedNames, which the driver already filtered to
+ * drop hidden names (dependentsBridgeBody) -- so a set_defined_name/delete_defined_name targeting an identifier
+ * that is an already-existing HIDDEN name was reaching dispatch as a plain create/delete, with the LIVE
+ * outcome measured UNOBSERVABLE (GH #362 comment 6646047708, docs/evidence/gh362-defined-names-live-20261105/):
+ * DISPATCHED_OUTCOME_UNKNOWN, never a known APPLY. p.hiddenDefinedNames (the unfiltered counterpart, write-planning
+ * only) is checked here, PRE-MUTATION, for any scope -- the measured gap names only the identifier, not a scope
+ * nuance, so a same-name hidden entry in ANY scope is refused rather than guessed at. Print intents are untouched:
+ * Print_Area/Print_Titles are RESERVED identifiers already (planName above) and never reach this branch.
+ */
+function hiddenNameProblem(p, op) {
+  if (PRINT[op.intent]) return null;
+  if (!Array.isArray(p.hiddenDefinedNames)) return { reason: 'xlsx-hidden-names-unobservable' };
+  const hit = p.hiddenDefinedNames.find(d => sameName(d.name, op.name));
+  return hit ? { reason: 'xlsx-defined-name-collides-hidden', name: op.name, scope: hit.scopeSheet } : null;
+}
+
 function gate(p, op) {
   if (!p || p.format !== 'xlsx') return { ok: false, reason: 'xlsx-observation-missing' };
   if (!p.complete) return { ok: false, reason: p.truncated ? 'xlsx-observation-truncated' : 'xlsx-observation-unreadable-getters', unsupported: p.unsupported };
   if (!Array.isArray(p.definedNames)) return { ok: false, reason: 'xlsx-names-unobservable' };
   if (!p.dependencies || !p.dependencies.complete) return { ok: false, reason: 'xlsx-names-dependency-observation-incomplete', unobservable: p.dependencies ? p.dependencies.unobservable.slice(0, 20) : 'not-read' };
+  const hiddenProblem = hiddenNameProblem(p, op);
+  if (hiddenProblem) return { ok: false, ...hiddenProblem };
   // the scope sheet of a sheet-level name is the sheet the write changes (a workbook-level name: none)
   const ref = refOnTarget(p.dependencies, op.scope ? [op.scope] : []);
   if (ref) return { ok: false, ...ref };

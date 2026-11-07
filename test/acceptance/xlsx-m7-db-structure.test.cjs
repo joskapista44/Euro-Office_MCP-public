@@ -30,9 +30,10 @@ const book = ({ s = {}, o = {} } = {}) => [{ name: 'S', cells: cells(), ...s }, 
 const objs = charts => ({ objects: { charts, pivots: [], names: [] } });
 
 const insRows = at => ({ intent: 'insert_rows', sheet: 'S', at, count: 1, anchor: { column: 'A', value: `r${at}` } });
-const delRows = at => ({ intent: 'delete_rows', sheet: 'S', at, count: 1, anchor: { column: 'A', value: `r${at + 1}` } });
+// owner decision B (2026-11-02): a delete also names its witness, the first REMOVED row / column (at `at`)
+const delRows = at => ({ intent: 'delete_rows', sheet: 'S', at, count: 1, anchor: { column: 'A', value: `r${at + 1}` }, witness: { column: 'A', value: `r${at}` } });
 const insCols = at => ({ intent: 'insert_columns', sheet: 'S', at, count: 1, anchor: { row: 1, value: `c${at}` } });
-const delCols = at => ({ intent: 'delete_columns', sheet: 'S', at, count: 1, anchor: { row: 1, value: `c${colName(colNum(at) + 1)}` } });
+const delCols = at => ({ intent: 'delete_columns', sheet: 'S', at, count: 1, anchor: { row: 1, value: `c${colName(colNum(at) + 1)}` }, witness: { row: 1, value: `c${at}` } });
 
 async function run(store, step, script = {}) {
   let n = 0;
@@ -50,9 +51,16 @@ async function applied(b, step) {
   const first = await run(store, step);
   assert.equal(first.result.ok, true, JSON.stringify([ev(first.result), first.result.execution.preservationVerification]));
   assert.equal(op0(first.result).status, OPERATION_STATUS.APPLIED);
+  const settled = JSON.stringify(store.durable);
   const again = await run(store, step);
   assert.equal(again.m.commands, 0, 'the reopened retry 0/0');
-  assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
+  if (step.intent.startsWith('delete')) {
+    // owner decision B (2026-11-02): a delete has no SATISFIED path -- the already-deleted shape is refused, 0 writes
+    assert.equal(op0(again.result).status, OPERATION_STATUS.FAILED);
+    assert.equal(ev(again.result).reason, 'xlsx-structure-delete-prior-execution-unprovable');
+    assert.equal(again.m.writes, 0);
+    assert.equal(JSON.stringify(store.durable), settled, 'the refused retry changed nothing');
+  } else assert.equal(op0(again.result).status, OPERATION_STATUS.SATISFIED);
   return store;
 }
 async function refused(b, step, want, why = null) {
@@ -89,7 +97,7 @@ test('anchorExtent: only the measured mode with a complete geometry', () => {
   const r = a => drawings.anchorExtent({ ...img(), parent: 'S', rotation: 0, flipH: null, flipV: null, anchor: a }, 'S');
   const to = { col: 5, colOff: 0, row: 8, rowOff: 100 };
   assert.deepEqual(r({ type: 1, to }), { lastCol: 5, lastRow: 8 });
-  assert.match(r({ type: 2, to }).why, /anchor-mode-not-measured/);
+  assert.deepEqual(r({ type: 2, to }), { lastCol: 5, lastRow: 8 });
   assert.match(r({ type: 0, to }).why, /anchor-mode-not-measured/);
   assert.match(r({ type: 1, to: { ...to, row: undefined } }).why, /anchor-to-incomplete/);
   assert.match(r({ type: 1, to: { ...to, colOff: -1 } }).why, /anchor-to-incomplete/);
@@ -124,6 +132,16 @@ test('refused before the write: a drawing at or after the cut (the boundary row 
   await refused(book({ s: objs([chart(ser('O', 'B', 2, 4), { pos: { fromCol: 1, colOffset: 0, fromRow: 12, rowOffset: 0 } })]) }), insRows(15), 'xlsx-structure-drawing-at-or-after-the-cut');
 });
 
+test('twoCell (Type 2): APPLIED before the cut, refused at or after it and on delete_columns', async () => {
+  const two = img({ anchor: { type: 2, to: { col: 5, colOff: 0, row: 8, rowOff: 0 } } });
+  for (const step of [insRows(15), delRows(15), insCols('L')]) {
+    const store = await applied(book({ s: { drawings: [two] } }), step);
+    assert.deepEqual(store.durable.find(x => x.name === 'S').drawings, [two], step.intent);
+  }
+  await refused(book({ s: { drawings: [two] } }), insRows(9), 'xlsx-structure-drawing-at-or-after-the-cut');
+  await refused(book({ s: { drawings: [two] } }), delCols('K'), 'xlsx-structure-drawing-delete-columns-not-measured');
+});
+
 test('refused before the write: delete_columns over a drawing or a series is not measured', async () => {
   await refused(book({ s: { drawings: [img()] } }), delCols('K'), 'xlsx-structure-drawing-delete-columns-not-measured');
   await refused(book({ o: objs([chart(ser('S', 'B', 2, 4))]) }), delCols('K'), 'xlsx-structure-chart-series-not-before-the-cut', /delete-columns-over-a-series-not-measured/);
@@ -131,7 +149,7 @@ test('refused before the write: delete_columns over a drawing or a series is not
 
 test('refused before the write: an unmeasured anchor mode, an incomplete geometry, a rotated drawing', async () => {
   const to = { col: 5, colOff: 0, row: 8, rowOff: 0 };
-  for (const [d, why] of [[img({ anchor: { type: 2, to } }), /anchor-mode-not-measured:2/], [img({ anchor: { type: 0, to } }), /anchor-mode-not-measured:0/],
+  for (const [d, why] of [[img({ anchor: { type: 0, to } }), /anchor-mode-not-measured:0/],
     [img({ anchor: { type: 1, to: { col: 5, row: 8 } } }), /anchor-to-incomplete/], [img({ anchor: 'UNOBSERVABLE:no-drawingBase' }), /no-drawingBase/], [img({ rotation: 30 }), /rotation-not-measured/]]) {
     await refused(book({ s: { drawings: [d] } }), insRows(15), 'xlsx-structure-drawing-geometry-unobservable', why);
   }

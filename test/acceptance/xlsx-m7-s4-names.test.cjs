@@ -71,7 +71,7 @@ test('insert 2 rows at 3: APPLIED, every name follows (workbook + sheet level, e
 test('delete rows 3:4 and the columns axis: the names follow (delete moves up, insert / delete columns move along)', async () => {
   const del = createStore(book(SUPPORTED));
   del.names = workbook(SUPPORTED);
-  const d = await run(del, step('delete_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' } }));
+  const d = await run(del, step('delete_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' }, witness: { column: 'A', value: 'r3' } }));
   assert.equal(d.result.ok, true, JSON.stringify([op(d.result).evidence, d.result.execution.preservationVerification]));
   assert.deepEqual(del.names.map(n => n.ref), ['P!$B$3', 'P!$B$2', 'Q!$B$5']);
   const cols = createStore(book(SUPPORTED));
@@ -86,8 +86,8 @@ for (const [title, names, t, why] of [
   ['a range name', [{ name: 'Rg', ref: 'P!$B$5:$B$6' }], INSERT, 'xlsx-structure-name-shape-unsupported'],
   ['a mixed-reference name', [{ name: 'Mx', ref: 'P!$B5' }], INSERT, 'xlsx-structure-name-shape-unsupported'],
   ['a name through another name', [{ name: 'Base', ref: 'Q!$B$5' }, { name: 'Via', ref: 'Below' }, { name: 'Below', ref: 'P!$B$5' }], INSERT, 'xlsx-structure-name-shape-unsupported'],
-  ['a name the delete breaks (#REF!)', [{ name: 'In', ref: 'P!$B$4' }], step('delete_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' } }), 'xlsx-structure-name-would-break'],
-  ['a sheet-level name the delete breaks', [{ name: 'ShIn', ref: 'P!$B$3', on: 'P' }], step('delete_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' } }), 'xlsx-structure-name-would-break'],
+  ['a name the delete breaks (#REF!)', [{ name: 'In', ref: 'P!$B$4' }], step('delete_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' }, witness: { column: 'A', value: 'r3' } }), 'xlsx-structure-name-would-break'],
+  ['a sheet-level name the delete breaks', [{ name: 'ShIn', ref: 'P!$B$3', on: 'P' }], step('delete_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' }, witness: { column: 'A', value: 'r3' } }), 'xlsx-structure-name-would-break'],
 ]) {
   test(`refused BEFORE the write, 0/0: ${title}`, async () => {
     const store = createStore(book(names));

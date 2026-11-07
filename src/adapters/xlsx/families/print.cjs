@@ -1,6 +1,6 @@
 'use strict';
 
-const { XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS } = require('../runtime.cjs');
+const { XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS, XLSX_B26_BRIDGE_WRITE_RUNTIME_IDS } = require('../runtime.cjs');
 const cells = require('./cells.cjs');
 
 /**
@@ -46,7 +46,23 @@ const cells = require('./cells.cjs');
  */
 const B10_BRIDGE_WRITE_RUNTIMES = XLSX_B10_BRIDGE_WRITE_RUNTIME_IDS;
 
-const INTENTS = Object.freeze(['set_print_fit', 'set_header_footer', 'set_page_break', 'set_first_page_number', 'set_print_centering', 'set_print_scale', 'set_paper_size', 'set_header_footer_flag']);
+/**
+ * GH #354 / #355 (Bridge /21, owner conditional B; design docs/DS-9.3.5-BRIDGE20-PAGE-SETUP-AND-READS-DESIGN.md): the
+ * LAYOUT settings the public API has no getter / setter for, written ONLY through sheet.printSettings.write/v2 (each with
+ * its own Layout history type 16-18), read through sheet.printSettings.read/v2 (the driver's `layout` field of printReads):
+ *   set_header_footer_margin { sheet, slot: 'header' | 'footer', value }  millimetres in [0, MAX_LAYOUT_MARGIN_MM]
+ *   set_page_order { sheet, order: 'downThenOver' | 'overThenDown' }
+ * The capability exists only on /21: on any other runtime the step is refused before the write (B26_BRIDGE_WRITE_RUNTIMES
+ * here, the driver's own list second, the in-editor gate third). L1 on the fresh v2 read; L3 masks only the step's own
+ * layout field. Proving the setting does not prove the printed appearance.
+ */
+const B26_BRIDGE_WRITE_RUNTIMES = XLSX_B26_BRIDGE_WRITE_RUNTIME_IDS;
+// the page-margin bound of page.cjs; the engine's own header/footer bound is NOT measured (the Bridge admits [0, 500])
+const MAX_LAYOUT_MARGIN_MM = 200;
+const PAGE_ORDERS = Object.freeze(['downThenOver', 'overThenDown']);
+const LAYOUT_KEYS = Object.freeze(['headerMargin', 'footerMargin', 'pageOrder']);
+
+const INTENTS = Object.freeze(['set_print_fit', 'set_header_footer', 'set_page_break', 'set_first_page_number', 'set_print_centering', 'set_print_scale', 'set_paper_size', 'set_header_footer_flag', 'set_header_footer_margin', 'set_page_order']);
 const FIELDS = Object.freeze({
   set_print_fit: ['fitToWidth', 'fitToHeight'],
   set_header_footer: ['slot', 'value'],
@@ -56,9 +72,12 @@ const FIELDS = Object.freeze({
   set_print_scale: ['scale'],
   set_paper_size: ['paper'],
   set_header_footer_flag: ['flag', 'value'],
+  set_header_footer_margin: ['slot', 'value'],
+  set_page_order: ['order'],
 });
 /** The sheet-level setting a step claims (and, for L3, the fields of its own sheet it may change). */
-const axisOf = (intent, w) => ({ set_print_fit: 'fit', set_print_scale: 'fit', set_paper_size: 'paper', set_header_footer_flag: w.flag, set_header_footer: w.slot, set_page_break: w.breaks, set_first_page_number: 'firstPage', set_print_centering: w.center }[intent]);
+const axisOf = (intent, w) => (isLayout(intent) ? w.setting : { set_print_fit: 'fit', set_print_scale: 'fit', set_paper_size: 'paper', set_header_footer_flag: w.flag, set_header_footer: w.slot, set_page_break: w.breaks, set_first_page_number: 'firstPage', set_print_centering: w.center }[intent]);
+function isLayout(intent) { return intent === 'set_header_footer_margin' || intent === 'set_page_order'; }
 /**
  * Owner OD-C / OD-A (owner channel): the paper sizes are EXACTLY the editor's own menu (web-apps view/Toolbar.js
  * pageSize items, the mm the UI passes to asc_changeDocSize); the file stores a size id found by an exact mm match
@@ -119,9 +138,21 @@ const PAGE = Object.freeze({
   set_paper_size: { holds: (st, w) => st.width === w.width && st.height === w.height, own: () => ['width', 'height'] },
   set_header_footer_flag: { holds: (st, w) => st[w.flag] === w.value, own: w => [w.flag] },
 });
-const wantOf = (step, at) => (Object.hasOwn(PAGE, step.intent) ? pageWant(step, at) : wantBase(step, at));
-const holds = (st, op) => (Object.hasOwn(PAGE, op.intent) ? PAGE[op.intent].holds(st, op.want) : holdsBase(st, op));
-const ownFields = op => (Object.hasOwn(PAGE, op.intent) ? PAGE[op.intent].own(op.want) : ownBase(op));
+/** GH #354/#355: the LAYOUT step's want -- the v2 setting name and its value, in the capability's own words. */
+function layoutWant(step, at) {
+  if (step.intent === 'set_page_order') return PAGE_ORDERS.includes(step.order) ? { want: { setting: 'pageOrder', value: step.order } } : { error: `${at}: order must be one of ${PAGE_ORDERS.join(', ')}` };
+  if (step.slot !== 'header' && step.slot !== 'footer') return { error: `${at}: slot must be 'header' or 'footer'` };
+  if (!(Number.isFinite(step.value) && step.value >= 0 && step.value <= MAX_LAYOUT_MARGIN_MM)) return { error: `${at}: value must be millimetres in [0, ${MAX_LAYOUT_MARGIN_MM}]` };
+  return { want: { setting: step.slot === 'header' ? 'headerMargin' : 'footerMargin', value: step.value } };
+}
+const layoutReadable = st => !!st && !!st.layout && typeof st.layout === 'object' && LAYOUT_KEYS.every(k => k in st.layout)
+  && ['headerMargin', 'footerMargin'].every(k => st.layout[k] === null || Number.isFinite(st.layout[k])) && (st.layout.pageOrder === null || PAGE_ORDERS.includes(st.layout.pageOrder));
+// a margin is the model's own number; a sub-micrometre difference is the inch round trip of the saved file, not a change
+const layoutHolds = (st, w) => (w.setting === 'pageOrder' ? st.layout.pageOrder === w.value : Number.isFinite(st.layout[w.setting]) && Math.abs(st.layout[w.setting] - w.value) < 1e-6);
+
+const wantOf = (step, at) => (isLayout(step.intent) ? layoutWant(step, at) : Object.hasOwn(PAGE, step.intent) ? pageWant(step, at) : wantBase(step, at));
+const holds = (st, op) => (isLayout(op.intent) ? layoutHolds(st, op.want) : Object.hasOwn(PAGE, op.intent) ? PAGE[op.intent].holds(st, op.want) : holdsBase(st, op));
+const ownFields = op => (isLayout(op.intent) ? [] : Object.hasOwn(PAGE, op.intent) ? PAGE[op.intent].own(op.want) : ownBase(op));
 
 function wantBase(step, at) {
   switch (step.intent) {
@@ -201,6 +232,7 @@ function gate(p, op) {
 /** M7 F2: the step's own sheet must serve the widened fields it reads; a removal names a MANUAL break (an automatic
  * one at the same id is not measured). */
 function stepGap(op, st) {
+  if (isLayout(op.intent) && !layoutReadable(st)) return { reason: 'xlsx-print-layout-unobservable', sheets: [op.selector.sheet], why: st && st.layout !== undefined ? st.layout : 'layout-not-read' };
   if (needsWide(op) && !wideReadable(st)) return { reason: 'xlsx-print-unobservable', sheets: [op.selector.sheet], why: 'widened-fields-not-read' };
   const auto = op.intent === 'set_page_break' && op.want.remove && st[op.want.breaks].some(b => b.id === op.want.breakId && b.man !== true);
   return auto ? { reason: 'xlsx-print-break-not-manual', breakId: op.want.breakId } : null;
@@ -212,6 +244,7 @@ function classify(p, op) {
   const where = { sheet: op.selector.sheet, want: op.want };
   if (holds(g.st, op)) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-print-settings' } };
   const runtime = p.runtime ? p.runtime.identity : null;
+  if (isLayout(op.intent) && !B26_BRIDGE_WRITE_RUNTIMES.includes(runtime)) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-print-layout-bridge-write-runtime-not-proven', runtime, proven: B26_BRIDGE_WRITE_RUNTIMES } };
   if (!B10_BRIDGE_WRITE_RUNTIMES.includes(runtime)) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-print-bridge-write-runtime-not-proven', runtime, proven: B10_BRIDGE_WRITE_RUNTIMES } };
   return { state: 'APPLY', evidence: { ...where, now: g.st } };
 }
@@ -228,6 +261,7 @@ function resolve(p, selector, ctx = {}) {
  */
 function bridgeArgs(op) {
   const w = op.want;
+  if (isLayout(op.intent)) return { args: { setting: w.setting, value: w.value }, requested: [w.setting] };
   switch (op.intent) {
     case 'set_print_fit': return { args: { setting: 'fit', fitToWidth: w.fitW, fitToHeight: w.fitH }, requested: fitOff(w) ? ['fitW', 'fitH', 'fitFlag', 'scale'] : ['fitW', 'fitH', 'fitFlag'] };
     case 'set_print_scale': return { args: { setting: 'scale', scale: w.scale }, requested: ['fitW', 'fitH', 'fitFlag', 'scale'] };
@@ -251,6 +285,8 @@ function lower(op) {
   const mapped = bridgeArgs(op);
   if (!mapped) return { kind: 'callCommand', body: `return { ok: false, stage: 'no-bridge-mapping', intent: ${JSON.stringify(op.intent)} };`, meta: Object.freeze({ family: 'print', action: op.intent, sheet, want: op.want, bridgePrintWrite: true }) };
   const { args, requested } = mapped;
+  const v2 = isLayout(op.intent);
+  const [G, W, F] = v2 ? ['__eoB26Gate', '__eoB26Write', '__eoB26Fail'] : ['__eoB10Gate', '__eoB10Write', '__eoB10Fail'];
   return {
     kind: 'callCommand',
     body: `
@@ -258,12 +294,12 @@ try {
   const name = ${JSON.stringify(sheet)};
   const ws = Api.GetSheet(name);
   if (!ws || ws.GetName() !== name) return { ok: false, stage: 'sheet-identity' };
-  const g10 = __eoB10Gate(name); if (!g10.ok) return g10;
-  const w = __eoB10Write(${JSON.stringify(args)}, ${JSON.stringify(requested)}); if (!w.ok) return __eoB10Fail(w);
+  const g10 = ${G}(name); if (!g10.ok) return g10;
+  const w = ${W}(${JSON.stringify(args)}, ${JSON.stringify(requested)}); if (!w.ok) return ${F}(w);
   return { ok: true };
 } catch (err) { return { ok: false, stage: 'threw', error: String(err) }; }
 `,
-    meta: Object.freeze({ family: 'print', action: op.intent, sheet, want: op.want, bridgePrintWrite: true }),
+    meta: Object.freeze({ family: 'print', action: op.intent, sheet, want: op.want, bridgePrintWrite: true, ...(v2 ? { bridgePrintLayoutWrite: true } : {}) }),
   };
 }
 
@@ -302,7 +338,8 @@ function verifyPreservation(op, before, after) {
   const b = before.primary.printReads;
   const a = after.primary.printReads;
   const own = ownFields(op);
-  const mask = reads => (reads ? Object.fromEntries(Object.entries(reads).map(([s, st]) => [s, s === op.selector.sheet && readable(st) ? { ...st, ...Object.fromEntries(own.map(k => [k, null])) } : st])) : null);
+  const layoutMask = st => (isLayout(op.intent) && layoutReadable(st) ? { layout: { ...st.layout, [op.want.setting]: null } } : {});
+  const mask = reads => (reads ? Object.fromEntries(Object.entries(reads).map(([s, st]) => [s, s === op.selector.sheet && readable(st) ? { ...st, ...Object.fromEntries(own.map(k => [k, null])), ...layoutMask(st) } : st])) : null);
   const kept = !!b && !!a && JSON.stringify(mask(b)) === JSON.stringify(mask(a)) && breaksKept(op, b, a);
   return { ok: rest.ok && kept, evidence: { ...rest.evidence, otherPrintSettingsKept: kept } };
 }
@@ -313,6 +350,6 @@ function wholeTaskChecks(op, finalObservation) {
 }
 
 const windowsOf = () => [];
-const liveExtras = () => ({ printSheets: ['*'] });
+const liveExtras = op => (op && isLayout(op.intent) ? { printSheets: ['*'], printLayout: true } : { printSheets: ['*'] });
 
-module.exports = { INTENTS, PAPER, B10_BRIDGE_WRITE_RUNTIMES, bridgeArgs, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };
+module.exports = { INTENTS, PAPER, B10_BRIDGE_WRITE_RUNTIMES, B26_BRIDGE_WRITE_RUNTIMES, MAX_LAYOUT_MARGIN_MM, PAGE_ORDERS, bridgeArgs, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };

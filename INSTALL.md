@@ -7,25 +7,26 @@ it is named consistently.
 
 The server only works against an Euro-Office Document Server **9.3.5.0** carrying this project's blocks. They are
 inserted into the editor bundles by `documentserver-patches/9.3.4.60/install_bridge.py` -- the same patcher script,
-pointed at the `documentserver-patches/9.3.5.0/fresh-install-v1.1.0.json` plan via `--plan` (the script is SHA256-based and
+pointed at the `documentserver-patches/9.3.5.0/fresh-install-v1.2.0.json` plan via `--plan` (the script is SHA256-based and
 plan-parameterized, so it did not need its own 9.3.5.0 copy) -- driven by that plan, which pins the exact UNPATCHED
 input bundle hash, each block hash and the exact output hash. Any other input (a different build, an already
 modified bundle) is refused and nothing is written.
 
-The plan installs the cell (XLSX) Bridge `euro-office-bridge-v1/9.3.5.0/17` and the word (DOCX) Bridge
+The plan installs the cell (XLSX) Bridge `euro-office-bridge-v1/9.3.5.0/29` and the word (DOCX) Bridge
 `euro-office-bridge-word-v1/9.3.5.0/5` -- the only Bridge revisions this release writes through.
-`documentserver-patches/9.3.5.0/fresh-install.json` is the earlier `/16` + `/3` plan, kept for the record only: against
-its output every XLSX write and every DOCX Bridge call of this release is refused.
+`documentserver-patches/9.3.5.0/fresh-install.json` (`/16` + `/3`) and `fresh-install-v1.1.0.json` (`/17` + `/5`) are
+earlier plans, kept for the record only: against either output every write this release accepts beyond what that
+earlier release already wrote is refused.
 
 Locate the bundles the editor actually loads (historically
 `<documentserver>/sdkjs/cell/sdk-all.js` and `<documentserver>/sdkjs/word/sdk-all.js`), keep a copy of each, then:
 
 ```sh
 cd documentserver-patches/9.3.4.60
-python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.1.0.json --target cell --input <cell sdk-all.js> --check
-python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.1.0.json --target cell --input <cell sdk-all.js> --apply --output /tmp/cell-sdk-all.js
-python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.1.0.json --target word --input <word sdk-all.js> --check
-python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.1.0.json --target word --input <word sdk-all.js> --apply --output /tmp/word-sdk-all.js
+python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.2.0.json --target cell --input <cell sdk-all.js> --check
+python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.2.0.json --target cell --input <cell sdk-all.js> --apply --output /tmp/cell-sdk-all.js
+python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.2.0.json --target word --input <word sdk-all.js> --check
+python3 install_bridge.py --plan ../9.3.5.0/fresh-install-v1.2.0.json --target word --input <word sdk-all.js> --apply --output /tmp/word-sdk-all.js
 ```
 
 `--check` prints `STATUS=PATCHABLE` (or `ALREADY_PATCHED`, exit 0, nothing to do); `--apply` verifies the output hash

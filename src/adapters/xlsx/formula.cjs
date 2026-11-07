@@ -127,4 +127,46 @@ function sheetRefs(formula) {
   return { ok: true, names: [...new Set(names)], external, structured };
 }
 
-module.exports = { tokenize, canonical, canonicalRenamed, sameFormula, sheetRefs, bareSheetName };
+const escapeRx = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * GH #332/#333 (owner decision A): `formula` with every STRUCTURED (table) reference to `from` renamed
+ * to `to` (`From[` -> `To[`, case-insensitive, word-boundary on the left -- the same boundary
+ * `table-structure.cjs`'s own `structuredRefs()` detection uses), OUTSIDE string literals and quoted
+ * sheet names (kept VERBATIM, via tokenize() -- the same protection canonicalRenamed gives sheet names).
+ * Unlike canonical()/canonicalRenamed(), this does NOT re-render the rest of the formula (no upper-
+ * casing, no whitespace removal outside the match): the engine re-renders on its own read-back
+ * (file header comment above), so a minimal, targeted substitution is enough and safer to reason about.
+ *
+ * Returns `null` for a non-formula string (no leading '=') or an unparsable one (unterminated
+ * literal). `{ formula, changed, sawInLiteral }`:
+ *   changed       true iff at least one `From[` occurrence outside a literal was rewritten
+ *   sawInLiteral  true iff `From[` ALSO occurs inside a string literal or quoted sheet name (e.g.
+ *                 INDIRECT("From[Qty]")) -- the rewrite cannot reach it; the CALLER treats this as
+ *                 unsafe to rename at all, not as a partial success
+ * A ref with no match anywhere in the 'other' tokens (e.g. an in-table `[@Qty]` relative reference,
+ * which never embeds the table name) comes back `changed: false` -- nothing needed rewriting there.
+ */
+function tableRenameRewrite(formula, from, to) {
+  const s = String(formula);
+  if (!s.startsWith('=')) return null;
+  const toks = tokenize(s.slice(1));
+  if (!toks) return null;
+  const FROM = escapeRx(String(from));
+  const refRe = () => new RegExp(`(^|[^A-Za-z0-9_.\\u00C0-\\uFFFF])${FROM}(\\s*\\[)`, 'gi');
+  const litRe = () => new RegExp(`${FROM}\\s*\\[`, 'i');
+  let changed = false;
+  let sawInLiteral = false;
+  const rebuilt = toks.map(t => {
+    if (t.kind !== 'other') {
+      if (litRe().test(t.text)) sawInLiteral = true;
+      return t.text;
+    }
+    if (!refRe().test(t.text)) return t.text;
+    changed = true;
+    return t.text.replace(refRe(), (_, pre) => `${pre}${to}[`);
+  }).join('');
+  return { formula: changed ? '=' + rebuilt : s, changed, sawInLiteral };
+}
+
+module.exports = { tokenize, canonical, canonicalRenamed, sameFormula, sheetRefs, bareSheetName, tableRenameRewrite };

@@ -9,6 +9,9 @@ const { ACCEPTED_RUNTIMES, DOCX_B18_BRIDGE_WRITE_RUNTIME_ENTRIES, DOCX_B18_BRIDG
 const { BRIDGE_CAPABILITIES, BRIDGE_CLIENT_SRC, BRIDGE_WRITES, BRIDGE_WRITE_CLIENT_SRC, BRIDGE_NUMBERING_REMOVE_WRITE_CLIENT_SRC, BRIDGE_STYLE_NEXT_LINK_WRITE_CLIENT_SRC, BRIDGE_LIST_DETACH_WRITE_CLIENT_SRC } = require('./ds-bridge.cjs');
 const { resolveConfigSource } = require('./config-source.cjs');
 const { IMAGES_READ_CALL } = require('./docx-images-read.cjs');
+const { SHAPES_READ_CALL } = require('./docx-shapes-read.cjs');
+const { CHARTS_READ_CALL } = require('./docx-charts-read.cjs');
+const { REWRITE_NO_WRITE_REASONS } = require('../../adapters/docx/families/text.cjs');
 
 /**
  * Euro-Office DOCX editor transport — the M1 driver contract on a real editor (M4).
@@ -164,6 +167,13 @@ function b18DispatchResult(r) {
   return { ok: false, dispatched: true, outcome: r && r.ok === true ? 'b18-bridge-write-failed' : (r && r.outcome) || 'b18-command-failed', evidence: res || null, error: (r && r.error) || null };
 }
 
+/** GH #296: the same receipt rule for a public-API command whose body returns { ok: true } only when its own guards and the engine call passed. */
+function receiptDispatchResult(r) {
+  const res = r && r.result;
+  if (r && r.ok === true && res && res.ok === true) return { ok: true, dispatched: true, outcome: r.outcome, error: null };
+  return { ok: false, dispatched: true, outcome: r && r.ok === true ? 'public-receipt-refused' : (r && r.outcome) || 'public-receipt-command-failed', evidence: res || null, error: (r && r.error) || null };
+}
+
 /**
  * M11.5e.4: the in-editor B21 client, prepended ONLY to a title/even header/footer command (every other command stays
  * byte-identical):
@@ -267,6 +277,25 @@ try {
 ${sl ? SLICE_PRELUDE(sl) : ''}  // A call that may throw, NAMED: the field becomes 'UNOBSERVABLE:<call>: <message>' instead of the throw aborting the WHOLE read (the outer catch returns { error } and every paragraph's rich entry, the
   // bookmark list included, is lost -- g266v1 ROUND4B). null still means 'absent', [] 'empty'; an unreadable field is this named string.
   const named = (what, f) => { try { return f(); } catch (e) { return 'UNOBSERVABLE:' + what + ': ' + String((e && e.message) || e).slice(0, 80); } };
+  // GH #313 R2 (LIVE-measured, zero, mini-probe PASS,
+  // test/live/docx-gh313-section-index-probe.live.cjs): a section's own 0-based position, by VALUE
+  // (the GetPrevious() chain length), NOT by identity -- paragraph.GetSection() returns a fresh,
+  // never-equal wrapper per call, so comparing two separately-obtained section objects with === is
+  // unsafe (the closingBlockIndex field removed earlier for exactly this reason). A plain integer
+  // chain-walk, one call per paragraph, has no cross-call comparison and is safe. Confirmed
+  // monotonic and in agreement with doc.GetSections() array order on a real DS.
+  const sectionIndexOf = sec => {
+    try {
+      let k = 0; let s = sec; let guard = 0;
+      while (s && typeof s.GetPrevious === 'function') {
+        const p = s.GetPrevious();
+        if (!p) break;
+        k += 1; s = p;
+        if (++guard > 1000) return 'UNOBSERVABLE:section-chain-guard';
+      }
+      return k;
+    } catch (e) { return 'UNOBSERVABLE:' + String((e && e.message) || e).slice(0, 80); }
+  };
   // The DS Bridge client (fail-closed, no fallback): the two Word read capabilities this driver
   // now depends on for list-level format and table grid -- no internal fallback on any failure.
 ${BRIDGE_CLIENT_SRC}  const rd = (cap, args) => { const r = __eoBridgeRead(cap.id, cap.version, ${JSON.stringify(ACCEPTED_RUNTIMES.docx)}, args, cap.valueType); return r.ok ? r.value : null; };
@@ -323,7 +352,7 @@ ${sl ? `  for (let i = ${sl.part === 'paragraphs' ? sl.from : 'n'}; i < n; i += 
       const rf = {};
       for (const [key, m] of [['bold', 'GetBold'], ['italic', 'GetItalic'], ['underline', 'GetUnderline'], ['strike', 'GetStrikeout']]) { const v = rget(m); if (typeof v === 'boolean') rf[key] = v; }
       const ff = rget('GetFontFamily'); if (ff) rf.fontFamily = String(ff);
-      const fs = rget('GetFontSize'); if (fs !== undefined && fs !== null && Number.isFinite(Number(fs))) { const v = Number(fs); rf.fontSize = v > 16 ? v / 2 : v; }
+      const fs = rget('GetFontSize'); if (fs !== undefined && fs !== null && Number.isFinite(Number(fs))) { const v = Number(fs); rf.fontSize = v / 2; }
       const lg = rget('GetLanguage'); if (lg) rf.language = String(lg);
       // W-08 (internal tracker): highlight / vertAlign read back as plain strings; colour via the
       // shared colorHex normalizer (never a raw object crosses the frame boundary).
@@ -383,6 +412,25 @@ ${numberingFormat ? `    // W-07 (M7 backlog, numbering pattern/start): the OWN 
           // every OTHER missing field (numFmt/lvlText/suff/lvlJc) still means "unread".
           if (Number.isInteger(lvlObj.start)) f.start = lvlObj.start;
           else if (!('start' in lvlObj)) f.start = 1;
+          // GH #319 (LIVE-measured, gh319-bulletcolorfont-probe-20261028): the glyph's OWN colour/
+          // font live on this SAME level's rPr -- a plain object: color is {auto, r, g, b}, rFonts
+          // is {ascii, ...} -- never the paragraph run's. hx2OwnColor mirrors the border-side
+          // reader's own hx2 shape (docx-driver.cjs's borderSideFormat, line ~572) -- '#RRGGBB', or
+          // 'auto' when the DS reports an auto-equivalent colour (auto === true), kept LOCAL (not
+          // shared) since the two readers see DIFFERENT raw shapes (this one direct ToJSON ints,
+          // that one an already-normalized side object) and a shared helper would hide that
+          // difference, not simplify it.
+          const rPr = lvlObj.rPr && typeof lvlObj.rPr === 'object' ? lvlObj.rPr : null;
+          if (rPr) {
+            const hx2OwnColor = n => Number(n).toString(16).padStart(2, '0').toUpperCase();
+            const rc = rPr.color && typeof rPr.color === 'object' ? rPr.color : null;
+            const color = rc && Number.isInteger(rc.r) && Number.isInteger(rc.g) && Number.isInteger(rc.b)
+              ? '#' + hx2OwnColor(rc.r) + hx2OwnColor(rc.g) + hx2OwnColor(rc.b)
+              : (rc && rc.auto === true ? 'auto' : null);
+            if (color) f.color = color;
+            const fonts = rPr.rFonts && typeof rPr.rFonts === 'object' ? rPr.rFonts : null;
+            if (fonts && typeof fonts.ascii === 'string') f.font = fonts.ascii;
+          }
           numFormat = f;
         }
       } catch (_) { numFormat = null; }
@@ -411,7 +459,12 @@ ${numberingFormat ? `    // W-07 (M7 backlog, numbering pattern/start): the OWN 
         }
       } catch (e) { if (childFailure === null) childFailure = 'UNOBSERVABLE:child ' + j + ': ' + String((e && e.message) || e).slice(0, 80); }
     }
-    const runInfo = { runs, nonRunChildren, runsCoverText: runs.map(r => r.text).join('') === text, hyperlinks: childFailure !== null ? childFailure : hyperlinks, noteRefs: childFailure !== null ? childFailure : noteRefs, ...(numbering ? { numbering${numberingFormat ? ': numbering.present === true ? { ...numbering, format: numFormat, abstractId: numAbstract } : numbering' : ''} } : {}) };
+    // GH #313 R2: this paragraph's own section index (value-based chain-walk, see sectionIndexOf
+    // above) -- one call, el.GetSection(), its result used immediately, never stored and compared
+    // against a separately-obtained section object.
+    let sectionIndex;
+    try { sectionIndex = typeof el.GetSection === 'function' ? sectionIndexOf(el.GetSection()) : 'UNOBSERVABLE:no-such-getter'; } catch (e) { sectionIndex = 'UNOBSERVABLE:' + String((e && e.message) || e).slice(0, 80); }
+    const runInfo = { runs, nonRunChildren, runsCoverText: runs.map(r => r.text).join('') === text, hyperlinks: childFailure !== null ? childFailure : hyperlinks, noteRefs: childFailure !== null ? childFailure : noteRefs, sectionIndex, ...(numbering ? { numbering${numberingFormat ? ': numbering.present === true ? { ...numbering, format: numFormat, abstractId: numAbstract } : numbering' : ''} } : {}) };
     // The lookup is its own failure domain (gbolv2/gbolv3 LIVE): doc.Search THROWS "this.Content[nPos].ConvertParaContentPosToRangePos is not a
     // function" while converting a hit INSIDE a paragraph whose hyperlink holds a bookmark (S3: bookmark inside the link text, S5: exactly on the
     // link range -- the stored file carries the link and the bookmark in both). It is a throw, not a non-unique hit. ONLY that paragraph is
@@ -428,25 +481,46 @@ ${numberingFormat ? `    // W-07 (M7 backlog, numbering pattern/start): the OWN 
       if (!p) { searchFailures.push({ index: i, error: searchError }); out.push({ text, props: null, searchUnobservable: 'UNOBSERVABLE:search-throws: ' + searchError, ...runInfo }); continue; }
       propsVia = 'paragraph-range';
     } else {
-      if (hits.length !== 1) { out.push({ text, props: null, ...runInfo }); continue; }
-      p = hits[0].GetTextPr();
+      // GH #312 / #311: several hits (the text also occurs inside ANOTHER paragraph) or none (a tab in the text, which
+      // doc.Search never matches) are not an ambiguity for THIS paragraph: its properties are read from its own text
+      // range, without the paragraph mark (GetRange() alone also reads the mark; docs/evidence/gh311-312-paragraph-lookup-probe-20261027.json).
+      // GetRange(0, length) is NOT that range on every paragraph (measured LIVE, docs/evidence/link-paragraph-props-read-probe-20261030.json):
+      // a hyperlink takes two range positions GetText does not count, and a reopened two-run paragraph read one character short too --
+      // the paragraph's last characters were missed and a mixed paragraph read as bold. So the end is not assumed: the SMALLEST
+      // GetRange(0, length + d) whose text IS the paragraph's text, d bounded by the element count; none -> props unread.
+      if (hits.length !== 1) {
+        try {
+          const n = typeof el.GetElementsCount === 'function' ? el.GetElementsCount() : 0;
+          let pr1 = null;
+          for (let d = 0; d <= 2 * n + 2 && !pr1 && typeof el.GetRange === 'function'; d += 1) {
+            try { const c = el.GetRange(0, text.length + d); if (c && String(c.GetText(textOpts) || '') === text) pr1 = c; } catch (_) {}
+          }
+          p = pr1 && typeof pr1.GetTextPr === 'function' ? pr1.GetTextPr() : null;
+        } catch (_) { p = null; }
+        if (!p) { out.push({ text, props: null, ...runInfo }); continue; }
+        propsVia = 'paragraph-text-range';
+      } else p = hits[0].GetTextPr();
       if (!p) { out.push({ text, props: null, ...runInfo }); continue; }
     }
     const get = m => (typeof p[m] === 'function' ? p[m]() : undefined);
     const props = { bold: get('GetBold'), italic: get('GetItalic'), underline: get('GetUnderline'),
       strike: get('GetStrikeout'), fontFamily: get('GetFontFamily'), fontSize: get('GetFontSize'), language: get('GetLanguage'),
-      color: colorHex(get('GetColor')), highlight: get('GetHighlight'), vertAlign: get('GetVertAlign') };
+      color: colorHex(get('GetColor')), highlight: get('GetHighlight'), vertAlign: get('GetVertAlign'),
+      // GH #318: LIVE-MEASURED -- GetSpacing() == written-points*20 across {-2,0,1,3,6}pt, negative
+      // included. Twips, same convention as every other point<->twip boundary in this family.
+      characterSpacing: get('GetSpacing') };
     // Whole-paragraph formatting, normalized as the source's direct read does
     // (docx-session-formatting.cjs readSemanticFormatting): booleans, font size in points,
     // alignment name, spacing in points, line spacing, style name, language.
     const format = {};
     for (const k of ['bold', 'italic', 'underline', 'strike']) if (props[k] !== undefined) format[k] = !!props[k];
     if (props.fontFamily) format.fontFamily = String(props.fontFamily);
-    if (Number.isFinite(Number(props.fontSize))) { const n = Number(props.fontSize); format.fontSize = n > 16 ? n / 2 : n; }
+    if (Number.isFinite(Number(props.fontSize))) { const n = Number(props.fontSize); format.fontSize = n / 2; }
     if (props.language) format.language = String(props.language);
     if (props.color) format.color = props.color;
     if (props.highlight) format.highlight = String(props.highlight);
     if (props.vertAlign) format.vertAlign = String(props.vertAlign);
+    if (Number.isFinite(Number(props.characterSpacing))) { const n = Number(props.characterSpacing); format.characterSpacing = n / 20; }
     if (typeof el.GetStyle === 'function') { const st = el.GetStyle(); if (st && typeof st.GetName === 'function' && st.GetName()) format.style = String(st.GetName()); }
     const pp = typeof el.GetParaPr === 'function' ? el.GetParaPr() : null;
     if (pp) {
@@ -469,7 +543,27 @@ ${numberingFormat ? `    // W-07 (M7 backlog, numbering pattern/start): the OWN 
       // alternate OOXML convention this family also produces) -- test/live/gh231b-linespacing-read-roundtrip-probe.live.cjs
       // (not run by this agent) measures the RAW GetSpacingLineValue()/GetSpacingLineRule() returns across
       // a value grid to settle this before the fix lands LIVE.
-      if (typeof pp.GetSpacingLineValue === 'function') { const n = Number(pp.GetSpacingLineValue()); if (Number.isFinite(n)) format.lineSpacing = n / 240; }
+      // GH #315: LIVE-MEASURED. GetSpacingLineRule() EXISTS and returns exactly 'exact'/'atLeast' as
+      // written, across all 10 tested (value, rule) pairs; GetLineRule and GetSpacingLine are
+      // missing-method (the other two gh231b's own probe tried). GetSpacingLineValue() ==
+      // written-points*20 for every one of the 10.
+      const ruleGetter = typeof pp.GetSpacingLineRule === 'function' ? pp.GetSpacingLineRule() : undefined;
+      if (typeof pp.GetSpacingLineValue === 'function') {
+        const n = Number(pp.GetSpacingLineValue());
+        if (Number.isFinite(n)) {
+          if (ruleGetter === 'exact' || ruleGetter === 'atLeast') { format.lineSpacingRule = ruleGetter; format.lineHeight = n / 20; }
+          else {
+            format.lineSpacing = n / 240;
+            // GH #315: lineSpacingRule itself is an observable SENTINEL whenever this read runs
+            // at all (mirrors shading's 'auto' sentinel, docx-driver.cjs's own established
+            // pattern) -- compare()'s pairing-aware lineHeight branch needs it present even when
+            // the rule-getter never found anything but 'auto'/undefined, so a request for
+            // exact/atLeast on a never-touched paragraph is a provable MISMATCH (-> APPLY), not
+            // an unobservable fail-closed.
+            format.lineSpacingRule = 'auto';
+          }
+        }
+      }
       // W-09 (indentation + shading): same points-externally/twips-internally convention as
       // spaceBefore/spaceAfter above (measured: SetIndLeft(720) round-trips as 720 in the saved
       // <w:ind>, i.e. the Builder's own unit is already twips). GetIndFirstLine() reports the
@@ -519,7 +613,17 @@ ${numberingFormat ? `    // W-07 (M7 backlog, numbering pattern/start): the OWN 
             if (!side || typeof side !== 'object') return null;
             const c = side.color && typeof side.color === 'object' ? side.color : null;
             const color = c && Number.isInteger(c.r) && Number.isInteger(c.g) && Number.isInteger(c.b) ? hx2(c.r) + hx2(c.g) + hx2(c.b) : (c && c.auto === true ? 'auto' : null);
-            return { style: typeof side.value === 'string' ? side.value : null, size: Number.isFinite(Number(side.sz)) ? Number(side.sz) / 8 : null, color };
+            // GH #314 (LIVE-measured): space round-trips through ToJSON as
+            // a PLAIN POINTS value (no /8 factor like sz -- confirmed: the SAME number the DS
+            // itself stored in the w:space attribute, not a further-scaled one). The value may
+            // already be the DS's own lossy rounding of whatever was written (mm-then-point); this
+            // read does not re-derive or correct it, only passes through what ToJSON reports.
+            return {
+              style: typeof side.value === 'string' ? side.value : null,
+              size: Number.isFinite(Number(side.sz)) ? Number(side.sz) / 8 : null,
+              color,
+              space: Number.isFinite(Number(side.space)) ? Number(side.space) : null,
+            };
           };
           format.borderTop = borderSideFormat(pBdr.top);
           format.borderBottom = borderSideFormat(pBdr.bottom);
@@ -627,9 +731,30 @@ ${includeComments ? `  // GH #269b (opt-in: only a read_comments request pays fo
     const tget = k => (tp && typeof tp[k] === 'function' ? tp[k]() : undefined);
     for (const [key, g] of [['bold', 'GetBold'], ['italic', 'GetItalic'], ['underline', 'GetUnderline'], ['strike', 'GetStrikeout']]) { const v = tget(g); if (typeof v === 'boolean') format[key] = v; }
     const ff = cellFirstParagraphFont(p); if (ff) format.fontFamily = ff;
-    const fs = tget('GetFontSize'); if (fs !== undefined && fs !== null && Number.isFinite(Number(fs))) { const v = Number(fs); format.fontSize = v > 16 ? v / 2 : v; }
+    const fs = tget('GetFontSize'); if (fs !== undefined && fs !== null && Number.isFinite(Number(fs))) { const v = Number(fs); format.fontSize = v / 2; }
     const st = p.GetStyle(); if (st && st.GetName()) format.style = String(st.GetName());
     const pp = p.GetParaPr(); const jc = pp ? pp.GetJc() : undefined; if (jc !== undefined && jc !== null) format.alignment = String(jc);
+    // GH #317: tabs -- the SAME ParaPr.ToJSON().tabs read + /20 (twips -> points) conversion the
+    // body-paragraph reader below already uses (W09-1b/1c MEASURED); this function is shared by
+    // the header/footer (Wave 5) and table-cell paragraph reads, so both gain the field additively.
+    // GH #317 LIVE FAIL (docx-gh317-header-footer-tabs-product round 1): a header-paragraph
+    // format.tabs OBJECT ARRAY wipes the WHOLE surrounding callCommand result (sections came back
+    // null on this branch, vs a readable result on main for the SAME doc) -- the SAME transport-
+    // escape class gnpq2 already measured for a top-level table's nested tables (nestedTablesJson).
+    // Shipped as a JSON STRING instead; inflateTabsJson (readLive -> richOutcome) turns it back
+    // into format.tabs on the Node side, for BOTH consumers of this shared function.
+    if (pp && typeof pp.ToJSON === 'function') {
+      try {
+        const raw = pp.ToJSON();
+        const ptj = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (ptj && typeof ptj === 'object') {
+          const tabs = Array.isArray(ptj.tabs)
+            ? ptj.tabs.map(t => ({ pos: Number.isFinite(Number(t && t.pos)) ? Number(t.pos) / 20 : null, align: t && typeof t.val === 'string' ? t.val : null }))
+            : [];
+          format.tabsJson = JSON.stringify(tabs);
+        }
+      } catch (_) { /* format.tabsJson absent -- no ToJSON or an unparsable result, never a guessed value */ }
+    }
     return format;
   }
   // GH #289 (LIVE probes 2-3, docs/evidence/gh289-*-hidden-content-20261021.json): a PAGE field reads as a run with EMPTY
@@ -822,6 +947,10 @@ ${sl ? '  if (__next !== null) return { paragraphs: out, document: { tables: doc
   } catch (_) { docInfo.tableStyles = null; }
   // GH #268b: the images -- doc.GetAllImages() + the page-side projection of ApiDrawing.ToJSON() (docx-images-read.cjs); the image BYTES ToJSON carries never leave the editor.
   ${IMAGES_READ_CALL}
+  // GH #309: the DrawingML shapes -- doc.GetAllShapes() availability + the paragraph-level GetAllDrawingObjects() walk (docx-shapes-read.cjs); a shape paragraph has no text, so the per-paragraph read never sees it.
+  ${SHAPES_READ_CALL}
+  // GH #323: the native charts -- the paragraph-level GetAllDrawingObjects() walk (class 'chart') + the chart's own ToJSON series projection (docx-charts-read.cjs).
+  ${CHARTS_READ_CALL}
   // Wave 5 (header/footer probes 1-2, 2026-09-25): the HTML projection shows NO header/footer text,
   // so every section is read through the public GetSections / GetHeader(v, false) /
   // GetFooter(v, false) -- false: a read never creates a part. Per section, per kind, per variant:
@@ -851,7 +980,11 @@ ${sl ? '  if (__next !== null) return { paragraphs: out, document: { tables: doc
           continue;
         }
         if (!e || e.GetClassType() !== 'paragraph') { simple = false; other = true; continue; }
-        for (let j = 0; j < e.GetElementsCount(); j += 1) { const ch = e.GetElement(j); if (!ch || ch.GetClassType() !== 'run') { simple = false; runsOnly = false; } }
+        // GH #317: tracked per-paragraph (not just the part-level simple/runsOnly above) so the text
+        // read below knows whether EVERY child of THIS paragraph is a run before trusting a join of
+        // the run texts over the paragraph's own GetText().
+        let allRuns = true;
+        for (let j = 0; j < e.GetElementsCount(); j += 1) { const ch = e.GetElement(j); if (!ch || ch.GetClassType() !== 'run') { simple = false; runsOnly = false; allRuns = false; } }
         // M5 gate 6 (owner decision 1 after 28947): the EFFECTIVE properties of every run (public
         // run.GetRange().GetTextPr(), the read header/footer probe 2 used) -- the replacement guard
         // compares them with what the full replacement yields. A throwing read -> runs null (unread).
@@ -862,10 +995,32 @@ ${sl ? '  if (__next !== null) return { paragraphs: out, document: { tables: doc
             if (!ch || ch.GetClassType() !== 'run') continue;
             const tp = ch.GetRange().GetTextPr();
             const g = k => (tp && typeof tp[k] === 'function' ? tp[k]() : undefined);
-            runs.push({ text: String(ch.GetText(textOpts) || ''), bold: g('GetBold'), italic: g('GetItalic'), underline: g('GetUnderline'), strike: g('GetStrikeout'), fontFamily: g('GetFontFamily'), fontSize: g('GetFontSize') });
+            const rr = { text: String(ch.GetText(textOpts) || ''), bold: g('GetBold'), italic: g('GetItalic'), underline: g('GetUnderline'), strike: g('GetStrikeout'), fontFamily: g('GetFontFamily'), fontSize: g('GetFontSize') };
+            // GH #316: the SAME shared colorHex normalizer the body-run reader already uses (line
+            // ~330 above) -- header/footer runs carried no color field at all until now.
+            const col = colorHex(g('GetColor')); if (col) rr.color = col;
+            // GH #317 step 4: a run-level drawing flag -- a run that carries a drawing (no text of
+            // its own) is otherwise indistinguishable from an empty run for any OTHER reason (a
+            // prior probe mistook an empty-text run for a drawing). First shipped as the SAME
+            // inline-type walk already used at PARAGRAPH level (inlineTypesOf below), applied to
+            // EACH RUN -- LIVE FAIL: an object/array value THIS DEEP (paras[i].runs[j].inline) wipes
+            // the WHOLE surrounding callCommand result (header/footer's sections came back null),
+            // the SAME transport-escape class already measured for nestedTablesJson and
+            // format.tabsJson. PRIMITIVE this time -- a plain boolean needs no Node-side inflate.
+            rr.hasDrawing = inlineTypesOf(ch).some(t => ['blipFill', 'image', 'paraDrawing'].includes(t));
+            runs.push(rr);
           }
         } catch (_) { runs = null; }
-        paras.push({ text: String(e.GetText(textOpts) || ''), format: paragraphFormat(e), runs, inline: inlineTypesOf(e) });
+        // GH #317 (HYPOTHESIS, not yet LIVE-confirmed by this candidate -- the real-tab-character
+        // LIVE probe measured that a run's own GetText() carries a literal tab while the
+        // PARAGRAPH's own GetText() drops it): when every child of this paragraph is a run and
+        // the run read above did not throw, build the paragraph's text by JOINING the run texts (each
+        // already read through the SAME textOpts) instead of trusting the paragraph's own GetText() --
+        // a field/drawing run's own GetText() reads '' (unchanged from before), so a paragraph with a
+        // PAGE field or an image joins to the SAME text it always did. Any paragraph this join cannot
+        // safely cover (a non-run child, or a thrown run read) keeps the untouched GetText() fallback.
+        const joinedText = allRuns && Array.isArray(runs) ? runs.map(r => r.text).join('') : null;
+        paras.push({ text: joinedText !== null ? joinedText : String(e.GetText(textOpts) || ''), format: paragraphFormat(e), runs, inline: inlineTypesOf(e) });
       }
       return { paragraphs: m, simple, paras, tables, withTables: tables.length > 0 && runsOnly && !other };
     };
@@ -912,6 +1067,16 @@ ${sl ? '  if (__next !== null) return { paragraphs: out, document: { tables: doc
         return v.slice();
       } catch (e) { return 'UNOBSERVABLE:' + String(e && e.message || e).slice(0, 80); }
     };
+    // GH #313: a section's own break TYPE (nextPage/continuous/...) -- read the SAME way as the
+    // other page-setup fields, one call, no cross-call identity needed (sec comes straight from
+    // the SAME doc.GetSections() array this whole pass already holds).
+    const readStr = (obj, name) => {
+      try {
+        if (!obj || typeof obj[name] !== 'function') return 'UNOBSERVABLE:no-such-getter';
+        const v = obj[name]();
+        return typeof v === 'string' && v ? v : 'UNOBSERVABLE:non-string-read';
+      } catch (e) { return 'UNOBSERVABLE:' + String(e && e.message || e).slice(0, 80); }
+    };
     const pageSetupOf = sec => ({
       pageWidth: read1(sec, 'GetPageWidth'),
       pageHeight: read1(sec, 'GetPageHeight'),
@@ -922,8 +1087,21 @@ ${sl ? '  if (__next !== null) return { paragraphs: out, document: { tables: doc
       columnsCount: read1(sec, 'GetColumnsCount'),
       columnsSpaces: readArr(sec, 'GetColumnsSpaces'),
       startPageNumber: read1(sec, 'GetStartPageNumber'),
+      type: readStr(sec, 'GetType'),
     });
-    docInfo.sections = (doc.GetSections() || []).map((sec, index) => {
+    const sectionsArr = doc.GetSections() || [];
+    // GH #313 R1 review (LIVE-measured, zero): a per-paragraph
+    // closingBlockIndex walk based on comparing paragraph.GetSection() results was tried here and
+    // REMOVED. The walk's OWN self-validating sanity check (comparing its derived section count to
+    // sectionsArr.length) worked exactly as designed: on the real DS, paragraph.GetSection() returns
+    // a NEW, never-equal wrapper even between IMMEDIATELY ADJACENT paragraphs in the SAME section --
+    // so the check degraded to UNOBSERVABLE on every single read, including a one-section document.
+    // No consumer sees that as a defect report; it always costs the full-body walk for nothing.
+    // section-break-insert.cjs's classify/verify is therefore rebuilt on section COUNT plus the
+    // type field only, informed by a follow-up surface/identity probe
+    // (test/live/docx-gh313-section-identity-probe.live.cjs) before the walk (or any replacement)
+    // is reinstated.
+    docInfo.sections = sectionsArr.map((sec, index) => {
       const one = { index, header: {}, footer: {}, ${variantFields}, ...pageSetupOf(sec) };
       for (const v of ['default', 'even', 'title']) { one.header[v] = partOf(sec.GetHeader(v, false)); one.footer[v] = partOf(sec.GetFooter(v, false)); }
       return one;
@@ -988,7 +1166,7 @@ ${sl ? '  if (__next !== null) return { paragraphs: out, document: { tables: doc
       } catch (_) { tj = null; tjReadFailed = true; }
       if (tjReadFailed) {
         const u = 'UNOBSERVABLE:no-readable-ToJSON';
-        return { name, identity: null, text: { bold: u, size: u, color: u, italic: u, underline: u, strike: u, fontFamily: u }, paragraph: { align: u, indentLeft: u, spacingAfter: u, spacingBefore: u, indentRight: u, indentFirstLine: u, keepNext: u, keepLines: u, pageBreakBefore: u } };
+        return { name, identity: null, text: { bold: u, size: u, color: u, italic: u, underline: u, strike: u, fontFamily: u, language: u }, paragraph: { align: u, indentLeft: u, spacingAfter: u, spacingBefore: u, indentRight: u, indentFirstLine: u, keepNext: u, keepLines: u, pageBreakBefore: u } };
       }
       const identity = { name: typeof tj.name === 'string' ? tj.name : null,
         basedOn: tj.basedOn === undefined ? null : tj.basedOn,
@@ -1016,7 +1194,12 @@ ${sl ? '  if (__next !== null) return { paragraphs: out, document: { tables: doc
       const twipsPt = (o, k, why) => (!o ? 'inherited' : (!(k in o) ? 'inherited' : (typeof o[k] === 'number' && Number.isFinite(o[k]) ? o[k] / 20 : 'UNOBSERVABLE:' + why)));
       const fonts = rPr && rPr.rFonts && typeof rPr.rFonts === 'object' ? rPr.rFonts : null;
       const fontFamily = !rPr ? 'inherited' : (!fonts || !('ascii' in fonts) ? 'inherited' : (typeof fonts.ascii === 'string' ? fonts.ascii : 'UNOBSERVABLE:non-string-font'));
-      const more = { text: { italic: flag(rPr, 'i'), underline: flag(rPr, 'u'), strike: flag(rPr, 'strike'), fontFamily },
+      // GH #324 (LIVE): a style's ToJSON carries language as rPr.lang.val (an OBJECT, unlike bold/
+      // size/color's flat keys) -- 'not a real BCP-47 tag' is NOT this read's problem: the setter
+      // itself silently drops an unrecognized string (measured: no rPr.lang key at all), so
+      // 'inherited' and 'never written' are indistinguishable here, exactly as intended.
+      const language = !rPr ? 'inherited' : (!('lang' in rPr) ? 'inherited' : (rPr.lang && typeof rPr.lang === 'object' && typeof rPr.lang.val === 'string' ? rPr.lang.val : 'UNOBSERVABLE:non-string-lang-val'));
+      const more = { text: { italic: flag(rPr, 'i'), underline: flag(rPr, 'u'), strike: flag(rPr, 'strike'), fontFamily, language },
         paragraph: { spacingBefore: twipsPt(spacing, 'before', 'non-numeric-spacing-before'), indentRight: twipsPt(ind, 'right', 'non-numeric-ind-right'),
           indentFirstLine: twipsPt(ind, 'firstLine', 'non-numeric-ind-first-line'), keepNext: flag(pPr, 'keepNext'), keepLines: flag(pPr, 'keepLines'), pageBreakBefore: flag(pPr, 'pageBreakBefore') } };
       return {
@@ -1080,10 +1263,53 @@ function inflateNestedTables(document) {
   return document;
 }
 
+/**
+ * inflateTabsJson(document) -> the same document with every paragraph's `format.tabsJson` string (paragraphFormat's GH #317 transport
+ * workaround -- the SAME class as nestedTablesJson above) turned back into `format.tabs`: header/footer paragraphs
+ * (document.sections[].header/footer[variant].paras[]) AND table-cell paragraphs (document.tables[].rows[][].format and .paraFormats[].format,
+ * INCLUDING nested tables -- walked after inflateNestedTables has already turned THEIR OWN JSON string back into objects, so the two
+ * inflaters must run in that order, as richOutcome below does). An unparseable string is NAMED ('UNOBSERVABLE:tabs-json: <message>'), never
+ * dropped. A format without the key is untouched.
+ */
+function inflateFormatTabsJson(format) {
+  if (!format || typeof format !== 'object' || typeof format.tabsJson !== 'string') return;
+  try { format.tabs = JSON.parse(format.tabsJson); } catch (e) { format.tabs = `UNOBSERVABLE:tabs-json: ${String((e && e.message) || e).slice(0, 80)}`; }
+  delete format.tabsJson;
+}
+function inflateCellTabsJson(cell) {
+  if (!cell || typeof cell !== 'object') return;
+  inflateFormatTabsJson(cell.format);
+  for (const pf of (Array.isArray(cell.paraFormats) ? cell.paraFormats : [])) inflateFormatTabsJson(pf && pf.format);
+  for (const nt of (Array.isArray(cell.nestedTables) ? cell.nestedTables : [])) {
+    for (const row of (nt && Array.isArray(nt.rows) ? nt.rows : [])) {
+      for (const c of (Array.isArray(row) ? row : [])) inflateCellTabsJson(c);
+    }
+  }
+}
+function inflateTabsJson(document) {
+  if (!document || typeof document !== 'object') return document;
+  for (const t of (Array.isArray(document.tables) ? document.tables : [])) {
+    for (const row of (t && Array.isArray(t.rows) ? t.rows : [])) {
+      for (const c of (Array.isArray(row) ? row : [])) inflateCellTabsJson(c);
+    }
+  }
+  for (const sec of (Array.isArray(document.sections) ? document.sections : [])) {
+    for (const kind of ['header', 'footer']) {
+      const part = sec && sec[kind];
+      if (!part || typeof part !== 'object') continue;
+      for (const variant of Object.keys(part)) {
+        const p = part[variant];
+        if (p && Array.isArray(p.paras)) for (const para of p.paras) inflateFormatTabsJson(para && para.format);
+      }
+    }
+  }
+  return document;
+}
+
 function richOutcome(props) {
   const r = props && props.ok ? props.result : null;
   const paragraphs = r && Array.isArray(r.paragraphs) ? r.paragraphs : null;
-  const document = r && r.document && typeof r.document === 'object' ? inflateNestedTables(r.document) : null;
+  const document = r && r.document && typeof r.document === 'object' ? inflateTabsJson(inflateNestedTables(r.document)) : null;
   const clip = x => String(x).slice(0, 160);
   let richUnobservable;
   if (!props || !props.ok) richUnobservable = `UNOBSERVABLE:property-query-call: ${clip((props && (props.error || props.outcome)) || 'no result')}`;
@@ -1216,7 +1442,7 @@ try {
     } catch (_) { tj = null; tjReadFailed = true; }
     if (tjReadFailed) {
       const u = 'UNOBSERVABLE:no-readable-ToJSON';
-      return { name, identity: null, text: { bold: u, size: u, color: u, italic: u, underline: u, strike: u, fontFamily: u }, paragraph: { align: u, indentLeft: u, spacingAfter: u, spacingBefore: u, indentRight: u, indentFirstLine: u, keepNext: u, keepLines: u, pageBreakBefore: u } };
+      return { name, identity: null, text: { bold: u, size: u, color: u, italic: u, underline: u, strike: u, fontFamily: u, language: u }, paragraph: { align: u, indentLeft: u, spacingAfter: u, spacingBefore: u, indentRight: u, indentFirstLine: u, keepNext: u, keepLines: u, pageBreakBefore: u } };
     }
     const identity = { name: typeof tj.name === 'string' ? tj.name : null,
       basedOn: tj.basedOn === undefined ? null : tj.basedOn,
@@ -1242,7 +1468,9 @@ try {
     const twipsPt = (o, k, why) => (!o ? 'inherited' : (!(k in o) ? 'inherited' : (typeof o[k] === 'number' && Number.isFinite(o[k]) ? o[k] / 20 : 'UNOBSERVABLE:' + why)));
     const fonts = rPr && rPr.rFonts && typeof rPr.rFonts === 'object' ? rPr.rFonts : null;
     const fontFamily = !rPr ? 'inherited' : (!fonts || !('ascii' in fonts) ? 'inherited' : (typeof fonts.ascii === 'string' ? fonts.ascii : 'UNOBSERVABLE:non-string-font'));
-    const more = { text: { italic: flag(rPr, 'i'), underline: flag(rPr, 'u'), strike: flag(rPr, 'strike'), fontFamily },
+    // GH #324: see PROPERTY_QUERY's styleOf -- the SAME rPr.lang.val read
+    const language = !rPr ? 'inherited' : (!('lang' in rPr) ? 'inherited' : (rPr.lang && typeof rPr.lang === 'object' && typeof rPr.lang.val === 'string' ? rPr.lang.val : 'UNOBSERVABLE:non-string-lang-val'));
+    const more = { text: { italic: flag(rPr, 'i'), underline: flag(rPr, 'u'), strike: flag(rPr, 'strike'), fontFamily, language },
       paragraph: { spacingBefore: twipsPt(spacing, 'before', 'non-numeric-spacing-before'), indentRight: twipsPt(ind, 'right', 'non-numeric-ind-right'),
         indentFirstLine: twipsPt(ind, 'firstLine', 'non-numeric-ind-first-line'), keepNext: flag(pPr, 'keepNext'), keepLines: flag(pPr, 'keepLines'), pageBreakBefore: flag(pPr, 'pageBreakBefore') } };
     return { name, identity, text: { bold, size, color, ...more.text }, paragraph: { align, indentLeft, spacingAfter, ...more.paragraph } };
@@ -1525,18 +1753,33 @@ function createEuroOfficeDocxDriver({ url, user, pass, loadPlaywright, timeoutMs
       // for it, before anything is sent (the adapter already refused it before the write)
       const refused = internalWriteRefusal(command, state.runtimeId);
       if (refused) return refused;
-      state.mutated = true; // any write attempt: from here a close needs an observed, acked save
       if (!command || command.kind !== 'callCommand' || typeof command.body !== 'string') {
+        state.mutated = true; // any write attempt: from here a close needs an observed, acked save
         return { ok: false, dispatched: false, detail: 'unsupported command kind' };
       }
-      if (command.meta && command.meta.bridgeNumberingRemove === true) return b18DispatchResult(await runInEditor(b18BridgeWritePrelude() + command.body));
+      if (command.meta && command.meta.bridgeNumberingRemove === true) { state.mutated = true; return b18DispatchResult(await runInEditor(b18BridgeWritePrelude() + command.body)); }
       // GH #292 S4: the same receipt rule as B18 -- ok ONLY when the body returned { ok: true }
-      if (command.meta && command.meta.bridgeStyleNextLink === true) return b18DispatchResult(await runInEditor(s4BridgeWritePrelude() + command.body));
+      if (command.meta && command.meta.bridgeStyleNextLink === true) { state.mutated = true; return b18DispatchResult(await runInEditor(s4BridgeWritePrelude() + command.body)); }
       // GH #293 L7: the same receipt rule -- ok ONLY when the body returned { ok: true } (the detach receipt AND the level write)
-      if (command.meta && command.meta.bridgeListDetach === true) return b18DispatchResult(await runInEditor(l7BridgeWritePrelude() + command.body));
+      if (command.meta && command.meta.bridgeListDetach === true) { state.mutated = true; return b18DispatchResult(await runInEditor(l7BridgeWritePrelude() + command.body)); }
+      // GH #296: a public-API command that RETURNS a receipt (image delete / replace) -- ok ONLY when the body returned { ok: true }
+      if (command.meta && command.meta.publicReceipt === true) { state.mutated = true; return receiptDispatchResult(await runInEditor(command.body)); }
       const prelude = command.meta && command.meta.bridgeSectionVariantRead === true ? b21BridgeReadPrelude() : '';
       const r = await runInEditor(prelude + command.body);
-      return { ok: r.ok === true, dispatched: true, outcome: r.outcome, error: r.error || null };
+      // GH #359 (1) 1/2: families/text.cjs's rewrite_paragraph commandBody now names every guard that
+      // fires BEFORE its first mutating engine call (REWRITE_NO_WRITE_REASONS) -- a dispatch that
+      // never wrote does not need a save-ack at close. Every other command on this generic path (a
+      // different family/action, or a rewrite that got past the named no-write guards -- including
+      // the post-AddText rollback branches, which already mutated the live paragraph before failing)
+      // keeps the unconditional mutated=true this driver always set for every dispatch attempt.
+      const isRewrite = command.meta && command.meta.family === 'text' && command.meta.action === 'rewrite';
+      const rewroteNothing = isRewrite && r.ok === true && REWRITE_NO_WRITE_REASONS.includes(r.result);
+      if (!rewroteNothing) state.mutated = true;
+      // GH #359 (1) 1/2 review feedback (point 1): the named reason must reach dispatchEvidence, or a
+      // LIVE run cannot tell which guard fired. Scoped to the rewrite branch -- other families' own
+      // `r.result` values are not a public reason vocabulary and are not exposed here.
+      const reason = isRewrite && typeof r.result === 'string' ? r.result : null;
+      return { ok: r.ok === true, dispatched: true, outcome: r.outcome, error: r.error || null, reason };
     },
 
     async readPackage() {
@@ -1549,6 +1792,6 @@ function createEuroOfficeDocxDriver({ url, user, pass, loadPlaywright, timeoutMs
   };
 }
 
-module.exports = { createEuroOfficeDocxDriver, PROPERTY_QUERY, propertyQuery, slicedPropertyRead, paragraphTagsOf, PROPERTY_SLICE_BUDGET_MS, PROPERTY_SLICE_MIN_PARAGRAPH_TAGS, richOutcome, inflateNestedTables, buildTargetedStyleQuery, DOCX_SAVE_BOUNDS, internalGateOf, internalWriteRefusal,
-  B18_BRIDGE_WRITE_RUNTIMES, B21_BRIDGE_READ_RUNTIMES, S4_BRIDGE_WRITE_RUNTIMES, L7_BRIDGE_RUNTIMES, b18BridgeWritePrelude, b18DispatchResult, b21BridgeReadPrelude, s4BridgeWritePrelude,
+module.exports = { createEuroOfficeDocxDriver, PROPERTY_QUERY, propertyQuery, slicedPropertyRead, paragraphTagsOf, PROPERTY_SLICE_BUDGET_MS, PROPERTY_SLICE_MIN_PARAGRAPH_TAGS, richOutcome, inflateNestedTables, inflateTabsJson, buildTargetedStyleQuery, DOCX_SAVE_BOUNDS, internalGateOf, internalWriteRefusal,
+  B18_BRIDGE_WRITE_RUNTIMES, B21_BRIDGE_READ_RUNTIMES, S4_BRIDGE_WRITE_RUNTIMES, L7_BRIDGE_RUNTIMES, b18BridgeWritePrelude, b18DispatchResult, b21BridgeReadPrelude, s4BridgeWritePrelude, receiptDispatchResult,
   l7BridgeWritePrelude, buildListMembersQuery };

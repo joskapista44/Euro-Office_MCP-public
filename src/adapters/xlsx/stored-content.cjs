@@ -57,7 +57,8 @@ function cellDiffs(ref, expected, actual, authority) {
 /** The product read results (an array of read_range-shaped { ok, result: { cells } } entries) -> { address: cell }. */
 function productCells(results) {
   const out = {};
-  for (const r of results || []) for (const c of ((r && r.result && r.result.cells) || [])) out[c.address] = c;
+  // a non-cell read (e.g. read_protection: cells = { nonEmpty, unlocked, hidden }) carries no cell list
+  for (const r of results || []) { const cs = r && r.result && r.result.cells; if (Array.isArray(cs)) for (const c of cs) out[c.address] = c; }
   return out;
 }
 

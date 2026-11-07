@@ -46,6 +46,9 @@ function fakeEditor(initial) {
     };
   }
   const doc = {
+    // GH #311/#312: the command finds its paragraph by iterating the body paragraphs (paragraph-lookup.cjs)
+    GetElementsCount: () => 1,
+    GetElement: () => paragraph,
     Search(needle) {
       const out = [];
       for (let i = state.text.indexOf(needle); i !== -1; i = state.text.indexOf(needle, i + needle.length)) out.push(mkRange(i, i + needle.length));

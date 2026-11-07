@@ -74,9 +74,24 @@ test('ALLOWLIST: the accepted XLSX intents; DOCX_WRITE_ALLOWLIST = [rewrite_para
     'freeze_panes', 'unfreeze_panes', 'set_validation', 'clear_validation', 'delete_conditional_format',
     'clear_filter', 'clear_print_area', 'create_sheet', 'rename_chart', 'set_chart_axis_title', 'clear_range', 'set_chart_style',
     'insert_columns', 'delete_columns', 'delete_sheet', 'move_sheet', 'set_chart', 'set_chart_legend', 'copy_range', 'copy_chart', 'copy_sheet', 'move_range', 'delete_chart', 'filter_range', 'set_defined_name', 'delete_defined_name', 'delete_cells', 'set_print_titles', 'clear_print_titles', 'set_page_layout', 'move_chart', 'insert_shape', 'insert_image', 'format_run',
-    'set_print_fit', 'set_header_footer', 'set_page_break', 'set_first_page_number', 'set_print_centering', 'set_print_scale', 'set_paper_size', 'set_header_footer_flag', 'refresh_pivot', 'create_pivot', 'write_array_formula', 'add_comment', 'set_shape_text', 'set_chart_point_data_label', 'set_shape_rotation', 'set_sheet_visibility']);
+    'set_print_fit', 'set_header_footer', 'set_page_break', 'set_first_page_number', 'set_print_centering', 'set_print_scale', 'set_paper_size', 'set_header_footer_flag', 'refresh_pivot', 'create_pivot', 'write_array_formula', 'add_comment', 'edit_comment', 'delete_comment', 'reply_to_comment', 'set_comment_resolved', 'set_shape_text', 'set_chart_point_data_label', 'set_shape_rotation', 'set_sheet_visibility',
+    // GH #300 L2 (owner decision 2026-10-27, "2: A ... 3: A"): + set_hyperlink / remove_hyperlink -- single-cell,
+    // external-only (hyperlinks-write.cjs), LIVE-ACCEPTED via release-gh300-l2-hyperlink-write-product.live.cjs.
+    'set_hyperlink', 'remove_hyperlink',
+    // GH #298 D (owner decision 2026-10-27, "3: A"): + create_table -- PUBLIC FormatAsTable (tables-write.cjs), LIVE-ACCEPTED via
+    // release-gh298-d-create-table-product.live.cjs.
+    'create_table',
+    // GH #336 / #337: the four table row / column intents (table-structure.cjs)
+    'insert_table_rows', 'delete_table_rows', 'insert_table_columns', 'delete_table_columns', 'set_table_style', 'set_table_flag', 'set_table_totals_row', 'rename_table', 'resize_table', 'set_header_footer_margin', 'set_page_order', 'protect_sheet', 'unprotect_sheet', 'set_cell_protection',
+    // GH #338-#342 remainder (Bridge /24, standing EURO-MCP GO): + protect_workbook / unprotect_workbook --
+    // workbook-scoped, no args; verified by read_protection's additive workbook field
+    'protect_workbook', 'unprotect_workbook',
+    // fa7244ac/3 (internal tracker; e65eda2d LANDED + LIVE PASS on the adapter path): + set_autofilter_range /
+    // remove_autofilter -- the same bare SetAutoFilter() toggle (fa7244ac/2 Q1/Q3 MEASURED), same sheet/range
+    // shape as clear_filter.
+    'set_autofilter_range', 'remove_autofilter']);
   assert.equal(Object.isFrozen(W.XLSX_WRITE_ALLOWLIST), true);
-  assert.deepEqual([...W.DOCX_WRITE_ALLOWLIST], ['rewrite_paragraph', 'insert_paragraph_before', 'insert_paragraph_after', 'delete_paragraph', 'move_paragraph_before', 'move_paragraph_after', 'apply_list', 'set_list_level', 'indent_list_item', 'outdent_list_item', 'remove_list', 'replace_table_cell', 'format_text', 'insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap']);
+  assert.deepEqual([...W.DOCX_WRITE_ALLOWLIST], ['rewrite_paragraph', 'insert_paragraph_before', 'insert_paragraph_after', 'delete_paragraph', 'move_paragraph_before', 'move_paragraph_after', 'apply_list', 'set_list_level', 'indent_list_item', 'outdent_list_item', 'remove_list', 'replace_table_cell', 'format_text', 'insert_table_row_before', 'insert_table_row_after', 'delete_table_row', 'insert_table_column_before', 'insert_table_column_after', 'delete_table_column', 'merge_table_cells', 'split_table_cell', 'format_table', 'set_page_setup', 'edit_header', 'edit_footer', 'define_style', 'modify_style', 'set_numbering', 'set_list_type', 'add_footnote', 'add_endnote', 'add_link', 'add_bookmark', 'resolve_comment', 'reply_comment', 'add_comment_on_match', 'set_image_size', 'set_image_wrap', 'insert_table', 'insert_section_break', 'insert_image', 'insert_paragraphs', 'insert_shape', 'insert_chart', 'delete_image', 'replace_image']);
   assert.deepEqual(Object.keys(W.STEP_SCHEMAS), [...W.XLSX_WRITE_ALLOWLIST]);
   assert.deepEqual(Object.keys(W.CONSTRAINTS), [...W.XLSX_WRITE_ALLOWLIST]);
   assert.throws(() => W.createWriteTool('docx'), /no WRITE handler for docx/);
@@ -142,14 +157,26 @@ test('TEMPORARY_BOUNDARY: the legacy set equals the M11.4a.0 census; no allowlis
   // docs/L18-DELETE-CELLS-SHIFT-PLAN.md cites instead.
   // GH #301 D4: write_array_formula is a NEW intent the census never enumerated -- same out-of-census release path,
   // acceptance evidence is the LIVE design probe + release harness (docs/evidence/gh301-d4-*).
+  // GH #354/#355: set_header_footer_margin / set_page_order are NEW intents the census never enumerated (Bridge /21,
+  // sheet.printSettings.write/v2) -- out-of-census release path, acceptance evidence is the release LIVE harness.
+  // GH #338-#342: protect_sheet / unprotect_sheet / set_cell_protection are NEW intents the census never enumerated (Bridge /22,
+  // sheet.protection.write/v1 + sheet.cellProtection.write/v1) -- the same out-of-census release path.
   // GH #138 U4: the 8 print.cjs intents DO carry a census row, but it classifies them
   // TEMPORARY_BOUNDARY/B10 -- STALE since M11.5b.4 migrated the family's write path off that boundary onto
   // the DS Bridge WRITE sheet.printSettings.write/v1 (/7+), the SAME migration set_page_layout (U3) already
   // rode. Excluded here for that reason, not because the row is missing.
   const PRINT_U4 = ['set_print_fit', 'set_header_footer', 'set_page_break', 'set_first_page_number', 'set_print_centering', 'set_print_scale', 'set_paper_size', 'set_header_footer_flag'];
   // GH #300 K2: add_comment is a NEW intent the census never enumerated either (same out-of-census release path; evidence:
-  // the K1 / K2 LIVE design probes + the release harness, docs/evidence/gh300-*).
-  for (const intent of W.XLSX_WRITE_ALLOWLIST.filter(i => !['format_range', 'set_chart_style', 'delete_chart', 'copy_chart', 'delete_cells', 'write_array_formula', 'add_comment', 'set_shape_text', 'set_chart_point_data_label', 'set_shape_rotation', 'set_sheet_visibility', ...PRINT_U4].includes(i))) {
+  // the K1 / K2 LIVE design probes + the release harness, docs/evidence/gh300-*). GH #348 / #349: edit_comment / delete_comment likewise
+  // (evidence: docs/evidence/gh348-probe-live-20261030.json + release-gh348-gh349-edit-delete-comment-product.live.cjs). GH #350 / #351:
+  // reply_to_comment / set_comment_resolved likewise (docs/evidence/gh350-gh351-probe-live-20261030.json + their release harness).
+  // GH #300 L2: set_hyperlink / remove_hyperlink are ALSO NEW intents the census never enumerated -- same
+  // out-of-census release path, acceptance evidence is release-gh300-l2-hyperlink-write-product.live.cjs.
+  // GH #338-#342 remainder: protect_workbook / unprotect_workbook are ALSO NEW intents the census never enumerated
+  // (Bridge /24 workbook.protection.write/v1) -- the same out-of-census release path.
+  // fa7244ac/3: set_autofilter_range / remove_autofilter are ALSO NEW intents the census never enumerated (the
+  // AutoFilter-object toggle, fa7244ac/2 Q1/Q3 MEASURED) -- the same out-of-census release path.
+  for (const intent of W.XLSX_WRITE_ALLOWLIST.filter(i => !['format_range', 'set_chart_style', 'delete_chart', 'copy_chart', 'delete_cells', 'write_array_formula', 'add_comment', 'edit_comment', 'delete_comment', 'reply_to_comment', 'set_comment_resolved', 'set_shape_text', 'set_chart_point_data_label', 'set_shape_rotation', 'set_sheet_visibility', 'set_hyperlink', 'remove_hyperlink', 'create_table', 'insert_table_rows', 'delete_table_rows', 'insert_table_columns', 'delete_table_columns', 'set_table_style', 'set_table_flag', 'set_table_totals_row', 'rename_table', 'resize_table', 'set_header_footer_margin', 'set_page_order', ...PRINT_U4, 'protect_sheet', 'unprotect_sheet', 'set_cell_protection', 'protect_workbook', 'unprotect_workbook', 'set_autofilter_range', 'remove_autofilter'].includes(i))) {
     assert.equal(Object.prototype.hasOwnProperty.call(W.TEMPORARY_BOUNDARY, intent), false, intent);
     const row = census.rows.find(r => r.FORMAT === 'XLSX' && r.INTENT === intent);
     assert.equal(row.PRODUCT_RELEASE_CLASS, 'ACCEPTED_WRITE', intent);
@@ -361,16 +388,16 @@ function mcp(tools) {
 test('M11.4b.1 surface: xlsx_execute_task listed and its tools/call reaches this handler; docx_execute_task (GH #228 proposed state) is listed too, with its OWN handler', async () => {
   const h = harness();
   const { tools } = buildServerTools({ config: CONFIG, configIdentity: 'fixture', writeTool: { execute: async () => { h.n.executor += 1; return { ok: true }; } } });
-  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(exposedTools(), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   // GH #228 (PROPOSED): the DOCX WRITE tool has BOTH release switches on (the capability list AND the tool row)
-  assert.deepEqual([...EXPOSED_CAPABILITY_TOOLS], ['xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual([...EXPOSED_CAPABILITY_TOOLS], ['xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   assert.equal(TOOL_ROWS.find(r => r.TOOL === 'docx_execute_task').EXPOSE_IN_PRODUCT_MCP, 'YES');
   assert.equal(TOOL_ROWS.find(r => r.TOOL === 'xlsx_execute_task').EXPOSE_IN_PRODUCT_MCP, 'YES');
-  assert.deepEqual(Object.keys(tools), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(Object.keys(tools), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   const s = mcp(tools);
   await s.send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   const list = await s.send('tools/list', {});
-  assert.deepEqual(list.result.tools.map(t => t.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(list.result.tools.map(t => t.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   const ok = await s.send('tools/call', { name: 'xlsx_execute_task', arguments: req([VALID.write_range]) });
   assert.equal(ok.error, undefined, JSON.stringify(ok));
   // W1d: freeze_panes is allowlisted now (was the refusal example here); GH #138 U2 released clear_print_titles too -- create_pivot

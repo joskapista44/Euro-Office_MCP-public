@@ -26,7 +26,8 @@ const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver
 const J = x => JSON.stringify(x);
 const FILE = '1303626';
 const req = steps => ({ fileId: FILE, task: { id: 't', steps } });
-const delAt = (at, count, value, extra = {}) => ({ intent: 'delete_rows', id: `s${at}`, sheet: 'S', at, count, anchor: { column: 'A', value }, ...extra });
+// owner decision B (2026-11-02): every delete_rows carries a witness (the first REMOVED row's value) beside the anchor
+const delAt = (at, count, value, extra = {}) => ({ intent: 'delete_rows', id: `s${at}`, sheet: 'S', at, count, anchor: { column: 'A', value }, witness: { column: 'A', value: `${value}-removed` }, ...extra });
 
 test('two delete_rows in one task, second step in post-first-step coordinates: plans, both operations', () => {
   const r = validateWriteRequest(req([delAt(10, 5, 'a'), delAt(12, 5, 'b')]));
@@ -64,7 +65,7 @@ test('delete_rows mixed with a NON-sole-step, non-structure intent still hits th
 });
 
 test('delete_rows mixed with delete_columns: still refused (different intent, not just different family)', () => {
-  const delCol = { intent: 'delete_columns', id: 'c', sheet: 'S', at: 'B', count: 1, anchor: { row: 1, value: 'z' } };
+  const delCol = { intent: 'delete_columns', id: 'c', sheet: 'S', at: 'B', count: 1, anchor: { row: 1, value: 'z' }, witness: { row: 1, value: 'y' } };
   const r = validateWriteRequest(req([delAt(10, 5, 'a'), delCol]));
   assert.equal(r.ok, false);
   assert.equal(r.code, 'REFUSED_COMPOSITION');
@@ -98,7 +99,7 @@ test('adapter.cjs planOperations directly: homogeneous delete_rows batch plans; 
 
 test('adapter.cjs planOperations: delete_rows batch still refuses when any step is a different structure intent', () => {
   const mixed = planOperations({ steps: [
-    { id: 's1', intent: 'delete_rows', sheet: 'S', at: 10, count: 5, anchor: { column: 'A', value: 'a' } },
+    { id: 's1', intent: 'delete_rows', sheet: 'S', at: 10, count: 5, anchor: { column: 'A', value: 'a' }, witness: { column: 'A', value: 'a-removed' } },
     { id: 's2', intent: 'insert_rows', sheet: 'S', at: 2, count: 1, anchor: { column: 'A', value: 'b' } },
   ] });
   assert.equal(mixed.ok, false);
@@ -109,8 +110,8 @@ test('plan-time literal-range overlap between two delete_rows steps is NOT refus
   // step 1 deletes rows 10-14; step 2's `at`=12 is a post-shift position (it names rows that, before
   // step 1 ran, sat at 17-21) -- literally 12-16 overlaps 10-14, but they are not the same rows.
   const r = planOperations({ steps: [
-    { id: 's1', intent: 'delete_rows', sheet: 'S', at: 10, count: 5, anchor: { column: 'A', value: 'a' } },
-    { id: 's2', intent: 'delete_rows', sheet: 'S', at: 12, count: 5, anchor: { column: 'A', value: 'b' } },
+    { id: 's1', intent: 'delete_rows', sheet: 'S', at: 10, count: 5, anchor: { column: 'A', value: 'a' }, witness: { column: 'A', value: 'a-removed' } },
+    { id: 's2', intent: 'delete_rows', sheet: 'S', at: 12, count: 5, anchor: { column: 'A', value: 'b' }, witness: { column: 'A', value: 'b-removed' } },
   ] });
   assert.equal(r.ok, true, J(r));
   assert.equal(r.operations.length, 2);
@@ -155,9 +156,11 @@ const statusOf = (result, id) => result.execution.appliedOperations.find(e => e.
 // r1 r4 r5 r6 r7 r8 r9 at rows 1..7. Step 2's `at` is POST-shift: it targets what were originally
 // r7/r8, now sitting at rows 5-6 (after step 1's -2 shift) -- the anchor that must be there BEFORE
 // step 2 runs is `anchor.now` = at + count = 7, which (after step 1) holds the original r9.
+// Owner decision B (2026-11-02): each step also names its witness, the first REMOVED row as it reads before that
+// step runs -- step 1: row 2 = r2; step 2: row 5 after step 1's shift = the original r7.
 const chainedSteps = (step2Anchor = 'r9') => [
-  { intent: 'delete_rows', at: 2, count: 2, anchor: { column: 'A', value: 'r4' } },
-  { intent: 'delete_rows', at: 5, count: 2, anchor: { column: 'A', value: step2Anchor } },
+  { intent: 'delete_rows', at: 2, count: 2, anchor: { column: 'A', value: 'r4' }, witness: { column: 'A', value: 'r2' } },
+  { intent: 'delete_rows', at: 5, count: 2, anchor: { column: 'A', value: step2Anchor }, witness: { column: 'A', value: 'r7' } },
 ];
 
 test('1. two delete_rows chained, the 2nd `at` in post-first-step coordinates: both APPLIED, final state = r1,r4,r5,r6,r9', async () => {
@@ -197,7 +200,7 @@ test('2. the 2nd step\'s anchor wrong for the state the 1st step produced: FAIL_
   assert.equal(s.A5.v, 'r7', 'step 2 never ran: the original r7 is still at its step-1-shifted position');
 });
 
-test('3. partial-task retry: the already-applied step is SATISFIED (0 writes), the not-yet-applied one is APPLY and runs', async () => {
+test('3. partial-task retry: the already-applied step is refused as unprovable (0 writes, the run stops); re-planned with only the remaining step, that one APPLIES', async () => {
   const store = createStore(execBook());
   // reproduce test 2's partial state first (step 1 applied, step 2 refused) ...
   await runExec(store, execTask(chainedSteps('r8')));
@@ -205,19 +208,31 @@ test('3. partial-task retry: the already-applied step is SATISFIED (0 writes), t
   assert.equal(S(store).A5.v, 'r7', 'still unshifted: step 2 has not run yet');
   // ... then retry the SAME task, this time with step 2's anchor corrected to match the state step 1
   // already produced (exactly what a caller does after reading the FAIL_CLOSED reason).
+  // Owner decision B (2026-11-02) changed this: step 1 now reads as already done (anchor r4 at `at`, witness r2 gone),
+  // which is no longer SATISFIED -- matching data cannot prove THIS delete produced it -- but FAIL_CLOSED, 0 writes, and
+  // the run stops there, so step 2 is not applied in this run.
+  const before = J(S(store));
   const t2 = execTask(chainedSteps('r9'));
   const { result, driver } = await runExec(store, t2);
-  assert.equal(result.ok, true, J(result.execution.appliedOperations));
-  assert.equal(statusOf(result, 's0'), OPERATION_STATUS.SATISFIED, 'step 1: already done, 0 re-write');
-  assert.equal(statusOf(result, 's1'), OPERATION_STATUS.APPLIED, 'step 2: now runs');
-  assert.equal(driver.calls.dispatch, 1, 'only the retried (2nd) step dispatches; the satisfied 1st does not');
+  assert.equal(result.ok, false, J(result.execution.appliedOperations));
+  assert.equal(statusOf(result, 's0'), OPERATION_STATUS.FAILED, 'step 1: reads as already done -- refused, not SATISFIED');
+  assert.equal(result.execution.appliedOperations.find(e => e.operationId === 's0').evidence.evidence.reason, 'xlsx-structure-delete-prior-execution-unprovable');
+  assert.equal(statusOf(result, 's1'), OPERATION_STATUS.SKIPPED_DUE_TO_PRIOR_FAILURE, 'step 2: not applied -- the run stopped at step 1');
+  assert.equal(driver.calls.dispatch, 0, 'the refusal is before any write');
+  assert.equal(J(S(store)), before, 'the retry changed nothing on the sheet');
+  // the caller re-plans from a fresh read with only the step still to do -- that one runs
+  const t3 = execTask(chainedSteps('r9')).steps.slice(1);
+  const { result: r3, driver: d3 } = await runExec(store, { id: 'l19c', steps: t3 });
+  assert.equal(r3.ok, true, J(r3.execution.appliedOperations));
+  assert.equal(statusOf(r3, 's1'), OPERATION_STATUS.APPLIED, 'step 2: now runs');
+  assert.equal(d3.calls.dispatch, 1);
   const s = S(store);
   assert.equal(s.A2.v, 'r4');
   assert.equal(s.A5.v, 'r9');
 });
 
 test('4. the two compositions zero named as still-refused: delete_rows + write_range, and insert_rows repeated', () => {
-  const dr = { intent: 'delete_rows', id: 'd', sheet: 'S', at: 2, count: 1, anchor: { column: 'A', value: 'r2' } };
+  const dr = { intent: 'delete_rows', id: 'd', sheet: 'S', at: 2, count: 1, anchor: { column: 'A', value: 'r2' }, witness: { column: 'A', value: 'd-removed' } };
   const wr = { intent: 'write_range', id: 'w', sheet: 'S', range: 'B1', values: [['x']] };
   const r1 = validateWriteRequest(req([dr, wr]));
   assert.equal(r1.ok, false);
@@ -250,44 +265,54 @@ const bigBook = () => [
 test('5. zero\'s exact example: a 2nd step given in TASK-START coordinates lands exactly on its own terminal -- refused, not silently SATISFIED', async () => {
   const store = createStore(bigBook());
   const t = execTask([
-    { intent: 'delete_rows', at: 10, count: 5, anchor: { column: 'A', value: 'R15' } },
+    { intent: 'delete_rows', at: 10, count: 5, anchor: { column: 'A', value: 'R15' }, witness: { column: 'A', value: 'R10' } },
     // task-START coordinates (the natural mistake): at=17/anchor=R22 is correct for the ORIGINAL
     // book, but after step 1's -5 shift, R22 now sits at row 17 -- exactly this step's own
     // `terminal` (17), so the unguarded classify would read it as already-done.
-    { intent: 'delete_rows', at: 17, count: 5, anchor: { column: 'A', value: 'R22' } },
+    // Its witness, given in the same task-START coordinates, is R17 (original row 17) -- after step 1 that sits at row 12.
+    { intent: 'delete_rows', at: 17, count: 5, anchor: { column: 'A', value: 'R22' }, witness: { column: 'A', value: 'R17' } },
   ]);
   const { result, driver } = await runExec(store, t);
   assert.equal(result.ok, false, J(result.execution.appliedOperations));
   assert.equal(statusOf(result, 's0'), OPERATION_STATUS.APPLIED);
   assert.equal(statusOf(result, 's1'), OPERATION_STATUS.FAILED);
-  assert.equal(result.execution.appliedOperations.find(e => e.operationId === 's1').evidence.evidence.reason, 'xlsx-structure-satisfied-after-applied-in-batch');
+  // Owner decision B (2026-11-02): a delete no longer has a SATISFIED path, so the batch invariant
+  // (`xlsx-structure-satisfied-after-applied-in-batch`) is no longer where this lands: the anchor sits at `at` but the
+  // witness R17 is still on the sheet (at row 12, not at `at`) -- the two witnesses disagree, refused before dispatch.
+  assert.equal(result.execution.appliedOperations.find(e => e.operationId === 's1').evidence.evidence.reason, 'xlsx-structure-delete-witnesses-disagree');
   assert.equal(driver.calls.dispatch, 1, 'the 2nd step is refused BEFORE dispatch, not just after a no-op');
   const s = S(store);
   assert.equal(s.A17.v, 'R22', 'rows 17-21 (current numbering) were never deleted -- no silent false success');
 });
 
-test('6. legit retry (1st and 2nd already done from an earlier run, 3rd is new) is NOT caught by the invariant: SATISFIED, SATISFIED, APPLIED', async () => {
+test('6. retry (1st and 2nd already done from an earlier run, 3rd is new): the 1st is refused as unprovable, the run stops -- FAILED, SKIPPED, SKIPPED, 0 writes', async () => {
   const store = createStore(execBook());
   // each step's own anchor value must SURVIVE the later steps (never itself be the thing a later
   // step deletes), or a retry could not re-verify it by that anchor at all -- step 0 deletes r2/r3
   // (survivor anchor r4), step 1 deletes the (post-shift) current rows 3-4 = r5/r6 (survivor r7),
   // step 2 deletes the (post-shift) current row 4 = r8 (survivor r9). None of r4/r7/r9 is ever removed.
+  // witnesses (owner decision B): step 0 removes row 2 = r2 first; step 1 removes the post-shift row 3 = r5 first.
   const threeSteps = [
-    { intent: 'delete_rows', at: 2, count: 2, anchor: { column: 'A', value: 'r4' } },
-    { intent: 'delete_rows', at: 3, count: 2, anchor: { column: 'A', value: 'r7' } },
+    { intent: 'delete_rows', at: 2, count: 2, anchor: { column: 'A', value: 'r4' }, witness: { column: 'A', value: 'r2' } },
+    { intent: 'delete_rows', at: 3, count: 2, anchor: { column: 'A', value: 'r7' }, witness: { column: 'A', value: 'r5' } },
   ];
   // run only the first two first, to reproduce "1st and 2nd already done" as an EARLIER run
   await runExec(store, execTask(threeSteps));
   assert.equal(S(store).A1.v, 'r1');
   assert.equal(S(store).A2.v, 'r4');
   assert.equal(S(store).A3.v, 'r7', 'r5/r6 deleted by step 1; r7 is the survivor at row 3');
-  // retry with all three -- 1 and 2 must come back SATISFIED (0 writes each), 3 is genuinely new
-  const t3 = execTask([...threeSteps, { intent: 'delete_rows', at: 4, count: 1, anchor: { column: 'A', value: 'r9' } }]);
+  // retry with all three (step 2 removes the post-shift row 4 = r8, its witness). Before owner decision B (2026-11-02)
+  // this came back SATISFIED, SATISFIED, APPLIED; now the already-done 1st step is refused as unprovable (matching data
+  // is no proof THIS delete ran), 0 writes, and the run stops -- the 2nd and 3rd are not applied.
+  const before = J(S(store));
+  const t3 = execTask([...threeSteps, { intent: 'delete_rows', at: 4, count: 1, anchor: { column: 'A', value: 'r9' }, witness: { column: 'A', value: 'r8' } }]);
   const { result, driver } = await runExec(store, t3);
-  assert.equal(result.ok, true, J(result.execution.appliedOperations));
-  assert.equal(statusOf(result, 's0'), OPERATION_STATUS.SATISFIED);
-  assert.equal(statusOf(result, 's1'), OPERATION_STATUS.SATISFIED);
-  assert.equal(statusOf(result, 's2'), OPERATION_STATUS.APPLIED);
-  assert.equal(driver.calls.dispatch, 1, 'only the 3rd (genuinely new) step dispatches');
-  assert.equal(S(store).A4.v, 'r9');
+  assert.equal(result.ok, false, J(result.execution.appliedOperations));
+  assert.equal(statusOf(result, 's0'), OPERATION_STATUS.FAILED);
+  assert.equal(result.execution.appliedOperations.find(e => e.operationId === 's0').evidence.evidence.reason, 'xlsx-structure-delete-prior-execution-unprovable');
+  assert.equal(statusOf(result, 's1'), OPERATION_STATUS.SKIPPED_DUE_TO_PRIOR_FAILURE);
+  assert.equal(statusOf(result, 's2'), OPERATION_STATUS.SKIPPED_DUE_TO_PRIOR_FAILURE);
+  assert.equal(driver.calls.dispatch, 0, 'nothing dispatches');
+  assert.equal(J(S(store)), before, 'the retry changed nothing on the sheet');
+  assert.equal(S(store).A4.v, 'r8', 'the 3rd step\'s row is still there');
 });

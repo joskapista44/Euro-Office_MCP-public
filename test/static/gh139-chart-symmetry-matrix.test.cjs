@@ -84,14 +84,17 @@ const styleOp = extra => {
 };
 const notProvenOf = op => charts.wholeTaskChecks(op, null)[0].notProven || [];
 
-test('the six WRITE-ONLY style targets (no public getter) each name their own written field in notProven', () => {
+test('the five WRITE-ONLY style targets (no public getter) each name their own written field in notProven', () => {
+  // GH #346 AUTO-REPAIR Egyseg 3 (design docs/GH346-DPT-AUTO-REPAIR-DESIGN-20261104.md): `dataPoint`
+  // moved OUT of this six -- it is now read-and-compare verifiable (the idx-correct Bridge write
+  // chart.series.dataPoint.style.write/v1, B29) and carries NO notProven, same as marker/gridlines/
+  // gapOverlap/seriesOrder below. See that test's own dataPoint case.
   const cases = [
     [{ target: 'plotArea', fill: '#FF0000' }, 'chart-style-plotarea-fill'],
     [{ target: 'title', outline: { width: 1, color: '#000000' } }, 'chart-style-title-outline'],
     [{ target: 'legend', fill: '#00FF00' }, 'chart-style-legend-fill'],
     [{ target: 'chart', fill: '#0000FF' }, 'chart-style-chart-fill'],
     [{ target: 'series', seriesIndex: 0, fill: '#AA00AA' }, 'chart-style-series-fill'],
-    [{ target: 'dataPoint', seriesIndex: 0, dataPointIndex: 1, fill: '#123456' }, 'chart-style-datapoint-fill'],
   ];
   for (const [extra, expect] of cases) {
     const notProven = notProvenOf(styleOp(extra));
@@ -104,12 +107,14 @@ test('markerSymbol/lineStyle still name themselves in notProven on the WRITE sid
   assert.deepEqual(notProvenOf(styleOp({ target: 'lineStyle', seriesIndex: 0, dash: 'dot' })), ['chart-style-linestyle-dash']);
 });
 
-test('the four bridge-VERIFIABLE style targets (marker, gridlines, gapOverlap, seriesOrder) carry NO notProven -- the matrix calls these SYMMETRIC, not WRITE_ONLY, and this is the code fact that backs it', () => {
+test('the five bridge-VERIFIABLE style targets (marker, gridlines, gapOverlap, seriesOrder, dataPoint) carry NO notProven -- the matrix calls these SYMMETRIC, not WRITE_ONLY, and this is the code fact that backs it', () => {
   const cases = [
     { target: 'marker', seriesIndex: 0, fill: '#FF0000' },
     { target: 'gridlines', axis: 'vertical', outline: { width: 1, color: '#000000' } },
     { target: 'gapOverlap', gapWidth: 150 },
     { target: 'seriesOrder', order: [1, 0] },
+    // GH #346 AUTO-REPAIR Egyseg 3: dataPoint's fifth row, same SYMMETRIC class.
+    { target: 'dataPoint', seriesIndex: 0, dataPointIndex: 1, fill: '#123456' },
   ];
   for (const extra of cases) assert.deepEqual(notProvenOf(styleOp(extra)), [], `target=${extra.target} should have no notProven`);
 });

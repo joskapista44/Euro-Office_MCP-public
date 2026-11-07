@@ -48,6 +48,12 @@ const BRIDGE_CAPABILITIES = Object.freeze({
   // the B05 READ, B09 and B13 cutovers read through these; a /3 runtime refuses them (PATCH_VERSION_MISMATCH).
   ALIGN_EXT_READ: Object.freeze({ id: 'range.alignmentExt.read/v1', version: 1, valueType: 'object' }),
   PRINT_SETTINGS_READ: Object.freeze({ id: 'sheet.printSettings.read/v1', version: 1, valueType: 'object' }),
+  // GH #354/#355 (/21 only): v1 + headerMargin / footerMargin (mm as stored, null = unset) + pageOrder (downThenOver | overThenDown | null)
+  PRINT_SETTINGS_READ_V2: Object.freeze({ id: 'sheet.printSettings.read/v2', version: 2, valueType: 'object' }),
+  // GH #344 (/21 only): per COLOUR-filter column of the sheet AutoFilter { field (1-based), kind, colour {form..} | null, slot }
+  COLOR_FILTER_READ: Object.freeze({ id: 'sheet.autoFilter.colorFilter.read/v1', version: 1, valueType: 'object' }),
+  // GH #346 (/21 only): ONE style target of one chart (chart | plotArea | title | legend | series | dataPoint): { element, fill, outline, outlineWidthEmu }
+  CHART_STYLE_READ: Object.freeze({ id: 'chart.series.style.read/v1', version: 1, valueType: 'object' }),
   PIVOT_STATE_READ: Object.freeze({ id: 'pivot.state.read/v1', version: 1, valueType: 'object' }),
   // X-O03/6b (internal tracker; X-O03/4 LIVE r4 FOUND_READ_PATH, X-O03/5 design doc, X-O03/6a LIVE
   // r6): a scatter chart series' Y-value array -- the PUBLIC chartApi's GetValues() is a formula
@@ -123,6 +129,56 @@ const BRIDGE_CAPABILITIES = Object.freeze({
   // shared `bridgeAxis` convention every other migrated axis in this file uses) -- compatibility-first, the
   // ACCEPTED list carries both /16 and /17 so a DS /16 -> /17 apply causes no product outage.
   PROTECTION_READ: Object.freeze({ id: 'sheet.protection.read/v1', version: 1, valueType: 'object' }),
+  // GH #298 D (owner decision, path A, order A: read_tables before read_hyperlinks): every Excel Table of a
+  // sheet -- name, A1 range, header/totals rows, column names, style flags, autoFilter PRESENCE only (its own
+  // range/filter detail is out of scope). { tables: [{ name, ref, headerRow, totalsRow, columns, style,
+  // autoFilter }] }, document order (docs/DS-9.3.5-BRIDGE18-HYPERLINKS-TABLES-READ.md). Served only on
+  // patchVersion /18; a /16 or /17 runtime correctly refuses with CAPABILITY_MISSING (same shared `bridgeAxis`
+  // convention every other migrated axis in this file uses) -- compatibility-first, the ACCEPTED list carries
+  // /16 + /17 + /18 so a DS /17 -> /18 apply causes no product outage.
+  TABLES_READ: Object.freeze({ id: 'sheet.tables.read/v1', version: 1, valueType: 'object' }),
+  // GH #361 route probe, route (c) (NOT installed anywhere -- documentserver-patches/9.3.5.0/euro-office-
+  // bridge-v1/rev28-table-autofilter-criteria-candidate/, candidate only): one Excel Table's own AutoFilter
+  // { present, range, fields } -- a candidate-only capability: range (the table's own AutoFilter range)
+  // and per-column criteria (fields: colId plus a value filter's selected keys or a custom filter's
+  // and/conditions, LIVE-measured against a real fixture, NOT a guess -- unmeasured sub-fields carry a
+  // named unverified gap instead of a guessed value). On any runtime without /28 this degrades to the SAME
+  // 'UNOBSERVABLE:CAPABILITY_MISSING' every other not-yet-installed capability already degrades to.
+  TABLE_AUTOFILTER_CRITERIA_READ: Object.freeze({ id: 'sheet.table.autoFilter.criteria.read/v1', version: 1, valueType: 'object' }),
+  // GH #363 2nd unit (NOT installed anywhere -- documentserver-patches/9.3.5.0/euro-office-bridge-v1/
+  // rev28-table-autofilter-criteria-candidate/, EXTENDED with this second capability, candidate only):
+  // up to 200 named cells (sheet + A1 list) -> each cell's conditional-format-EVALUATED fill, read
+  // through the worksheet's own getCompiledStyle(row, col) getter (0-based, derived from the A1
+  // address) -- ONLY the fill is read (style.getFill() -> getColor()/getSolidFill()); every other
+  // compiled-style field (font, border, number format, ...) is NOT attempted. LIVE-measured (docs/
+  // GH363-CF-EFFECTIVE-READBACK-MEASUREMENT-20261105.md, docs/evidence/gh363-cf-effective-readback-
+  // live-20261105/internal-route-probe-v2-measured.json): a firing cell's compiled style carries the
+  // rule's own fill (16711680 == #FF0000); a non-firing cell's compiled style is null. On any runtime
+  // without /28 this degrades to the SAME 'UNOBSERVABLE:CAPABILITY_MISSING' every other not-yet-
+  // installed capability already degrades to.
+  COMPILED_STYLE_READ: Object.freeze({ id: 'sheet.cells.compiledStyle.read/v1', version: 1, valueType: 'object' }),
+  // GH #356/#357 (/23 only): one sheet's rendered print page count { pages } -- the editor's own calcPagesPrint, the live model untouched
+  PRINT_PAGE_COUNT_READ: Object.freeze({ id: 'sheet.printPageCount.read/v1', version: 1, valueType: 'object' }),
+  // GH #338-#342 (/24 only, docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md W1): the workbook-level structure
+  // lock { lockStructure } -- the counterpart of PROTECTION_READ's per-SHEET axis above, one value for the whole
+  // workbook. Served only on /24; a pre-/24 runtime refuses with CAPABILITY_MISSING (same shared `bridgeAxis`
+  // convention every other migrated axis in this file uses) -- the W1 gate itself (adapter.cjs workbookGate)
+  // treats that refusal as a deliberate pass-through, not a fail-closed one (see the design doc).
+  WORKBOOK_PROTECTION_READ: Object.freeze({ id: 'workbook.protection.read/v1', version: 1, valueType: 'object' }),
+  // GH #300 L1 (owner decision, path A, order A: after read_tables): every hyperlink of a sheet -- the A1 ref
+  // ($-stripped), target address, internal location, screen-tip, kind (external/internal/unknown:<n> from the
+  // engine's own hyperlink-type code). The DISPLAYED text is NOT part of this output -- it is the cell's own
+  // value (read_range covers that). { links: [{ ref, address, location, tooltip, kind }] }, row-then-column
+  // order (docs/DS-9.3.5-BRIDGE18-HYPERLINKS-TABLES-READ.md). Served only on patchVersion /18; a /16 or /17
+  // runtime correctly refuses with CAPABILITY_MISSING (same shared `bridgeAxis` convention).
+  HYPERLINKS_READ: Object.freeze({ id: 'sheet.hyperlinks.read/v1', version: 1, valueType: 'object' }),
+  // GH #365 option C U2 (owner GO; follows U1): one sheet name -> { veryHidden }, true only when the engine model carries BOTH
+  // bHidden===true AND the new bEoVeryHidden===true field U1's own 3-step engine REPLACE
+  // introduces (docs/GH365-VERYHIDDEN-SHEET-STATE-SOURCE-CONTRACT-20261105.md "3. EGYSEG"). On any
+  // runtime without /29 this degrades to the SAME 'UNOBSERVABLE:CAPABILITY_MISSING' every other
+  // not-yet-installed capability already degrades to -- read_sheet_state's own 'hidden' +
+  // visibilityDetail shape stays byte-identical pre-/29 (sheet-state-read.cjs).
+  VERY_HIDDEN_READ: Object.freeze({ id: 'sheet.veryHidden.read/v1', version: 1, valueType: 'object' }),
 });
 
 /**
@@ -204,6 +260,8 @@ const BRIDGE_WRITES = Object.freeze({
   ALIGN_EXT_WRITE: Object.freeze({ id: 'range.alignmentExt.write/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
   // M11.5b.4: B10-WRITE (the eight print/page settings, one per call), served only on /7
   PRINT_SETTINGS_WRITE: Object.freeze({ id: 'sheet.printSettings.write/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
+  // GH #354/#355: headerMargin / footerMargin / pageOrder (Layout history 16-18), one per call, served only on /21
+  PRINT_SETTINGS_WRITE_V2: Object.freeze({ id: 'sheet.printSettings.write/v2', version: 2, kind: 'WRITE', mutation: 'TARGETED' }),
   // M11.5c.4: B03-WRITE (one worksheet copy, appended last; its own receipt shape, parsed by the driver's B03 client), only /8
   WORKSHEET_COPY_WRITE: Object.freeze({ id: 'worksheet.copy/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
   // M11.5d.4: B18-WRITE (one paragraph's numbering removed; its own receipt shape, parsed by the B18 client), only word /2
@@ -249,6 +307,34 @@ const BRIDGE_WRITES = Object.freeze({
   // paths fired; neither is ever readable back (no getter for the line's own width/fill exists
   // on the public or `markerStyle`-read internal surface). Served only on /15.
   LINE_STYLE_WRITE: Object.freeze({ id: 'chart.series.lineStyle.write/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
+  // GH #332-#335 (Bridge /19; design docs/DS-9.3.5-BRIDGE19-TABLE-WRITE-DESIGN.md): ONE property of ONE Excel Table per call (style |
+  // flag | totalsRow | name | ref), through the editor's own table actions (asc_changeAutoFilter / asc_changeFormatTableInfo /
+  // asc_changeDisplayNameTable / asc_changeTableRange) -- the public API has no table setter (PUBLIC-FIRST probe, 23/23 unchanged).
+  // Its own receipt { applied: [property], table, observed }, parsed by __eoBridgeTableWrite. Served only on /19.
+  TABLE_WRITE: Object.freeze({ id: 'sheet.table.write/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
+  // GH #338-#342 (Bridge /22; design docs/DS-9.3.5-BRIDGE22-SHEET-PROTECTION-WRITE-DESIGN.md): PASSWORDLESS sheet protect / unprotect
+  // with the 15 forbids flags (the exact mirror of PROTECTION_READ), and the xf locked / hidden of a bounded range of an UNPROTECTED
+  // sheet. Their own receipt { applied } | { applied: [], satisfied: true }, parsed by __eoBridgeProtectionWrite. Served only on /22.
+  PROTECTION_WRITE: Object.freeze({ id: 'sheet.protection.write/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
+  CELL_PROTECTION_WRITE: Object.freeze({ id: 'sheet.cellProtection.write/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
+  // GH #338-#342 remainder (Bridge /24; design docs/DS-9.3.5-BRIDGE24-WORKBOOK-PROTECTION-DESIGN.md "W3"): PASSWORDLESS
+  // workbook-level structure lock on/off (lockStructure only -- no password member ever touched). Its own receipt
+  // { applied } | { applied: [], satisfied: true }, parsed by __eoBridgeWorkbookProtectionWrite. Served only on /24.
+  WORKBOOK_PROTECTION_WRITE: Object.freeze({ id: 'workbook.protection.write/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
+  // GH #346 AUTO-REPAIR Egyseg 2 (design docs/GH346-DPT-AUTO-REPAIR-DESIGN-20261104.md Dontesi pont 2):
+  // idx-based (never array-position-based) dataPoint fill/outline normalisation -- collects every
+  // stored dPt at the requested idx, keeps the first (document order, the renderer's own
+  // first-match-wins tie-break) and removes the rest via the internal, History-tracked
+  // CSeriesBase.prototype.removeDPt(pos); a gap (no entry at idx) with explicit formatting creates one
+  // via AscFormat.CDPt + setIdx + s.addDPt (idx-based, never the position-based dPt[point] the
+  // engine's own public setter uses -- GH #346's own root cause). Its own receipt shape
+  // { outcome: NORMALIZED|WRITTEN|SATISFIED, removed, before:{count,effective}, after:{count,effective} }
+  // -- NOT the generic { applied } shape BRIDGE_WRITE_CLIENT_SRC's own __eoBridgeWrite expects, hence the
+  // dedicated BRIDGE_DATA_POINT_STYLE_WRITE_CLIENT_SRC client below (the SAME reason
+  // BRIDGE_CHART_DELETE_WRITE_CLIENT_SRC / BRIDGE_COPY_WRITE_CLIENT_SRC each exist for their own
+  // custom receipt shapes). Served only on the /27 candidate (XLSX_B29_BRIDGE_WRITE_RUNTIME_IDS,
+  // core/runtime-identity.cjs + adapters/xlsx/runtime.cjs, landed GH #346 unit 2, `fbb08b5b`).
+  DATA_POINT_STYLE_WRITE: Object.freeze({ id: 'chart.series.dataPoint.style.write/v1', version: 1, kind: 'WRITE', mutation: 'TARGETED' }),
 });
 
 /**
@@ -411,6 +497,59 @@ const BRIDGE_CHART_DELETE_WRITE_CLIENT_SRC = `
 `;
 
 /**
+ * GH #346 AUTO-REPAIR Egyseg 2/3: the chart.series.dataPoint.style.write/v1 write client, included
+ * ONLY in a set_chart_style body that writes the `dataPoint` target (after BRIDGE_WRITE_CLIENT_SRC,
+ * whose gate it uses). Its own receipt shape (build-rev27.py's own DPT_WRITE_IMPL, "MEGVALOSITAS 2"):
+ *   success:  { ok: true, value: { outcome: NORMALIZED|WRITTEN|SATISFIED, removed, before:{count,
+ *              effective}, after:{count,effective} } }
+ *   failure:  EITHER { ok: false, reason } (the handler's own _DPT_WRITE_LOOKUP guards and the
+ *             xlsx-datapoint-duplicate-unresolvable:<prop> check -- all BEFORE `before` is even
+ *             computed, so none carry it) OR { ok: false, reason, before, removed } (every PREFLIGHT
+ *             refusal and every MUTATE-phase one, build-rev27.py's own two comment blocks) -- NOT the
+ *             generic { applied } shape __eoBridgeWrite expects, hence this dedicated client (the SAME
+ *             reason __eoBridgeChartDeleteWrite / __eoBridgeCopyWrite above each exist for their own
+ *             custom receipt shapes).
+ *   __eoBridgeDataPointStyleWrite(bridge, capabilityId, args) -> { ok: true, outcome, removed, before,
+ *     after } | { ok: false, reason, uncertain, mutation, before?, removed? }
+ *     mutation NONE for every reason the handler's own preflight-before-mutate ordering (build-rev27.py
+ *     "4b. ELOSZOR ELLENORIZ, AZTAN MUTAL") guarantees runs before any removeDPt/addDPt/setFill/setLn
+ *     call -- i.e. every reason EXCEPT the six the handler can itself throw strictly AFTER that point
+ *     (removedpt-threw / setidx-threw / adddpt-threw / setsppr-threw / setfill-threw / setln-threw,
+ *     the "MUTATE:" comment's own boundary in DPT_WRITE_IMPL) -- UNCERTAIN_AFTER_MUTATE_START below;
+ *     those six are uncertain, mutation UNKNOWN (fail-closed: the dedup/gap-fill may have partially
+ *     happened). A malformed receipt -> UNEXPECTED_SHAPE (uncertain). Never retried; the caller
+ *     re-reads (classifyStyle's own fresh chart.series.style.read/v1 read-and-compare, the SAME path
+ *     marker/gridlines/gapOverlap/seriesOrder already rely on for their own bridge-backed targets).
+ */
+const DATA_POINT_STYLE_WRITE_UNCERTAIN_AFTER_MUTATE_START = Object.freeze(['removedpt-threw', 'setidx-threw', 'adddpt-threw', 'setsppr-threw', 'setfill-threw', 'setln-threw']);
+const BRIDGE_DATA_POINT_STYLE_WRITE_CLIENT_SRC = `
+  const __eoBridgeDataPointStyleWrite = (bridge, capabilityId, args) => {
+    const odd = { ok: false, reason: 'UNEXPECTED_SHAPE', uncertain: true, mutation: 'UNKNOWN' };
+    let r;
+    try { r = bridge.write(capabilityId, args); } catch (err) { return { ok: false, reason: 'BRIDGE_THREW', uncertain: true, mutation: 'UNKNOWN' }; }
+    if (!r || typeof r !== 'object' || typeof r.ok !== 'boolean') return odd;
+    const OUTCOMES = ['NORMALIZED', 'WRITTEN', 'SATISFIED'];
+    const countedOk = x => x && typeof x === 'object' && Object.keys(x).sort().join(',') === 'count,effective' && typeof x.count === 'number';
+    if (r.ok === true) {
+      const v = r.value;
+      const shaped = Object.keys(r).sort().join(',') === 'ok,value' && v && typeof v === 'object'
+        && Object.keys(v).sort().join(',') === 'after,before,outcome,removed'
+        && OUTCOMES.indexOf(v.outcome) !== -1 && typeof v.removed === 'number' && v.removed >= 0
+        && countedOk(v.before) && countedOk(v.after);
+      return shaped ? { ok: true, outcome: v.outcome, removed: v.removed, before: v.before, after: v.after } : odd;
+    }
+    if (typeof r.reason !== 'string' || !r.reason) return odd;
+    const uncertain = ${JSON.stringify(DATA_POINT_STYLE_WRITE_UNCERTAIN_AFTER_MUTATE_START)}.indexOf(r.reason) !== -1;
+    const keys = Object.keys(r).sort().join(',');
+    if (keys === 'ok,reason') return { ok: false, reason: 'BRIDGE:' + r.reason, uncertain, mutation: uncertain ? 'UNKNOWN' : 'NONE' };
+    if (keys === 'before,ok,reason,removed' && countedOk(r.before) && typeof r.removed === 'number') {
+      return { ok: false, reason: 'BRIDGE:' + r.reason, uncertain, mutation: uncertain ? 'UNKNOWN' : 'NONE', before: r.before, removed: r.removed };
+    }
+    return odd;
+  };
+`;
+
+/**
  * M11.5d.4: the B18 numbering-removal write client, included ONLY in a list body that removes numbering (after
  * BRIDGE_WRITE_CLIENT_SRC, whose gate it uses).
  *   __eoBridgeNumberingRemove(bridge, capabilityId, args) -> { ok: true } | { ok: false, reason, uncertain, mutation }
@@ -500,4 +639,97 @@ const BRIDGE_LIST_DETACH_WRITE_CLIENT_SRC = `
   };
 `;
 
-module.exports = { BRIDGE_MAJOR, BRIDGE_CAPABILITIES, BRIDGE_CLIENT_SRC, BRIDGE_HYDRATIONS, BRIDGE_HYDRATE_CLIENT_SRC, BRIDGE_WRITES, BRIDGE_WRITE_CLIENT_SRC, BRIDGE_SERIES_STYLE_WRITE_CLIENT_SRC, BRIDGE_COPY_WRITE_CLIENT_SRC, BRIDGE_CHART_DELETE_WRITE_CLIENT_SRC, BRIDGE_NUMBERING_REMOVE_WRITE_CLIENT_SRC, BRIDGE_STYLE_NEXT_LINK_WRITE_CLIENT_SRC, BRIDGE_LIST_DETACH_WRITE_CLIENT_SRC };
+/**
+ * GH #332-#335: the table-property write client, included ONLY in a table-props body (after BRIDGE_WRITE_CLIENT_SRC, whose gate it uses).
+ *   __eoBridgeTableWrite(bridge, capabilityId, args) -> { ok: true, table, observed } | { ok: false, reason, uncertain, mutation, ... }
+ *     ONE write() call. sheet.table.write/v1 has its own receipt: success is exactly { ok: true, value: { applied: [property], table,
+ *     observed } } with applied === [args.property], a string table and a string-or-boolean observed. A refusal the /19 handler makes
+ *     BEFORE its editor call (an explicit allowlist of its pre-call reasons, incl. already-at-value -- no call was made) -> mutation
+ *     NONE; ANY other reason (<call>-threw / <call>-error / no-effect / table-count-changed / other-table-changed /
+ *     target-collateral-change / <property>-unexpected / tables-read-failed, or an unknown one) -> uncertain, mutation UNKNOWN: the
+ *     table may have changed (fail-closed). A malformed receipt -> UNEXPECTED_SHAPE (uncertain). Never retried; the caller re-reads.
+ */
+const BRIDGE_TABLE_WRITE_CLIENT_SRC = `
+  const __eoBridgeTableWrite = (bridge, capabilityId, args) => {
+    const odd = { ok: false, reason: 'UNEXPECTED_SHAPE', uncertain: true, mutation: 'UNKNOWN' };
+    let r;
+    try { r = bridge.write(capabilityId, args); } catch (err) { return { ok: false, reason: 'BRIDGE_THREW', uncertain: true, mutation: 'UNKNOWN' }; }
+    if (!r || typeof r !== 'object' || typeof r.ok !== 'boolean') return odd;
+    if (r.ok === true) {
+      const v = r.value;
+      const shaped = Object.keys(r).sort().join(',') === 'ok,value' && v && typeof v === 'object' && Object.keys(v).sort().join(',') === 'applied,observed,table'
+        && Array.isArray(v.applied) && v.applied.join(',') === args.property && typeof v.table === 'string' && (typeof v.observed === 'string' || typeof v.observed === 'boolean');
+      return shaped ? { ok: true, table: v.table, observed: v.observed } : odd;
+    }
+    if (typeof r.reason !== 'string' || !r.reason) return odd;
+    const PRE = ['bad-args', 'unsupported-property', 'style-unknown', 'flag-unknown', 'value-not-boolean', 'totals-off-not-measured', 'name-invalid', 'ref-unparsable',
+      'editor-missing', 'edit-not-allowed', 'workbook-locked', 'workbook-protected', 'sheet-not-found', 'sheet-ambiguous', 'table-not-found', 'table-ambiguous',
+      'already-at-value', 'table-style-info-missing', 'header-row-missing', 'name-taken', 'range-unreadable', 'ref-moves-origin', 'ref-too-small', 'ref-overlaps',
+      'c_oAscChangeFilterOptions-missing', 'c_oAscChangeTableStyleInfo-missing'];
+    const pre = PRE.indexOf(r.reason) >= 0 || /^(asc_changeAutoFilter|asc_changeFormatTableInfo|asc_changeDisplayNameTable|asc_changeTableRange|asc_getWorksheetsCount|asc_getWorksheetName|asc_showWorksheet|asc_isProtectedWorkbook|asc_registerCallback|asc_unregisterCallback|canEdit)-missing$/.test(r.reason);
+    return { ok: false, reason: 'BRIDGE:' + r.reason, uncertain: !pre, mutation: pre ? 'NONE' : 'UNKNOWN', observed: r.observed === undefined ? null : r.observed, errors: r.errors || null };
+  };
+`;
+
+/**
+ * GH #338-#342: the protection write client, included ONLY in a protection body (after BRIDGE_WRITE_CLIENT_SRC, whose gate it uses).
+ *   __eoBridgeProtectionWrite(bridge, capabilityId, args, requested) -> { ok: true, satisfied } | { ok: false, reason, uncertain, mutation }
+ *     ONE write() call. Success is exactly { ok: true, value: { applied } } with applied === requested, or { ok: true, value: { applied: [],
+ *     satisfied: true } } (the target state was already held -- no history). A refusal the /22 handlers make BEFORE their setter (an
+ *     explicit allowlist) -> mutation NONE; setter-threw / no-effect / cells-walk-threw / any unknown reason -> uncertain, mutation
+ *     UNKNOWN (fail-closed). A malformed receipt -> UNEXPECTED_SHAPE (uncertain). Never retried; the caller re-reads.
+ */
+const BRIDGE_PROTECTION_WRITE_CLIENT_SRC = `
+  const __eoBridgeProtectionWrite = (bridge, capabilityId, args, requested) => {
+    const odd = { ok: false, reason: 'UNEXPECTED_SHAPE', uncertain: true, mutation: 'UNKNOWN' };
+    let r;
+    try { r = bridge.write(capabilityId, args); } catch (err) { return { ok: false, reason: 'BRIDGE_THREW', uncertain: true, mutation: 'UNKNOWN' }; }
+    if (!r || typeof r !== 'object' || typeof r.ok !== 'boolean') return odd;
+    if (r.ok === true) {
+      const v = r.value;
+      if (Object.keys(r).sort().join(',') !== 'ok,value' || !v || typeof v !== 'object' || !Array.isArray(v.applied)) return odd;
+      const keys = Object.keys(v).sort().join(',');
+      if (keys === 'applied' && v.applied.join(',') === requested.join(',')) return { ok: true, satisfied: false };
+      if (keys === 'applied,satisfied' && v.applied.length === 0 && v.satisfied === true) return { ok: true, satisfied: true };
+      return odd;
+    }
+    if (typeof r.reason !== 'string' || !r.reason) return odd;
+    const PRE = ['bad-args', 'forbids-not-canonical', 'sheet-not-found', 'model-missing', 'protection-api-missing', 'history-missing', 'history-off',
+      'credential-protected', 'protection-unreadable', 'invalid-value', 'range-shape-not-supported', 'sheet-protected', 'range-invalid', 'range-over-cap:10000',
+      'capability-not-advertised'];
+    const pre = PRE.indexOf(r.reason) >= 0 || /^flag-not-boolean:[A-Za-z]+$/.test(r.reason);
+    return { ok: false, reason: 'BRIDGE:' + r.reason, uncertain: !pre, mutation: pre ? 'NONE' : 'UNKNOWN' };
+  };
+`;
+
+/**
+ * GH #338-#342 remainder (W3): the workbook-protection write client, included ONLY in a workbook-protection body
+ * (after BRIDGE_WRITE_CLIENT_SRC, whose gate it uses). Same receipt-parsing contract as
+ * BRIDGE_PROTECTION_WRITE_CLIENT_SRC above (success is { applied } === requested, or { applied: [], satisfied: true }),
+ * but its OWN pre-dispatch reason list -- the handler's refusals are bad-args / model-missing /
+ * protection-api-missing / credential-unobservable / history-missing / history-off (all BEFORE any history point
+ * or setter call, mutation NONE); setter-threw / no-effect happen AFTER the setter ran (mutation UNKNOWN,
+ * uncertain) -- see the rev24-candidate handler, handler-wb-protection-write-v24.txt.
+ */
+const BRIDGE_WORKBOOK_PROTECTION_WRITE_CLIENT_SRC = `
+  const __eoBridgeWorkbookProtectionWrite = (bridge, capabilityId, args, requested) => {
+    const odd = { ok: false, reason: 'UNEXPECTED_SHAPE', uncertain: true, mutation: 'UNKNOWN' };
+    let r;
+    try { r = bridge.write(capabilityId, args); } catch (err) { return { ok: false, reason: 'BRIDGE_THREW', uncertain: true, mutation: 'UNKNOWN' }; }
+    if (!r || typeof r !== 'object' || typeof r.ok !== 'boolean') return odd;
+    if (r.ok === true) {
+      const v = r.value;
+      if (Object.keys(r).sort().join(',') !== 'ok,value' || !v || typeof v !== 'object' || !Array.isArray(v.applied)) return odd;
+      const keys = Object.keys(v).sort().join(',');
+      if (keys === 'applied' && v.applied.join(',') === requested.join(',')) return { ok: true, satisfied: false };
+      if (keys === 'applied,satisfied' && v.applied.length === 0 && v.satisfied === true) return { ok: true, satisfied: true };
+      return odd;
+    }
+    if (typeof r.reason !== 'string' || !r.reason) return odd;
+    const PRE = ['bad-args', 'model-missing', 'protection-api-missing', 'credential-unobservable', 'history-missing', 'history-off', 'capability-not-advertised'];
+    const pre = PRE.indexOf(r.reason) >= 0;
+    return { ok: false, reason: 'BRIDGE:' + r.reason, uncertain: !pre, mutation: pre ? 'NONE' : 'UNKNOWN' };
+  };
+`;
+
+module.exports = { BRIDGE_MAJOR, BRIDGE_CAPABILITIES, BRIDGE_CLIENT_SRC, BRIDGE_HYDRATIONS, BRIDGE_HYDRATE_CLIENT_SRC, BRIDGE_WRITES, BRIDGE_WRITE_CLIENT_SRC, BRIDGE_SERIES_STYLE_WRITE_CLIENT_SRC, BRIDGE_COPY_WRITE_CLIENT_SRC, BRIDGE_CHART_DELETE_WRITE_CLIENT_SRC, BRIDGE_DATA_POINT_STYLE_WRITE_CLIENT_SRC, BRIDGE_TABLE_WRITE_CLIENT_SRC, BRIDGE_NUMBERING_REMOVE_WRITE_CLIENT_SRC, BRIDGE_STYLE_NEXT_LINK_WRITE_CLIENT_SRC, BRIDGE_LIST_DETACH_WRITE_CLIENT_SRC, BRIDGE_PROTECTION_WRITE_CLIENT_SRC, BRIDGE_WORKBOOK_PROTECTION_WRITE_CLIENT_SRC };

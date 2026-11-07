@@ -187,6 +187,28 @@ test('A driver b05DispatchResult: ok ONLY when the command completed AND its bod
   }
 });
 
+test('GH #367 3rd unit v6: driver plainDispatchResult -- a script\'s own {ok:false, stage} is surfaced, not silently reported as a successful dispatch (card an internal branch)', () => {
+  // RED (the bug, pre-fix): { ok: r.ok === true, dispatched: true, outcome: r.outcome, error: r.error || null }
+  // would have reported { ok: true } here, because r.ok (transport-level) is true -- the script's
+  // own { ok: false, stage: 'add-returned-null' } (r.result) was never inspected.
+  const scriptFailed = drv.plainDispatchResult({ ok: true, outcome: 'command-completed', result: { ok: false, stage: 'add-returned-null' } });
+  assert.deepEqual(scriptFailed, { ok: false, dispatched: true, outcome: 'script-add-returned-null', evidence: { ok: false, stage: 'add-returned-null' }, error: null });
+
+  // a thrown-inside-the-script result (comments.cjs's own `catch (err) { return { ok:false, stage:'threw', error: ... } }`)
+  const threw = drv.plainDispatchResult({ ok: true, outcome: 'command-completed', result: { ok: false, stage: 'threw', error: 'TypeError: x' } });
+  assert.deepEqual(threw, { ok: false, dispatched: true, outcome: 'script-threw', evidence: { ok: false, stage: 'threw', error: 'TypeError: x' }, error: 'TypeError: x' });
+
+  // GREEN, unchanged: the script's own { ok: true } still reports a successful dispatch.
+  assert.deepEqual(drv.plainDispatchResult({ ok: true, outcome: 'command-completed', result: { ok: true } }), { ok: true, dispatched: true, outcome: 'command-completed', error: null });
+
+  // transport-level failure (never reached the script, or callCommand itself failed) -- unchanged.
+  assert.deepEqual(drv.plainDispatchResult({ ok: false, outcome: 'command-callback-timeout' }), { ok: false, dispatched: true, outcome: 'command-callback-timeout', error: null });
+
+  // a script that returns no shaped result at all (null/undefined, e.g. a READ body) -- falls back
+  // to the transport-level ok, exactly as before.
+  assert.deepEqual(drv.plainDispatchResult({ ok: true, outcome: 'command-completed', result: null }), { ok: true, dispatched: true, outcome: 'command-completed', error: null });
+});
+
 test('A driver second line: a B05 command is refused WITHOUT an editor on a runtime other than /6', async () => {
   const d = drv.createEuroOfficeXlsxDriver({ url: 'u', user: 'u', pass: 'p', loadPlaywright: () => ({ ok: false }) });
   const r = await d.dispatch(null, lowered(INDENT));
@@ -223,7 +245,7 @@ for (const [label, spec, check] of [['indent', INDENT, c => c.indent === 2], ['s
 // GH #326/#327: the accepted list widened again (9.3.5.0/16 + /17, compatibility-first) -- /17 moved OFF this
 // refused list onto the accepted one, so this example moves forward to /18 (the next unclaimed number), the
 // SAME "keep moving this example forward" edge the DS9346-era comment this replaced already named.
-for (const rt of [RT5, '9.3.4|euro-office-bridge-v1/9.3.4.60/4', '9.3.5|euro-office-bridge-v1/9.3.5.0/18', 'unknown']) {
+for (const rt of [RT5, '9.3.4|euro-office-bridge-v1/9.3.4.60/4', '9.3.5|euro-office-bridge-v1/9.3.5.0/20', 'unknown']) {
   test(`B wrong runtime ${rt}: B05 FAIL_CLOSED after the prewrite READ, before any write -- dispatch 0, Bridge write 0, mutation 0`, async () => {
     const store = createStore(book()); const before = JSON.stringify(store.durable);
     const { result, driver } = await run(store, task(BOTH), { runtime: rt });

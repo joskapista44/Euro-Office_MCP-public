@@ -68,8 +68,8 @@ test('SCHEMA: the name -- missing, empty, blank, over 128 characters, a control 
   assert.equal(verdict([ds('x'.repeat(128))]).ok, true, 'exactly 128');
 });
 
-test('SCHEMA: only the measured fields -- highlight / caps / spaceBefore (the format_text name) / lineSpacing / widowControl / tabs / borders / a style-level theme colour are UNKNOWN_FIELD, a malformed basedOn REFUSED_SHAPE (GH #292 released italic / underline / strike / fontFamily / spacingBefore / indentRight / indentFirstLine / keep*); an empty group or no group is REFUSED_SHAPE', () => {
-  for (const [group, key] of [['text', 'highlight'], ['text', 'language'], ['text', 'vertAlign'], ['text', 'caps'],
+test('SCHEMA: only the measured fields -- highlight / caps / spaceBefore (the format_text name) / lineSpacing / widowControl / tabs / borders / a style-level theme colour are UNKNOWN_FIELD, a malformed basedOn REFUSED_SHAPE (GH #292 released italic / underline / strike / fontFamily / spacingBefore / indentRight / indentFirstLine / keep*; GH #324 released language -- see its own tests below); an empty group or no group is REFUSED_SHAPE', () => {
+  for (const [group, key] of [['text', 'highlight'], ['text', 'vertAlign'], ['text', 'caps'],
     ['paragraph', 'spaceBefore'], ['paragraph', 'lineSpacing'], ['paragraph', 'shading'], ['paragraph', 'tabs'], ['paragraph', 'borderTop'], ['paragraph', 'widowControl']]) {
     const v = verdict([ds(NAME, { [group]: { bold: true, ...(group === 'paragraph' ? { align: 'left' } : {}), [key]: group === 'text' ? 'x' : 1 } })]);
     assert.equal(v.code, 'UNKNOWN_FIELD', `${group}.${key} -> ${v.code}`);
@@ -106,6 +106,45 @@ test('SCHEMA: value shapes -- color must be a BARE 6-hex or exactly "auto" (GH #
   }
 });
 
+// GH #324 (LIVE, probe2.json): ApiTextPr.SetLanguage persists on a style, read back via ToJSON()
+// rPr.lang.val -- the ENGINE itself does not validate the string (an unrecognized one silently
+// writes nothing, measured), so an invalid-looking tag is refused HERE, pre-dispatch, named.
+test('SCHEMA: text.language accepts a BCP-47-ish tag (two-letter, region-tagged, longer subtags) and refuses a malformed one, pre-dispatch', () => {
+  for (const language of ['hu-HU', 'en', 'en-GB', 'zh-Hans-CN']) {
+    const v = verdict([ds(NAME, { text: { language } })]);
+    assert.equal(v.ok, true, `${language} -> ${v.code} ${v.reason}`);
+  }
+  // 'not-a-lang-code' is the EXACT GH #324 probe example: the engine's own SetLanguage silently
+  // dropped it (no rPr.lang key at all afterwards) -- this codebase refuses it instead of letting
+  // that silent no-op reach dispatch.
+  for (const language of ['not-a-lang-code', '', 'x', 123, true, null, 'hu_HU', 'toolongprimarytag']) {
+    const v = verdict([ds(NAME, { text: { language } })]);
+    assert.equal(v.code, 'REFUSED_SHAPE', `${JSON.stringify(language)} -> ${v.code} ${v.reason}`);
+    assert.equal(v.dispatched, false);
+  }
+});
+
+test('WRITE + READ-BACK (GH #324): language is written on the style and read back through BOTH the write-side verification and read_styles, by name', async () => {
+  const p = product();
+  const r = await p.tool.handler(req([ds(NAME, { text: { language: 'hu-HU' } })]));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.operations.map(o => o.status), ['APPLIED']);
+  assert.equal(r.operations[0].l1, 'PASS');
+  assert.equal(r.operations[0].l3, 'PASS');
+  assert.deepEqual(p.store.durableDoc.styles[NAME].text, { language: 'hu-HU' });
+  const byName = await p.readStyles([NAME]);
+  assert.equal(byName[0].text.language, 'hu-HU');
+});
+
+test('RETRY (GH #324): the style already carries the requested language -- SATISFIED, zero writes', async () => {
+  const p = product({ [NAME]: { text: { language: 'hu-HU' }, paragraph: {} } });
+  const r = await p.tool.handler(req([ds(NAME, { text: { language: 'hu-HU' } })]));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.noOp, true);
+  assert.deepEqual(r.operations.map(o => o.status), ['SATISFIED']);
+  assert.equal(p.writes(), 0);
+});
+
 test('SOLO: define_style must be the only step of its task (the proof is the final style list and body; a name defined twice or beside another step is refused)', () => {
   const others = [{ intent: 'rewrite_paragraph', selector: { text: OUTSIDE }, text: 'X' }, ds('GH264 Other'), ds(NAME)];
   for (const other of others) {
@@ -140,7 +179,7 @@ test('READ-BACK (GH #224b): the defined custom style is NOT in the plain read_st
   assert.equal((await p.readStyles()).some(s => s.name === NAME), false, 'the enumeration is blind to a CreateStyle-d style');
   const byName = await p.readStyles([NAME]);
   assert.equal(byName.length, 1);
-  assert.deepEqual(byName[0], { name: NAME, identity: { name: NAME, basedOn: null, next: null, link: null, styleType: 'paragraphStyle', basedOnName: null, nextName: null, linkName: null }, text: { bold: true, size: 16, color: '2255AA', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited' }, paragraph: { align: 'center', indentLeft: 18, spacingAfter: 12, spacingBefore: 'inherited', indentRight: 'inherited', indentFirstLine: 'inherited', keepNext: 'inherited', keepLines: 'inherited', pageBreakBefore: 'inherited' } });
+  assert.deepEqual(byName[0], { name: NAME, identity: { name: NAME, basedOn: null, next: null, link: null, styleType: 'paragraphStyle', basedOnName: null, nextName: null, linkName: null }, text: { bold: true, size: 16, color: '2255AA', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited', language: 'inherited' }, paragraph: { align: 'center', indentLeft: 18, spacingAfter: 12, spacingBefore: 'inherited', indentRight: 'inherited', indentFirstLine: 'inherited', keepNext: 'inherited', keepLines: 'inherited', pageBreakBefore: 'inherited' } });
   assert.deepEqual(await p.readStyles(['GH264 Missing']), [{ name: 'GH264 Missing', gap: 'not-found' }]);
 });
 

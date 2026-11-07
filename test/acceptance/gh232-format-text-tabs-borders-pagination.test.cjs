@@ -111,8 +111,8 @@ test('SCHEMA: border sides -- a non-single style, a missing field, a bare / name
     [{ borderTop: { size: 1, color: '#FF0000' } }, 'REFUSED_SHAPE'], [{ borderTop: { style: 'single', color: '#FF0000' } }, 'REFUSED_SHAPE'], [{ borderTop: { style: 'single', size: 1 } }, 'REFUSED_SHAPE'],
     [{ borderTop: b({ color: 'FF0000' }) }, 'REFUSED_SHAPE'], [{ borderTop: b({ color: 'red' }) }, 'REFUSED_SHAPE'], [{ borderTop: b({ color: '#FF00' }) }, 'REFUSED_SHAPE'],
     [{ borderTop: b({ size: 0 }) }, 'REFUSED_SHAPE'], [{ borderTop: b({ size: -1 }) }, 'REFUSED_SHAPE'], [{ borderTop: b({ size: 12.5 }) }, 'REFUSED_SHAPE'], [{ borderTop: b({ size: '1' }) }, 'REFUSED_SHAPE'],
-    // GH #290: a side is now an anyOf (single | none) -- an extra field inside it is a REFUSED_SHAPE (still pre-dispatch), like format_table's edges
-    [{ borderTop: b({ space: 0 }) }, 'REFUSED_SHAPE'], [{ borderTop: null }, 'REFUSED_SHAPE'], [{ borderTop: 'single' }, 'REFUSED_SHAPE'],
+    // GH #290: a side is now an anyOf (single | none) -- an unknown field inside it is a REFUSED_SHAPE (still pre-dispatch), like format_table's edges
+    [{ borderTop: b({ spaceX: 0 }) }, 'REFUSED_SHAPE'], [{ borderTop: null }, 'REFUSED_SHAPE'], [{ borderTop: 'single' }, 'REFUSED_SHAPE'],
     [{ borderBetween: b() }, 'UNKNOWN_FIELD'], [{ borderBar: b() }, 'UNKNOWN_FIELD'], [{ border: b() }, 'UNKNOWN_FIELD'],
   ];
   for (const [format, code] of cases) { const v = verdict(format); assert.equal(v.code, code, `${JSON.stringify(format)} -> ${v.code} ${v.reason}`); assert.equal(v.dispatched, false); }
@@ -123,6 +123,29 @@ test('SCHEMA: border sides -- a non-single style, a missing field, a bare / name
   // GH #290: { style: 'none' } removes a side -- alone; with a size or a colour it is refused
   assert.equal(verdict({ borderTop: { style: 'none' } }).ok, true);
   for (const bad of [{ style: 'none', size: 1 }, { style: 'none', color: '#FF0000' }]) assert.notEqual(verdict({ borderTop: bad }).ok, true, JSON.stringify(bad));
+  // GH #314: 'none' takes no space either, the same refusal shape as size/colour above
+  assert.notEqual(verdict({ borderTop: { style: 'none', space: 0 } }).ok, true);
+});
+
+// GH #314 (LIVE-measured, internal tracker/#ref): the DS stores a paragraph border's `space`
+// rounded down to whole millimeters then back to the nearest point, silently -- only 12 point-
+// values are exactly reachable this way. `space` is optional; omitting it keeps the prior
+// behaviour (space 0, unconditionally) exactly as it was before this axis existed.
+test('SCHEMA: border space -- ONLY the 12 point-values the DS can store exactly are accepted; every other number is REFUSED_SHAPE with the list enumerated', () => {
+  const b = (o = {}) => ({ style: 'single', size: 1, color: '#FF0000', ...o });
+  const ACCEPTED = [0, 3, 6, 9, 11, 14, 17, 20, 23, 26, 28, 31];
+  for (const space of ACCEPTED) assert.equal(verdict({ borderTop: b({ space }) }).ok, true, `space ${space}`);
+  for (const space of [1, 2, 4, 5, 7, 8, 10, 12, 13, 15, 32, -1, 0.5, 11.5]) {
+    const v = verdict({ borderTop: b({ space }) });
+    assert.equal(v.code, 'REFUSED_SHAPE', `space ${space} -> ${v.code}`);
+    assert.equal(v.dispatched, false);
+    assert.match(v.reason, /0, 3, 6, 9, 11, 14, 17, 20, 23, 26, 28, 31/, `space ${space}: reason must enumerate the allowed values, not just say "invalid"`);
+  }
+  // all four sides, independently, with DIFFERENT accepted values -- no cross-side confusion
+  const r = verdict({ borderTop: b({ space: 0 }), borderBottom: b({ space: 31 }), borderLeft: b({ space: 14 }), borderRight: b({ space: 28 }) });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  // composes with the OTHER new keys in the same format object
+  assert.equal(verdict({ borderTop: b({ space: 9 }), keepNext: true, tabs: [{ pos: 36, align: 'left' }] }).ok, true);
 });
 
 test('SCHEMA: the pagination flags accept a real boolean -- 0, 1, "true", null are REFUSED_SHAPE; GH #290: false is released (widowControl too, measured 2026-10-23)', () => {
@@ -237,6 +260,29 @@ test('INDEPENDENT SIDES (W09-1e): a second border request on ONE side adds/chang
   assert.deepEqual(read.borderLeft, READ_BACK.borderLeft);
   assert.deepEqual(read.borderBottom, READ_BACK.borderBottom);
   assert.equal(read.borderRight, null, 'a side nobody wrote stays none');
+});
+
+// GH #314: the WIRING end to end on the fake transport -- plan -> dispatch -> inventory ->
+// read_formatting carries `space` through unchanged, L1 (compare/borderSideEqual) passes, retry
+// is SATISFIED. The fake driver cannot model the DS's own lossy mm-rounding (it echoes the
+// requested shape verbatim, by design -- its own header comment); that numeric quirk is proven
+// ONLY by the LIVE harness (docx-gh314-border-space-product.live.cjs, not run by this author).
+test('GH #314 WIRING: a border space request round-trips through read_formatting, verifies PASS (L1), and a retry is SATISFIED with zero new writes', async () => {
+  const p = product();
+  const sel = selectorFrom(doc(), TARGET);
+  const task = req([step(sel, { borderTop: { style: 'single', size: 1, color: '#FF0000', space: 11 } })]);
+  const r1 = await p.tool.handler(task);
+  assert.equal(r1.ok, true, JSON.stringify(r1));
+  assert.deepEqual(r1.operations.map(o => o.status), ['APPLIED']);
+  assert.equal(r1.operations[0].l1, 'PASS');
+  const read = readFormattingOf(p.store.durable, TARGET);
+  assert.deepEqual(read.borderTop, { style: 'single', size: 1, color: 'FF0000', space: 11 });
+  const savesAfterFirst = p.writes();
+  const r2 = await p.tool.handler(task);
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  assert.equal(r2.noOp, true);
+  assert.deepEqual(r2.operations.map(o => o.status), ['SATISFIED']);
+  assert.equal(p.writes(), savesAfterFirst, 'no write on the retry');
 });
 
 test('RANGE (matchText) + the new keys: not refused for naming matchText -- they write the WHOLE PARENT paragraph, the text itself is untouched', async () => {

@@ -266,7 +266,9 @@ function bodyKey(primary) {
 /** Every OTHER section's own page setup, unaffected by this op. */
 function otherFieldsOfSection(sec) {
   if (!sec) return null;
-  return JSON.stringify({ pageWidth: sec.pageWidth, pageHeight: sec.pageHeight, margins: sec.margins, columnsCount: sec.columnsCount, startPageNumber: sec.startPageNumber });
+  // GH #313: `type` joins the compared fields -- a set_page_setup op must not silently change a
+  // section's own break type any more than its size/margins/columns/startPageNumber.
+  return JSON.stringify({ pageWidth: sec.pageWidth, pageHeight: sec.pageHeight, margins: sec.margins, columnsCount: sec.columnsCount, startPageNumber: sec.startPageNumber, type: sec.type });
 }
 
 function otherSectionsKey(sections, exceptIndex) {
@@ -296,7 +298,10 @@ function verifyPreservation(op, before, after) {
   const a = sectionState(after && after.primary, op);
   if (!b.ok || !a.ok) return { ok: false, evidence: { reason: !b.ok ? `before-${b.reason}` : `after-${a.reason}` } };
   const requested = new Set(Object.keys(op.fields));
-  const axisKeys = { size: ['pageWidth', 'pageHeight'], margins: ['margins'], columns: ['columnsCount', 'columnsSpaces'], startPageNumber: ['startPageNumber'] };
+  // GH #313: `type` is never one of set_page_setup's own FIELDS (it is set only by
+  // insert_section_break, at break-creation time), so it is NEVER in `requested` here -- it is
+  // therefore ALWAYS checked as "must stay unchanged", the same way every other unrequested axis is.
+  const axisKeys = { size: ['pageWidth', 'pageHeight'], margins: ['margins'], columns: ['columnsCount', 'columnsSpaces'], startPageNumber: ['startPageNumber'], type: ['type'] };
   const changedOwnSectionFields = Object.keys(axisKeys).filter(f => !requested.has(f)).filter(f => {
     const keyOf = sec => JSON.stringify(axisKeys[f].map(k => sec && sec[k]));
     return keyOf(b.sec) !== keyOf(a.sec);

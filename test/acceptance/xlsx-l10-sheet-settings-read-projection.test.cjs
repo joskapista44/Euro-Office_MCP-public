@@ -81,7 +81,7 @@ test('FILTER (L-10b r1): a value LIST is read by its RAW SHAPE -- 1 element -> v
   // GH #301 D2: 3..10 different plain values under xlFilterValues ARE a writer shape now -> values; 11, or 3 under another operator, stay a gap
   assert.deepEqual(flt({ range: 'A1:C5', filters: [eng(1, 'xlFilterValues', ['2', '3', '4'])] }).filters[0], { field: 1, values: ['2', '3', '4'] });
   assert.equal(flt({ range: 'A1:C5', filters: [eng(1, 'xlOr', ['2', '3', '4'])] }).filters[0].unsupported, true, 'a 3-list only as xlFilterValues');
-  for (const list of [['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'], ['2', '3', '2'], ['2', '2'], ['2', '>4'], ['=2', '4'], [''], [], ['2', null]]) {
+  for (const list of [['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'], ['2', '3', '2'], ['2', '2'], ['2', '>4'], ['=2', '4'], [''], ['2', null]]) {  // GH #345: [] left this list -- it is the named AMBIGUOUS_EMPTY_LIST state (gh344-gh345-filter-read-shapes.test.cjs)
     const out = flt({ range: 'A1:C5', filters: [eng(1, 'xlFilterValues', list)] }).filters[0];
     assert.equal(out.unsupported, true, JSON.stringify(list));
     assert.match(out.reason, /^NO_WRITE_PATH:/, JSON.stringify(list));
@@ -213,7 +213,8 @@ test('TOOL SURFACE: the three reads are ACCEPTED (sheet only), each request asks
     assert.equal(rt.validateReadRequest('xlsx', { fileId: '1', operation: op, sheet: 'S', range: 'A1' }).ok, false, `${op}: no range`);
   }
   assert.deepEqual(rt.xlsxRequest('read_freeze_panes', { sheet: 'S' }), { windows: [], panes: true });
-  assert.deepEqual(rt.xlsxRequest('read_page_setup', { sheet: 'S' }), { windows: [], pageSheets: ['S'], printSheets: ['S'] });
-  assert.deepEqual(rt.xlsxRequest('read_filter', { sheet: 'S' }), { windows: [], filterSheets: ['S'] });
-  assert.equal(rt.validateReadRequest('xlsx', { fileId: '1', operation: 'read_print_rendering' }).code, 'REFUSED_NOT_MEASURED', 'the RENDERED print stays refused');
+  assert.deepEqual(rt.xlsxRequest('read_page_setup', { sheet: 'S' }), { windows: [], pageSheets: ['S'], printSheets: ['S'], printLayout: true });
+  assert.deepEqual(rt.xlsxRequest('read_filter', { sheet: 'S' }), { windows: [], filterSheets: ['S'], filterColor: true });
+  // GH #356/#357: the RENDERED print is its own ACCEPTED read now (Bridge /23), with its own { sheet } contract
+  assert.equal(rt.validateReadRequest('xlsx', { fileId: '1', operation: 'read_print_rendering', sheet: 'S' }).ok, true, 'the RENDERED print is read_print_rendering\'s own');
 });

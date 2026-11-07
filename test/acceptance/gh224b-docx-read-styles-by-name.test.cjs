@@ -86,7 +86,7 @@ test('WITH names: a CUSTOM style comes back by name with the six measured fields
   const res = await ok({ names: ['GH224b Custom'] });
   assert.deepEqual(res.styles.map(x => x.name), ['GH224b Custom']);
   assert.deepEqual(res.styles[0], { name: 'GH224b Custom', identity: { name: 'GH224b Custom', basedOn: null, next: null, link: null, styleType: 'paragraphStyle', basedOnName: null, nextName: null, linkName: null },
-    text: { bold: true, size: 16, color: '2255AA', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited' }, paragraph: { align: 'center', indentLeft: 18, spacingAfter: 12, spacingBefore: 'inherited', indentRight: 'inherited', indentFirstLine: 'inherited', keepNext: 'inherited', keepLines: 'inherited', pageBreakBefore: 'inherited' } }); // GH #292: the further keys, unset
+    text: { bold: true, size: 16, color: '2255AA', italic: 'inherited', underline: 'inherited', strike: 'inherited', fontFamily: 'inherited', language: 'inherited' }, paragraph: { align: 'center', indentLeft: 18, spacingAfter: 12, spacingBefore: 'inherited', indentRight: 'inherited', indentFirstLine: 'inherited', keepNext: 'inherited', keepLines: 'inherited', pageBreakBefore: 'inherited' } }); // GH #292: the further keys, unset
   assert.deepEqual(Object.keys(res).sort(), ['scope', 'styles']);
   assert.match(res.scope, /name-targeted/);
   const mixed = await ok({ names: ['Heading 1', 'GH224b Custom', 'Normal'] });

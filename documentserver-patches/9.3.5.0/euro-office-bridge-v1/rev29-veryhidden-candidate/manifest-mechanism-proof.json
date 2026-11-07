@@ -1,0 +1,33 @@
+{
+  "format": "euro-office-bridge-v1-candidate-insert",
+  "name": "euro-office-bridge-v1",
+  "runtime": "9.3.5.0",
+  "base": "rev28-table-autofilter-criteria-candidate/bridge-block.js",
+  "base_sha256": "ba78664568676be7777e7bffd3c56cb37c37deb5198924cca2b78055f2275c6b",
+  "output_sha256": "0a2fae2c9419ce12b09278260493a32e667b45c722b4cf5f1b9dbd0ac275b3ba",
+  "new_capabilities": [
+    "sheet.veryHidden.read/v1"
+  ],
+  "getters": [
+    "\"sheet.veryHidden.read/v1\": function",
+    "{ id: \"sheet.veryHidden.read/v1\""
+  ],
+  "operations": [
+    {
+      "id": "patch-version-marker",
+      "old": "patchVersion: \"euro-office-bridge-v1/9.3.5.0/28\"",
+      "new": "patchVersion: \"euro-office-bridge-v1/9.3.5.0/29\""
+    },
+    {
+      "id": "manifest-capability-entry",
+      "anchor": "], }; function argsOk(args, keys) {",
+      "inserted": " { id: \"sheet.veryHidden.read/v1\", version: 1, kind: \"READ\", format: \"XLSX\", mutation: \"NO\", semanticContract: \"one sheet name: whether it is specifically veryHidden (not merely hidden) -- true only when the worksheet model carries BOTH bHidden===true AND bEoVeryHidden===true, the second field introduced by this unit's own 3-step engine REPLACE (binary reader/writer + setHidden) that stops folding EVisibleType.visibleVeryHidden into the same case as visibleHidden. A visible or plain-hidden sheet reads veryHidden:false, never a guess; on an engine where the REPLACE steps have not been applied, bEoVeryHidden is simply undefined and this reads false too (never throws). GH #365 option C, docs/GH365-VERYHIDDEN-SHEET-STATE-SOURCE-CONTRACT-20261105.md \\\"3. EGYSEG\\\".\" },"
+    },
+    {
+      "id": "handler-entry",
+      "anchor": "},}; var EO_BRIDGE_WRITES = {",
+      "inserted": " \"sheet.veryHidden.read/v1\": function (args) { if (!args || typeof args.sheet !== \"string\") return { ok: false, reason: \"bad-args\" }; var ws = Api.GetSheet(args.sheet); if (!ws) return { ok: false, reason: \"sheet-not-found\" }; var m; try { m = ws.worksheet; } catch (e) { return { ok: false, reason: \"worksheet-missing\" }; } if (!m) return { ok: false, reason: \"worksheet-missing\" }; var h; try { h = m.bHidden; } catch (e) { return { ok: false, reason: \"threw\" }; } var vh; try { vh = m.bEoVeryHidden; } catch (e) { vh = null; } return { ok: true, value: { veryHidden: h === true && vh === true } }; },"
+    }
+  ],
+  "_comment": "GH #365 option C U1 candidate, derived by build-rev29-veryhidden.py from the real rev28-table-autofilter-criteria-candidate/bridge-block.js (base_sha256 pinned above). NOT installed anywhere. The companion 3-step engine REPLACE (R1/R2/R3) that makes bEoVeryHidden a real, non-undefined field lives in plan-rev29-veryhidden.py (old1..3.txt/new1..3.txt), combined with THIS bridge-block in one install plan -- this script alone only adds the READ plumbing."
+}

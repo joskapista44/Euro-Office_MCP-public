@@ -163,17 +163,53 @@ test("SCHEMA: an unknown format field (style/borderBetween; color/highlight/vert
   }
 });
 
-test('SCHEMA: malformed property values are refused pre-dispatch (wrong type, out-of-range fontSize, empty fontFamily/language)', () => {
+test('SCHEMA: malformed property values are refused pre-dispatch (wrong type, out-of-range fontSize, empty fontFamily/language, GH #324-follow-up: an invalid-looking language TAG, not just an empty/too-long one)', () => {
   const cases = [
     [{ bold: 'yes' }, 'REFUSED_SHAPE'], [{ italic: 1 }, 'REFUSED_SHAPE'],
     [{ fontFamily: '' }, 'REFUSED_SHAPE'], [{ fontFamily: 123 }, 'REFUSED_SHAPE'],
     [{ fontSize: 0 }, 'REFUSED_SHAPE'], [{ fontSize: -1 }, 'REFUSED_SHAPE'], [{ fontSize: 1639 }, 'REFUSED_SHAPE'], [{ fontSize: '14' }, 'REFUSED_SHAPE'],
     [{ language: '' }, 'REFUSED_SHAPE'], [{ language: 'x'.repeat(36) }, 'REFUSED_SHAPE'],
+    // GH #324 follow-up: the SAME invalid examples gh264-docx-define-style.test.cjs already proves REFUSED_SHAPE
+    // on the style field with -- the second subtag 'a' too short, an underscore instead of a hyphen, non-string.
+    [{ language: 'not-a-lang-code' }, 'REFUSED_SHAPE'], [{ language: 'hu_HU' }, 'REFUSED_SHAPE'],
+    [{ language: 'toolongprimarytag' }, 'REFUSED_SHAPE'], [{ language: 123 }, 'REFUSED_SHAPE'], [{ language: true }, 'REFUSED_SHAPE'],
   ];
   for (const [format, code] of cases) { const v = D.validateDocxWriteRequest(req([step({ text: TARGET }, format)])); assert.equal(v.code, code, `${JSON.stringify(format)} -> ${v.code} ${v.reason}`); }
   // the boundary values themselves are accepted
   assert.equal(D.validateDocxWriteRequest(req([step({ text: TARGET }, { fontSize: 1 })])).ok, true);
   assert.equal(D.validateDocxWriteRequest(req([step({ text: TARGET }, { fontSize: 1638 })])).ok, true);
+  // and valid-shaped tags of every length this codebase already uses (GH #264's own list) are accepted
+  for (const language of ['hu-HU', 'en', 'en-GB', 'zh-Hans-CN']) {
+    const v = D.validateDocxWriteRequest(req([step({ text: TARGET }, { language })]));
+    assert.equal(v.ok, true, `${language} -> ${v.code} ${v.reason}`);
+  }
+});
+
+test('GH #324 follow-up, SECOND LAYER: the family\'s own normalizeWanted() refuses an invalid language tag directly -- not just the ajv schema in front of it', () => {
+  const { normalizeWanted } = require('../../src/adapters/docx/families/formatting.cjs');
+  for (const language of ['not-a-lang-code', 'hu_HU', 'x', 'toolongprimarytag']) {
+    const r = normalizeWanted({ language });
+    assert.equal(r.ok, false, JSON.stringify(language));
+    assert.match(r.detail, /language/i, JSON.stringify(language));
+  }
+  for (const language of ['hu-HU', 'en', 'zh-Hans-CN']) {
+    const r = normalizeWanted({ language });
+    assert.equal(r.ok, true, JSON.stringify(language));
+    assert.equal(r.wanted.language, language);
+  }
+});
+
+test('GH #324 follow-up: format_text.language and define_style/modify_style text.language are validated by the SAME pattern -- one constant, not a hand-kept copy', () => {
+  const { LANGUAGE_PATTERN } = require('../../src/adapters/docx/families/style-definition.cjs');
+  // the ajv-shaped schema object isn't exported directly; probe it the same way the SCHEMA tests above do,
+  // on a string that is exactly one character short of LANGUAGE_PATTERN's own longest-allowed subtag --
+  // if format_text's pattern ever drifted from the style's, this boundary would move too.
+  const primaryTooShort = 'a'; // LANGUAGE_PATTERN requires 2-3 letters for the primary subtag
+  assert.equal(LANGUAGE_PATTERN.test(primaryTooShort), false);
+  assert.equal(D.validateDocxWriteRequest(req([step({ text: TARGET }, { language: primaryTooShort })])).code, 'REFUSED_SHAPE');
+  const primaryShortest = 'en'; // 2 letters, the pattern's own lower bound
+  assert.equal(LANGUAGE_PATTERN.test(primaryShortest), true);
+  assert.equal(D.validateDocxWriteRequest(req([step({ text: TARGET }, { language: primaryShortest })])).ok, true);
 });
 
 // ---- the product handler, end to end on the fake transport -----------------------------------------------------------

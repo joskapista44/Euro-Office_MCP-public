@@ -88,7 +88,7 @@ test('GH #137 U2: two runs APPLIED, both hold; retry SATISFIED 0 dispatch; a cha
 });
 
 test('GH #137 U2: a cell over the RUN_MAP_CHAR_CEILING is refused named xlsx-format-run-text-too-long, nothing dispatched', async () => {
-  const h = harness({ store: createStore([{ name: 'S', cells: { A1: { v: 'x'.repeat(300) } } }]) });
+  const h = harness({ store: createStore([{ name: 'S', cells: { A1: { v: 'x'.repeat(1100) } } }]) }); // GH #364 raised RUN_MAP_CHAR_CEILING 256 -> 1024; must stay PAST the new ceiling
   const d0 = h.calls().dispatch;
   const r = await h.tool.handler(req([run()]));
   assert.equal(r.ok, false, J(r).slice(0, 300));

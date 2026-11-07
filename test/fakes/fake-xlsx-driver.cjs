@@ -3,6 +3,10 @@
 const { XLSX_RUNTIME_ID } = require('../../src/core/runtime-identity.cjs');
 const { translateFormula } = require('../../src/adapters/xlsx/shift.cjs');
 const { parseRange: parseA1Range, addr: a1Addr } = require('../../src/adapters/xlsx/a1.cjs');
+// GH #335 remainder (a maintainer review): the real Bridge's OWN sheet.table.write/v1 handler refuses value !== true on
+// every revision shipped today -- the SAME capability list the adapter's family uses, so the fake stays in lock-step
+// with it instead of drifting (the v1 review's own finding: the fake accepted false, the real Bridge never did).
+const { TOTALS_OFF_BRIDGE_RUNTIMES } = require('../../src/adapters/xlsx/families/table-props.cjs');
 /**
  * A fake XLSX editor transport (M6). Same DURABLE / LIVE split as the fake DOCX transport:
  *   open        LIVE := copy of DURABLE
@@ -203,6 +207,9 @@ function createFakeXlsxDriver(store, script = {}) {
   const calls = { open: 0, close: 0, forceSave: 0, canSave: 0, readLive: 0, dispatch: 0, readPackage: 0, bridgeWrites: 0 };
   const reads = [];
   let live = null;
+  // GH #338-#342 remainder (W3, Bridge /24): the workbook-level structure lock, ONE value for the whole
+  // workbook (not per-sheet, unlike `ws.protection` above) -- the same durable/live split `live` itself uses.
+  let workbookLocked = false;
   let openedFileId = null;
   let dirty = false;
   let literalOnSave = {}; // L-06 'copy-saves-literal': sheet\u0000addr -> the source's literal { f, v }, until a formula write replaces it
@@ -677,12 +684,13 @@ function createFakeXlsxDriver(store, script = {}) {
   }
   /** The SAME character-by-character merge the real driver's PUBLIC run-map read does (zero
    * #ref's correction) -- 'UNOBSERVABLE:empty-cell' / 'UNOBSERVABLE:text-too-long' mirror the
-   * real driver's own named gaps (`RUN_MAP_CHAR_CEILING` there is 256, matched here). */
+   * real driver's own named gaps (`RUN_MAP_CHAR_CEILING` there is 1024 since GH #364's LIVE
+   * timing measurement raised it from the prior 256, matched here). */
   function runMapOf(ws, a) {
     const c = ws.cells[a] || { v: '' };
     const text = c.v === null || c.v === undefined ? '' : String(c.v);
     if (text === '') return 'UNOBSERVABLE:empty-cell';
-    if (text.length > 256) return 'UNOBSERVABLE:text-too-long';
+    if (text.length > 1024) return 'UNOBSERVABLE:text-too-long';
     const runs = [];
     let cur = null;
     for (let i = 1; i <= text.length; i += 1) {
@@ -720,16 +728,269 @@ function createFakeXlsxDriver(store, script = {}) {
     }
     return out;
   }
+  // GH #348 / #349: edit_comment (SetText) / delete_comment (Delete) on the SESSION user's own comment (the real command re-checks the
+  // live comment's uid against the session uid and does nothing otherwise). SetText keeps author / uid / solved / replies (LIVE probe);
+  // Delete takes the comment and its replies, no other comment, no cell value. Faults: 'ignore', 'side-effect', 'comment-touches-other'
+  // (another comment's text changes), edit: 'edit-changes-author', 'edit-drops-replies', 'edit-unsolves'; delete: 'delete-takes-neighbour'
+  // (another comment goes too), 'delete-clears-cell' (the cell value is lost), 'delete-drops-foreign-reply' (the command body's foreign-reply guard is broken).
+  function applyEditOrDeleteComment(m, ws, author) {
+    const f = script.fault;
+    ws.comments = ws.comments || [];
+    const i = ws.comments.findIndex(c => c.cell === m.cell);
+    if (i < 0 || ws.comments[i].userId !== author.id) return;
+    // the race: a foreign reply lands on the live comment between the read and the dispatch (script.foreignReplyAtDispatch = the cell)
+    if (script.foreignReplyAtDispatch === m.cell) ws.comments[i].replies = [...(ws.comments[i].replies || []), { text: 'late reply', author: 'Late Replier', userId: 'oc_late', timeUtc: 0 }];
+    // the command body's own guard: a delete never takes a foreign reply with it (fault 'delete-drops-foreign-reply' = a broken guard)
+    if (m.intent === 'delete_comment' && f !== 'delete-drops-foreign-reply' && (ws.comments[i].replies || []).some(r => r.userId !== author.id)) return;
+    if (m.intent === 'edit_comment') {
+      const c = ws.comments[i];
+      c.text = m.text;
+      if (f === 'edit-changes-author') c.author = 'Someone Else';
+      if (f === 'edit-drops-replies') c.replies = [];
+      if (f === 'edit-unsolves') c.solved = false;
+    } else {
+      ws.comments.splice(i, 1);
+      if (f === 'delete-takes-neighbour') { const j = ws.comments.findIndex(c => c.cell !== m.cell); if (j >= 0) ws.comments.splice(j, 1); }
+      if (f === 'delete-clears-cell' && ws.cells[m.cell]) delete ws.cells[m.cell];
+    }
+    if (f === 'comment-touches-other') { const o = ws.comments.find(c => c.cell !== m.cell); if (o) o.text += ' (changed)'; }
+    if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
+  }
+  // GH #350 / #351: reply_to_comment (AddReply by the SESSION author, appended) / set_comment_resolved (SetSolved) on ANY author's comment;
+  // the root comment, its other replies and every cell are kept (LIVE probe). Faults: 'ignore', 'side-effect', 'comment-touches-other',
+  // reply: 'reply-wrong-author' (the reply carries another name/uid), 'reply-drops-thread' (the earlier replies vanish), 'reply-unsolves';
+  // resolve: 'resolve-drops-replies', 'resolve-changes-text'.
+  function applyReplyOrResolve(m, ws, author) {
+    const f = script.fault;
+    const c = (ws.comments || []).find(x => x.cell === m.cell);
+    if (!c) return;
+    if (m.intent === 'reply_to_comment') {
+      const prior = c.replies || [];
+      const r = { text: m.text, author: f === 'reply-wrong-author' ? 'Someone Else' : author.name, userId: f === 'reply-wrong-author' ? 'oc_other' : author.id, timeUtc: 0 };
+      c.replies = f === 'reply-drops-thread' ? [r] : [...prior, r];
+      if (f === 'reply-unsolves') c.solved = false;
+    } else {
+      c.solved = m.resolved;
+      if (f === 'resolve-drops-replies') c.replies = [];
+      if (f === 'resolve-changes-text') c.text += ' (changed)';
+    }
+    if (f === 'comment-touches-other') { const o = ws.comments.find(x => x.cell !== m.cell); if (o) o.text += ' (changed)'; }
+    if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
+  }
   function applyComment(m) {
     const f = script.fault;
     const author = sessionUserOf();
     if (f === 'ignore' || !author) return;
     const ws = live.find(x => x.name === m.sheet);
     if (!ws) return;
+    if (m.intent === 'edit_comment' || m.intent === 'delete_comment') { applyEditOrDeleteComment(m, ws, author); return; }
+    if (m.intent === 'reply_to_comment' || m.intent === 'set_comment_resolved') { applyReplyOrResolve(m, ws, author); return; }
     ws.comments = ws.comments || [];
     if (ws.comments.some(c => c.cell === m.cell)) return; // the measured silent no-op
     ws.comments.push({ cell: m.cell, text: m.text, author: f === 'comment-wrong-author' ? 'Someone Else' : author.name, userId: f === 'comment-no-user-id' ? '' : author.id, timeUtc: 0, solved: false, replies: [] });
     if (f === 'comment-touches-other') { const o = ws.comments.find(c => c.cell !== m.cell); if (o) o.text += ' (changed)'; }
+    if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
+  }
+  // GH #336 / #337: insert_table_rows / delete_table_rows / insert_table_columns / delete_table_columns -- the public Insert/Delete over the table's FULL
+  // width (rows) / FULL height (columns), header included. The engine shifts ONLY the band (rows: the table's columns from the cut down; columns:
+  // the table's rows from the cut right); the table's ref grows / shrinks; an inserted column gets the engine's own header 'ColumnN'. (Formula TEXT is not
+  // re-pointed here: the offline fixtures keep formulas outside the band or assert the family's own refusals.) Faults: 'ignore', 'side-effect',
+  // 'ts-ref-not-grown' (the table ref stays), 'ts-partial-width' (a row op shifts only the first column: the table is sheared), 'ts-band-stays' (no cell
+  // moves), 'ts-columns-lost' (a column insert drops the old column names), 'ts-leaves-ref-error' (a delete writes #REF! into a formula cell outside).
+  function applyTableStructure(m) {
+    const f = script.fault;
+    if (f === 'ignore') return;
+    const ws = live.find(x => x.name === m.sheet);
+    if (!ws) return;
+    const t = (ws.tables || []).find(x => String(x.name).toLowerCase() === String(m.table).toLowerCase());
+    if (!t) return;
+    const g = parseRange(m.ref);
+    const rows = m.axis === 'rows';
+    const act = rows ? { r1: g.r1 + m.at, r2: g.r1 + m.at + m.count - 1, c1: g.c1, c2: g.c2 } : { r1: g.r1, r2: g.r2, c1: g.c1 + m.at - 1, c2: g.c1 + m.at - 1 + m.count - 1 };
+    const inBand = (r, c) => (rows ? r >= act.r1 && c >= g.c1 && c <= (f === 'ts-partial-width' ? g.c1 : g.c2) : c >= act.c1 && r >= g.r1 && r <= g.r2);
+    const inAct = (r, c) => r >= act.r1 && r <= act.r2 && c >= act.c1 && c <= act.c2;
+    const moved = {};
+    for (const [a, cell] of Object.entries(ws.cells)) {
+      const q = parseRange(a);
+      if (f !== 'ts-band-stays' && inBand(q.r1, q.c1)) {
+        if (m.sign < 0 && inAct(q.r1, q.c1)) continue;
+        const r = rows ? q.r1 + m.sign * m.count : q.r1;
+        const c = rows ? q.c1 : q.c1 + m.sign * m.count;
+        moved[addr(c, r)] = cell;
+      } else moved[a] = cell;
+    }
+    if (m.sign > 0 && !rows) {
+      const names = [];
+      for (let i = 0; i < m.count; i += 1) { names.push(`Column${i + 1}`); moved[addr(act.c1 + i, g.r1)] = { v: `Column${i + 1}`, f: '' }; }
+      t.columns = f === 'ts-columns-lost' ? [...names, ...t.columns.map(() => 'X')] : [...t.columns.slice(0, m.at - 1), ...names, ...t.columns.slice(m.at - 1)];
+    }
+    if (m.sign < 0 && !rows) t.columns = t.columns.filter((_, i) => i < m.at - 1 || i >= m.at - 1 + m.count);
+    ws.cells = moved;
+    if (f !== 'ts-ref-not-grown') t.ref = rangeText({ r1: g.r1, c1: g.c1, r2: rows ? g.r2 + m.sign * m.count : g.r2, c2: rows ? g.c2 : g.c2 + m.sign * m.count });
+    if (f === 'ts-leaves-ref-error' && m.sign < 0) { const k = Object.keys(ws.cells).find(a => ws.cells[a].f); if (k) ws.cells[k] = { ...ws.cells[k], f: '=SUM(#REF!)', v: '#REF!' }; }
+    if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
+  }
+  // GH #332-#335: set_table_style / set_table_flag / set_table_totals_row / rename_table / resize_table -- ONE sheet.table.write/v1 Bridge WRITE (/19). The fake
+  // models the handler's own verdict: the property is applied to the table (style name / one style flag / totals row + the ref grown by one row / name / ref) and
+  // the dispatch is ok. Script: tpWrite 'gate-refused' (the Bridge write gate answers CAPABILITY_MISSING, mutation NONE). Faults: 'ignore' (nothing changes, the
+  // handler's no-effect refusal: uncertain, mutation UNKNOWN), 'tp-ok-but-nothing' (ok:true but nothing changed -- only the independent verification can tell),
+  // 'tp-collateral' (also flips another field of the table), 'tp-other-table' (also changes another table), 'tp-cell-side-effect' (a cell outside changes),
+  // 'tp-rename-breaks-formula' (a rename leaves #NAME? in a formula cell), 'tp-rename-rewrite-skipped'
+  // (GH #332: the per-cell SetValue rewrite the rename callCommand issues for a structured reference
+  // never runs -- the old name stays in the dependent formula).
+  // GH #338-#342: the /22 protection writes. `ws.protectionCredential: true` = a password-protected sheet (the handler refuses it, NONE).
+  // Faults: 'ignore' (no-effect, uncertain), 'prot-cell-side-effect' (a cell value changes too).
+  function protectionWrite(m) {
+    const f = script.fault;
+    calls.bridgeWrites += 1;
+    const failed = (reason, pre) => ({ ok: false, dispatched: true, outcome: 'protectionWrite-bridge-write-failed', evidence: { ok: false, stage: 'bridge-write', reason, uncertain: !pre, mutation: pre ? 'NONE' : 'UNKNOWN' } });
+    const ws = live.find(x => x.name === m.sheet);
+    if (!ws) return failed('BRIDGE:sheet-not-found', true);
+    if (m.intent !== 'set_cell_protection' && ws.protectionCredential) return failed('BRIDGE:credential-protected', true);
+    if (m.intent === 'set_cell_protection' && ws.protection) return failed('BRIDGE:sheet-protected', true);
+    if (f === 'ignore') return failed('BRIDGE:no-effect', false);
+    if (m.intent === 'protect_sheet') ws.protection = { full: true, forbids: { ...m.want.forbids } };
+    else if (m.intent === 'unprotect_sheet') ws.protection = null;
+    else {
+      const cp = ws.cellProtection || (ws.cellProtection = { unlocked: [], hidden: [] });
+      for (const a of cellsOf(parseRange(m.range))) {
+        if (m.want.locked !== undefined) cp.unlocked = m.want.locked ? cp.unlocked.filter(x => x !== a) : [...new Set([...cp.unlocked, a])];
+        if (m.want.hidden !== undefined) cp.hidden = m.want.hidden ? [...new Set([...cp.hidden, a])] : cp.hidden.filter(x => x !== a);
+      }
+    }
+    if (f === 'prot-cell-side-effect') ws.cells.Z99 = { v: 'side effect', f: '' };
+    return { ok: true, dispatched: true, outcome: 'command-completed', error: null };
+  }
+  // GH #338-#342 remainder (/24 Bridge candidate, 62133fca): the workbook-level structure lock. Mirrors the real
+  // handler (handler-wb-protection-write-v24.txt): already-at-target -> satisfied, no history; unprotect while
+  // LOCKED -> credential-unobservable, UNCONDITIONALLY -- the real handler never distinguishes a password-protected
+  // lock from a passwordless one (62133fca's own security fix), so the fake does not script a separate credential flag.
+  function workbookProtectionWrite(m) {
+    calls.bridgeWrites += 1;
+    const failed = (reason, pre) => ({ ok: false, dispatched: true, outcome: 'workbookProtectionWrite-bridge-write-failed', evidence: { ok: false, stage: 'bridge-write', reason, uncertain: !pre, mutation: pre ? 'NONE' : 'UNKNOWN' } });
+    if (workbookLocked === m.want.protect) return { ok: true, dispatched: true, outcome: 'command-completed', error: null };
+    if (m.want.protect === false && workbookLocked === true) return failed('BRIDGE:credential-unobservable', true);
+    if (script.fault === 'ignore') return failed('BRIDGE:no-effect', false);
+    workbookLocked = m.want.protect;
+    return { ok: true, dispatched: true, outcome: 'command-completed', error: null };
+  }
+  function tablePropsWrite(m) {
+    const f = script.fault;
+    calls.bridgeWrites += 1;
+    const failed = (reason, extra = {}) => ({ ok: false, dispatched: true, outcome: 'tableWrite-bridge-write-failed', evidence: { ok: false, stage: 'bridge-write', reason, uncertain: true, mutation: 'UNKNOWN', ...extra }, error: null });
+    if (script.tpWrite === 'gate-refused') return { ok: false, dispatched: true, outcome: 'tableWrite-bridge-write-failed', evidence: { ok: false, stage: 'bridge-write-gate', reason: 'CAPABILITY_MISSING', mutation: 'NONE' }, error: null };
+    // GH #338-#342 remainder (G1 LIVE on the disposable DS, 2026-11-03, internal tracker): the real
+    // sheet.table.write/v1 handler refuses `workbook-protected`, PRE_DISPATCH, under a workbook-level
+    // structure lock -- measured since /19, orthogonal to the table/sheet-level checks below it.
+    if (workbookLocked === true) return failed('BRIDGE:workbook-protected', { uncertain: false, mutation: 'NONE' });
+    const ws = live.find(x => x.name === m.sheet);
+    const t = ws && (ws.tables || []).find(x => String(x.name).toLowerCase() === String(m.table).toLowerCase());
+    if (!t) return failed('BRIDGE:table-not-found', { uncertain: false, mutation: 'NONE' });
+    if (f === 'ignore') return failed('BRIDGE:no-effect');
+    if (f === 'tp-ok-but-nothing') return { ok: true, dispatched: true, outcome: 'command-completed', error: null };
+    const w = m.want;
+    // GH #335 remainder: the real Bridge handler refuses value !== true on every revision shipped today,
+    // INDEPENDENTLY of the adapter's own classify() gate -- a direct dispatch() against this fake (bypassing the
+    // adapter, as the "driver second line" test does) must see the same closed door the real Bridge shows.
+    if (m.property === 'totalsRow' && w.value === false && !TOTALS_OFF_BRIDGE_RUNTIMES.includes(script.runtime === undefined ? XLSX_RUNTIME_ID : script.runtime)) {
+      return failed('BRIDGE:totals-off-not-measured', { mutation: 'NONE', uncertain: false });
+    }
+    if (m.property === 'style') t.style = { ...(t.style || { rowStripes: true, columnStripes: false, firstColumn: false, lastColumn: false }), name: w.style };
+    if (m.property === 'flag') t.style = { ...t.style, [w.flag]: w.value };
+    if (m.property === 'totalsRow') {
+      const g = parseRange(t.ref);
+      if (w.value === true) {
+        t.totalsRow = true;
+        const newRow = g.r2 + 1;
+        t.ref = rangeText({ r1: g.r1, c1: g.c1, r2: newRow, c2: g.c2 });
+        // GH #335 remainder: the measured LIVE shape the engine fills the new row with -- a label in the first
+        // column, a SUBTOTAL formula (itself a structured reference to the table) in the last.
+        ws.cells[a1Addr(g.c1, newRow)] = { v: 'Summary', f: '' };
+        const lastCol = (t.columns || [])[t.columns.length - 1];
+        ws.cells[a1Addr(g.c2, newRow)] = { v: 0, f: `SUBTOTAL(103,${t.name}[${lastCol}])` };
+      } else {
+        t.totalsRow = false;
+        t.ref = rangeText({ r1: g.r1, c1: g.c1, r2: g.r2 - 1, c2: g.c2 });
+        // the vacated row's cells disappear with it (including the engine's own SUBTOTAL formula, if present)
+        for (let c = g.c1; c <= g.c2; c += 1) delete ws.cells[a1Addr(c, g.r2)];
+      }
+    }
+    if (m.property === 'name') t.name = w.name;
+    if (m.property === 'ref') t.ref = w.ref;
+    // GH #332 (owner decision A): the rename callCommand's OWN rewrite step, modelled by the SAME shape
+    // measured LIVE (6d4606b2 #ref) -- the formula text updates immediately, the VALUE reads back ''
+    // until the engine recalculates (which the fake does not model; the family's verifyPreservation
+    // excludes these addresses for exactly this reason). Fault 'tp-rename-rewrite-skipped': the write
+    // never happens (a bug in the engine or the callCommand) -- the old name stays in the formula, so a
+    // test asserting the rewritten text actually catches it.
+    if (m.renameFormulaRewrites && f !== 'tp-rename-rewrite-skipped') {
+      for (const rw of m.renameFormulaRewrites) {
+        const sep = rw.address.indexOf('!');
+        const wsR = live.find(x => x.name === rw.address.slice(0, sep));
+        if (wsR) wsR.cells[rw.address.slice(sep + 1)] = { ...(wsR.cells[rw.address.slice(sep + 1)] || {}), f: rw.to, v: '' };
+      }
+    }
+    if (f === 'tp-collateral') t.autoFilter = !t.autoFilter;
+    if (f === 'tp-other-table') { const o = ws.tables.find(x => x !== t); if (o) o.style = { ...(o.style || {}), name: 'TableStyleDark1' }; }
+    if (f === 'tp-cell-side-effect') ws.cells.Z99 = { v: 'side effect', f: '' };
+    if (f === 'tp-rename-breaks-formula') { const k = Object.keys(ws.cells).find(a => ws.cells[a].f); if (k) ws.cells[k] = { v: '#NAME?', f: ws.cells[k].f }; }
+    return { ok: true, dispatched: true, outcome: 'command-completed', error: null };
+  }
+  // GH #300 L1 / #298 D (H2 fix): a sheet's `hyperlinks` list of { ref, address, location,
+  // tooltip, kind } / `tables` list of { name, ref, headerRow, totalsRow, columns, style, autoFilter },
+  // read via `hyperlinkSheets`/table reads (read_hyperlinks/read_tables). Row-then-column order for links
+  // (the bridge's own convention); document order for tables (the fixture's own array order).
+  // script.hyperlinksUnobservable / .tablesUnobservable -> 'UNOBSERVABLE:threw'.
+  // GH #300 L2 (RELEASED, after LIVE acceptance): the WRITE side -- SetHyperlink (external-only, v1);
+  // `kind` is always 'external' here (the only LIVE-measured value). ClearHyperlinks removes the entry
+  // outright (measured: getAll() drops the record, not a tombstone). Faults 'ignore', 'side-effect',
+  // 'hyperlink-wrong-address' (a different address lands), 'hyperlink-touches-other' (another link's
+  // address changes).
+  const rowMajorRef = (x, y) => { const a = parseRange(x.ref); const b = parseRange(y.ref); return a.r1 - b.r1 || a.c1 - b.c1; };
+  function hyperlinkReadsOf(asked) {
+    const out = {};
+    for (const n of asked) {
+      if (script.hyperlinksUnobservable) { out[n] = 'UNOBSERVABLE:threw'; continue; }
+      const ws = live.find(x => x.name === n);
+      out[n] = ws ? { links: clone(ws.hyperlinks || []).sort(rowMajorRef) } : 'UNOBSERVABLE:sheet-missing';
+    }
+    return out;
+  }
+  function tableReadsOf(asked) {
+    const out = {};
+    // eb2fca05 v4: '*' = every sheet, the SAME convention printReadsOf/pageReadsOf/... already use (and the
+    // real driver's tableAsked.includes('*') ? sheets.map(...) : tableAsked, xlsx-driver.cjs:1350).
+    for (const n of (asked.includes('*') ? live.map(x => x.name) : asked)) {
+      if (script.tablesUnobservable) { out[n] = 'UNOBSERVABLE:threw'; continue; }
+      const ws = live.find(x => x.name === n);
+      out[n] = ws ? { tables: clone(ws.tables || []) } : 'UNOBSERVABLE:sheet-missing';
+    }
+    return out;
+  }
+  function applyHyperlink(m) {
+    const f = script.fault;
+    const ws = live.find(x => x.name === m.sheet);
+    if (!ws) return;
+    ws.hyperlinks = ws.hyperlinks || [];
+    if (m.action === 'remove') {
+      if (f === 'ignore') return;
+      ws.hyperlinks = ws.hyperlinks.filter(l => l.ref !== m.cell);
+      if (f === 'hyperlink-touches-other') { const o = ws.hyperlinks.find(l => l.ref !== m.cell); if (o) o.address += '-changed'; }
+      if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
+      return;
+    }
+    if (f === 'ignore') return;
+    ws.hyperlinks = ws.hyperlinks.filter(l => l.ref !== m.cell);
+    // GH #352: an internal link is stored with the canonical quoted location and no address (LIVE probe round 4); an
+    // external one never carries a location (the engine drops it -- round 1)
+    if (m.kind === 'internal') ws.hyperlinks.push({ ref: m.cell, address: null, location: f === 'hyperlink-wrong-address' ? "'Wrong'!A1" : m.location, tooltip: m.tooltip === undefined ? null : m.tooltip, kind: 'internal' });
+    else ws.hyperlinks.push({ ref: m.cell, address: f === 'hyperlink-wrong-address' ? 'https://wrong.example/' : m.address, location: null, tooltip: m.tooltip === undefined ? null : m.tooltip, kind: 'external' });
+    // GH #300 L2 (a maintainer's LIVE empty-cell probe, 2026-10-28): SetHyperlink's own measured side effect on
+    // the TARGET cell's value -- sTextToDisplay '' rewrites it to the address; the cell's own text (what
+    // the family always passes now) leaves it unchanged (a number stays a number -- GH #352 probe round 4). Mirrored here so a regression (passing '' again)
+    // fails this OFFLINE suite too, not only a LIVE run.
+    if (typeof m.text === 'string') { const c = ws.cells[m.cell] || {}; ws.cells[m.cell] = { ...c, v: m.text === '' ? (m.address || m.location) : (String(c.v) === m.text ? c.v : m.text) }; }
+    if (f === 'hyperlink-touches-other') { const o = ws.hyperlinks.find(l => l.ref !== m.cell); if (o) o.address += '-changed'; }
     if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
   }
   function applyArrayFormula(m) {
@@ -932,6 +1193,15 @@ function createFakeXlsxDriver(store, script = {}) {
     if (f === 'name-appears') liveNames = [...liveNames, { name: 'Appeared', ref: `${m.sheet}!$A$1` }];
     if (f === 'name-other-changes') { const i = liveNames.findIndex(n => !n.ref.toUpperCase().startsWith(`${m.sheet.toUpperCase()}!`)); if (i >= 0) liveNames[i] = { ...liveNames[i], ref: liveNames[i].ref.replace(/\$(\d+)$/, (_, r) => `$${Number(r) + 1}`) }; }
     if (f === 'side-effect') live.find(x => x !== target).cells.Z99 = { v: 'side effect' };
+    // fa7244ac/5 (Q4 MEASURED, c19b1065 #ref): the real engine's own row insert, when the cut lies strictly
+    // within the target's OWN AutoFilter data rows (after its header, at or before its last data row), grows the
+    // filter's ref by the inserted count -- the header, the other edges and every criterion stay put. Fault
+    // 'autofilter-no-extend' models a hypothetical engine that leaves the ref alone (an L3 negative control: the
+    // fix's filterExtendedAsExpected must then NOT match, and the step must fail).
+    if (rows && count > 0 && f !== 'autofilter-no-extend' && target.autoFilter && target.autoFilter.range) {
+      const g = parseRange(target.autoFilter.range);
+      if (g && g.r1 < m.at && m.at <= g.r2) target.autoFilter = { ...target.autoFilter, range: `${addr(g.c1, g.r1)}:${addr(g.c2, g.r2 + count)}` };
+    }
     // M7 S2a L3 negative controls: the step ALSO moves a layout object (on script.layoutSheet, default the target)
     const lw = live.find(x => x.name === (script.layoutSheet || m.sheet));
     if (f === 'layout-moves-filter' && lw && lw.autoFilter) lw.autoFilter = { ...lw.autoFilter, range: 'A1:A99' };
@@ -1190,26 +1460,59 @@ function createFakeXlsxDriver(store, script = {}) {
     return out;
   }
 
+  // GH #344: SetAutoFilter(field, Api.CreateColorFromRGB(r,g,b), 'xlFilter<Cell|Font>Color') -- criteria1/criteria2
+  // stay null (the measured, public-getter-invisible shape, filter-read.cjs); the colour itself lands only in
+  // af.colours.columns, mirroring the real driver's auto-attached Bridge /21 capability (xlsx-driver.cjs: colours
+  // is added to a filterReads entry whenever an xlFilterCellColor/FontColor operator is present).
+  const COLOUR_OP_OF = { cellColor: 'xlFilterCellColor', fontColor: 'xlFilterFontColor' };
+  const hexOfRgb = ([r, g, b]) => [r, g, b].map(n => n.toString(16).padStart(2, '0')).join('').toUpperCase();
+
   function applyFilter(m) {
     const f = script.fault;
     if (f === 'ignore') return;
     const ws = live.find(x => x.name === m.sheet);
     if (!ws) return;
     if (m.action === 'filter_range') {
-      const af = ws.autoFilter && ws.autoFilter.range === m.range ? ws.autoFilter : { range: m.range, filters: [] };
+      const af = ws.autoFilter && ws.autoFilter.range === m.range ? ws.autoFilter : { range: m.range, filters: [], colours: { columns: [] } };
+      if (!af.colours) af.colours = { columns: [] };
       // M7 R19: values -> xlOr =a / =b; and -> xlAnd c1 / c2 (the probe's read-back)
       const wrong = f === 'filter-wrong-value';
       // GH #301 D2 (AF-02): 3+ values -> xlFilterValues + the array; top -> xlTop10Items n; dynamic -> xlFilterDynamic constant
       const DYN = { aboveAverage: 'xlFilterAboveAverage', belowAverage: 'xlFilterBelowAverage' };
-      const crit = m.values && m.values.length > 2 ? { operator: 'xlFilterValues', criteria1: wrong ? m.values.slice(0, -1) : [...m.values], criteria2: null }
+      const crit = m.colour ? { operator: COLOUR_OP_OF[m.colour.kind], criteria1: null, criteria2: null }
+        : m.values && m.values.length > 2 ? { operator: 'xlFilterValues', criteria1: wrong ? m.values.slice(0, -1) : [...m.values], criteria2: null }
         : m.top ? { operator: 'xlTop10Items', criteria1: wrong ? m.top + 1 : m.top, criteria2: null }
           : m.dynamic ? { operator: 'xlFilterDynamic', criteria1: wrong ? 'xlFilterToday' : DYN[m.dynamic], criteria2: null }
             : m.values ? { operator: 'xlOr', criteria1: `=${m.values[0]}`, criteria2: `=${m.values[1]}` } : (m.and ? { operator: 'xlAnd', criteria1: m.and[0], criteria2: m.and[1] } : { operator: 'xlOr', criteria1: `=${wrong ? `${m.value}!` : m.value}`, criteria2: null });
       if (wrong && m.values && m.values.length === 2) crit.criteria2 = `=${m.values[1]}!`;
       if (f === 'filter-wrong-operator') crit.operator = crit.operator === 'xlAnd' ? 'xlOr' : 'xlAnd';
-      af.filters = af.filters.filter(x => x.field !== m.field && f !== 'filter-drops-other').concat([{ field: f === 'filter-wrong-field' ? m.field + 1 : m.field, on: true, ...crit }]);
+      const field = f === 'filter-wrong-field' ? m.field + 1 : m.field;
+      af.filters = af.filters.filter(x => x.field !== m.field && f !== 'filter-drops-other').concat([{ field, on: true, ...crit }]);
       if (f === 'filter-extra-field') af.filters.push({ field: m.field + 1, on: true, operator: 'xlOr', criteria1: '=extra', criteria2: null });
+      if (m.colour) {
+        af.colours = { columns: af.colours.columns.filter(c => c.field !== field) };
+        // filter-colour-unlisted: the write lands (the filter IS on the sheet), but the Bridge capability never
+        // lists this field's column -- the measured colour-unverifiable shape (colourOf()'s UNOBSERVABLE path).
+        if (f !== 'filter-colour-unlisted') {
+          const rgb = wrong ? [255 - m.colour.rgb[0], 255 - m.colour.rgb[1], 255 - m.colour.rgb[2]] : m.colour.rgb;
+          af.colours.columns.push({ field, kind: f === 'filter-colour-wrong-kind' ? (m.colour.kind === 'cellColor' ? 'fontColor' : 'cellColor') : m.colour.kind, colour: { form: 'rgb', hex: hexOfRgb(rgb) } });
+        }
+      }
       ws.autoFilter = af;
+    } else if (m.action === 'set_autofilter_range' || m.action === 'remove_autofilter') {
+      // fa7244ac/2: the engine's bare SetAutoFilter() toggles the whole AutoFilter object (Q1/Q3 MEASURED,
+      // c19b1065) -- creates buttons-only when none exists, removes it entirely when one does. gate()/
+      // classify() only ever dispatch set_autofilter_range when none exists yet and remove_autofilter when
+      // one does, so modelling the real toggle (rather than branching on which intent asked) exercises
+      // lower()'s actual call body, not a shortcut around it.
+      // a maintainer review (e65eda2d #ref): 'remove-leaves-inactive' models the clear_filter/ShowAllData shape
+      // (object stays, range intact, every filter turned off) instead of the real toggle's full removal --
+      // the fault remove_autofilter's own verify (range === null) must NOT accept, discriminating it from
+      // clear_filter's weaker "no active filter" criterion.
+      if (f === 'remove-leaves-inactive' && m.action === 'remove_autofilter' && ws.autoFilter) {
+        ws.autoFilter = { ...ws.autoFilter, filters: ws.autoFilter.filters.map(x => ({ ...x, on: false })) };
+      } else if (ws.autoFilter) delete ws.autoFilter;
+      else ws.autoFilter = { range: m.range, filters: [], colours: { columns: [] } };
     } else if (ws.autoFilter) ws.autoFilter = { ...ws.autoFilter, filters: ws.autoFilter.filters.map(x => ({ ...x, on: false })) };
     if (f === 'side-effect') live.find(x => x !== ws).cells.Z99 = { v: 'side effect' };
     dirty = true;
@@ -1299,6 +1602,25 @@ function createFakeXlsxDriver(store, script = {}) {
       if (hit && m.target === 'seriesOrder' && f !== 'style-bridge-stale') {
         m.styleOrder.forEach((v, i) => { if (hit.series[i]) hit.series[i].order = v; });
       }
+      // GH #346 AUTO-REPAIR Egyseg 3: dataPoint IS readable (through chartReadsOf's own
+      // `pointStyles` field below, the {form:'rgb',hex}-shaped chart.series.style.read/v1 value,
+      // Egyseg 1) -- a successful dispatch NORMALISES (always, even with no fill/outline change: a
+      // stored `duplicated` is cleared) and writes only the REQUESTED axis onto the single
+      // surviving entry, keeping the other axis from whatever was there before (the real handler's
+      // own "only the requested field changes on the survivor" rule). 'style-bridge-stale' is the
+      // SAME sabotage fault as marker/gridlines/gapOverlap/seriesOrder above: the dispatch succeeds
+      // but the bridge-read value does not change, proving classifyStyle/PRIMITIVE actually
+      // read-and-compare rather than trusting the dispatch outcome.
+      if (hit && m.target === 'dataPoint' && f !== 'style-bridge-stale') {
+        hit.pointStyles = hit.pointStyles || {};
+        const key = `${m.seriesIndex}:${m.dataPointIndex}`;
+        const prev = hit.pointStyles[key];
+        const prevObj = prev && typeof prev === 'object' ? prev : { element: 'absent', fill: null, outline: null, outlineWidthEmu: null };
+        const fill = m.styleFill !== null ? { form: 'rgb', hex: m.styleFill } : prevObj.fill;
+        const outline = m.styleOutline !== null ? { form: 'rgb', hex: m.styleOutline.color } : prevObj.outline;
+        const outlineWidthEmu = m.styleOutline !== null ? Math.round(m.styleOutline.width * 12700) : prevObj.outlineWidthEmu;
+        hit.pointStyles[key] = { element: 'present', fill, outline, outlineWidthEmu, effective: { brush: fill, pen: outline } };
+      }
     } else if (m.action === 'delete_chart') {
       // X-O07/3: removes the WHOLE chart record -- the generic `f === 'ignore'` fault above
       // (dispatch succeeds, nothing actually happens) already covers the RED case, same
@@ -1370,11 +1692,22 @@ function createFakeXlsxDriver(store, script = {}) {
   // 'print-side' (another print field of the sheet changes too), 'break-drops-other' (an existing break goes),
   // 'fit-wrong-height', 'break-not-manual' (man false), 'first-page-unused' (the number without its use flag), 'side-effect'.
   const PRINT_DEFAULT = { fitW: 0, fitH: 0, fitFlag: false, oddHeader: null, rowBreaks: [], useFirstPage: false, firstPage: null, hCenter: false, oddFooter: null, vCenter: false, colBreaks: [], scale: 100, width: 210, height: 297, firstHeader: null, firstFooter: null, evenHeader: null, evenFooter: null, diffFirst: false, diffOddEven: false };
+  // GH #354/#355: the print LAYOUT (sheet.printSettings.read/v2 / write/v2) lives in ws.layout { headerMargin, footerMargin, pageOrder };
+  // script.layoutBuild false -> the read gaps the field (a /19 runtime: 'UNOBSERVABLE:CAPABILITY_MISSING')
+  const LAYOUT_DEFAULT = { headerMargin: 7.62, footerMargin: 7.62, pageOrder: 'downThenOver' };
   function applyPrint(m) {
     const f = script.fault;
     if (f === 'ignore') return;
     const ws = live.find(x => x.name === m.sheet);
     if (!ws) return;
+    if (m.action === 'set_header_footer_margin' || m.action === 'set_page_order') {
+      const l = { ...LAYOUT_DEFAULT, ...clone(ws.layout || {}) };
+      const w = m.want;
+      l[w.setting] = f !== 'print-wrong-value' ? w.value : w.setting === 'pageOrder' ? (w.value === 'downThenOver' ? 'overThenDown' : 'downThenOver') : w.value + 1;
+      if (f === 'print-side') { if (w.setting === 'pageOrder') l.headerMargin += 1; else l.pageOrder = l.pageOrder === 'downThenOver' ? 'overThenDown' : 'downThenOver'; }
+      ws.layout = l; dirty = true;
+      return;
+    }
     const p = { ...PRINT_DEFAULT, ...clone(ws.print || {}) };
     const w = m.want;
     const bump = x => (f === 'print-wrong-value' ? x + 1 : x);
@@ -1513,13 +1846,13 @@ function createFakeXlsxDriver(store, script = {}) {
     if (f === 'side-effect') live.find(x => x !== host).cells.Z99 = { v: 'side effect' };
     dirty = true;
   }
-  const printReadsOf = (asked, cols) => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => { const ws = live.find(x => x.name === n);
+  const printReadsOf = (asked, cols, withLayout) => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => { const ws = live.find(x => x.name === n);
     if (script.printBuild === false) return [n, 'UNOBSERVABLE:runtime-not-verified'];
     // M7 F2: the widened fields (oddFooter, vCenter, and with them colBreaks) as the proven build serves them;
     // script.printWide false -> an unwidened read
     const { colBreaks, oddFooter, vCenter, firstHeader, firstFooter, evenHeader, evenFooter, diffFirst, diffOddEven, ...pr } = { ...PRINT_DEFAULT, ...clone((ws && ws.print) || {}) };
     const wide = script.printWide !== false;
-    return [n, { ...pr, ...(cols || wide ? { colBreaks: script.colBreakBuild === false ? 'UNOBSERVABLE:runtime-not-verified' : colBreaks } : {}), ...(wide ? { oddFooter, vCenter, firstHeader, firstFooter, evenHeader, evenFooter, diffFirst, diffOddEven } : {}) }]; }));
+    return [n, { ...pr, ...(cols || wide ? { colBreaks: script.colBreakBuild === false ? 'UNOBSERVABLE:runtime-not-verified' : colBreaks } : {}), ...(wide ? { oddFooter, vCenter, firstHeader, firstFooter, evenHeader, evenFooter, diffFirst, diffOddEven } : {}), ...(withLayout ? { layout: script.layoutBuild === false ? 'UNOBSERVABLE:CAPABILITY_MISSING' : { ...LAYOUT_DEFAULT, ...clone((ws && ws.layout) || {}) } } : {}) }]; }));
   const PAGE_DEFAULT = { orientation: 'xlPortrait', printGridlines: false, printHeadings: false, topMargin: 19.1, bottomMargin: 19.1, leftMargin: 17.8, rightMargin: 17.8 };
   function applyPage(m) {
     const f = script.fault;
@@ -1546,7 +1879,9 @@ function createFakeXlsxDriver(store, script = {}) {
   // matching the X-O04/6 LIVE fixture (an untouched series' field is null, never absent/guessed).
   // script.chartStyleUnobservable simulates a pre-/11 bridge (both fields read 'UNOBSERVABLE:...').
   const MARKER_WRITE_TYPES = ['scatter', 'lineNormal'];
-  const chartReadsOf = asked => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => { const ws = live.find(x => x.name === n); const o = ws && ws.objects ? ws.objects : { charts: [], pivots: [] };
+  // the real driver (xlsx-driver.cjs) attaches styles/pointStyles ONLY when the read asks for chartStyle -- mirrored
+  // here so a write path that forgets to ask fails offline the same way it failed LIVE (GH #346 unit 3, Bridge /27)
+  const chartReadsOf = (asked, chartStyle = false) => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => { const ws = live.find(x => x.name === n); const o = ws && ws.objects ? ws.objects : { charts: [], pivots: [] };
     return [n, script.chartsUnobservable ? 'UNOBSERVABLE:threw' : { charts: (o.charts || []).map(c => ({ name: c.name === undefined ? null : c.name,
       // X-O03/3 (LIVE MEASURED): GetChartType() reads a radar chart back as "unknown", never
       // "radar" -- every other type (stock included) reads back as its own name.
@@ -1568,7 +1903,14 @@ function createFakeXlsxDriver(store, script = {}) {
       // X-O05/2 (LIVE VERIFIED): chart-level, read on EVERY chart type the fake carries (the real
       // bridge handler itself gates to bar-only; classifyStyle's own bar-only check runs BEFORE
       // this field is ever read, so the fake does not need to repeat that gate here).
-      gapOverlap: script.chartStyleUnobservable ? 'UNOBSERVABLE:CAPABILITY_MISSING' : { gapWidth: (c.gapOverlap && c.gapOverlap.gapWidth !== undefined) ? c.gapOverlap.gapWidth : null, overlap: (c.gapOverlap && c.gapOverlap.overlap !== undefined) ? c.gapOverlap.overlap : null } })), pivots: (o.pivots || []).map(p => p.name) }]; }));
+      gapOverlap: script.chartStyleUnobservable ? 'UNOBSERVABLE:CAPABILITY_MISSING' : { gapWidth: (c.gapOverlap && c.gapOverlap.gapWidth !== undefined) ? c.gapOverlap.gapWidth : null, overlap: (c.gapOverlap && c.gapOverlap.overlap !== undefined) ? c.gapOverlap.overlap : null },
+      // GH #346 AUTO-REPAIR Egyseg 3: the `si:pi` keyed chart.series.style.read/v1 'dataPoint'
+      // target value (Egyseg 1's own /27+ shape: {element,fill,outline,outlineWidthEmu,effective,
+      // duplicated?}) -- carried verbatim from the fixture's OWN `pointStyles` dict (the SAME
+      // convention `effectiveLabels` above already uses: a fixture provides exactly the keys it
+      // wants read, an absent key reads as styleBridgeNow's own 'UNOBSERVABLE:point-not-read').
+      // script.chartStyleUnobservable simulates a pre-/21 bridge (the whole axis unreadable).
+      ...(chartStyle ? { pointStyles: script.chartStyleUnobservable ? 'UNOBSERVABLE:CAPABILITY_MISSING' : clone(c.pointStyles || {}) } : {}) })), pivots: (o.pivots || []).map(p => p.name) }]; }));
   // Drawings (M7 S2b): a sheet's charts (objects.charts; pos / w / h default to the probe's chart geometry, w: 0 = the
   // measured 0 x 0) plus its explicit `drawings` (raw images / shapes in the driver's read shape); read for
   // `drawingSheets` ('*' = every sheet). script.drawingsUnobservable -> every sheet 'UNOBSERVABLE:threw';
@@ -1621,7 +1963,17 @@ function createFakeXlsxDriver(store, script = {}) {
     const c = ((ws.objects && ws.objects.charts) || [])[0];
     if (script.fault.startsWith('chart-') ? c : d) fn(d, c, ws);
   }
-  const filterReadsOf = asked => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => { const ws = live.find(x => x.name === n); return [n, script.filterBuild === false ? 'UNOBSERVABLE:field-build-not-verified' : (ws && ws.autoFilter ? clone(ws.autoFilter) : { range: null, filters: [] })]; }));
+  // GH #344: like the real driver, `colours` is only attached when a colour-operator filter is actually present
+  // (xlsx-driver.cjs: `if (filters.some(... xlFilterCellColor/FontColor))`) -- NOT unconditionally on every sheet.
+  const filterReadsOf = asked => Object.fromEntries((asked.includes('*') ? live.map(x => x.name) : asked).map(n => {
+    const ws = live.find(x => x.name === n);
+    if (script.filterBuild === false) return [n, 'UNOBSERVABLE:field-build-not-verified'];
+    if (!ws || !ws.autoFilter) return [n, { range: null, filters: [] }];
+    const hasColour = (ws.autoFilter.filters || []).some(x => x.operator === 'xlFilterCellColor' || x.operator === 'xlFilterFontColor');
+    const c = clone(ws.autoFilter);
+    if (!hasColour) delete c.colours;
+    return [n, c];
+  }));
   // GH #326/#327: a sheet is unprotected unless the fixture opts in with `ws.protection = { forbids: {<flag
   // overrides, default false>}, unlocked: [<A1 addresses, EXPLICITLY unlocked>] }` -- the SAME shape
   // sheet.protection.read/v1 reads on the real DS 9.3.5 bridge (docs/DS-9.3.5-BRIDGE17-PROTECTION-READ.md): a
@@ -1635,9 +1987,18 @@ function createFakeXlsxDriver(store, script = {}) {
     if (!ws) return 'UNOBSERVABLE:sheet-missing';
     if ((script.protectionUnread || []).includes(n)) return 'UNOBSERVABLE:scripted';
     const p = ws.protection;
-    if (!p) return { protected: false, forbids: null, cells: range !== undefined ? rangeCells(ws, range, null) : null };
-    const forbids = Object.fromEntries(FLAGS.map(f => [f, !!(p.forbids && p.forbids[f])]));
-    return { protected: true, forbids, cells: range !== undefined ? rangeCells(ws, range, p.unlocked || []) : null };
+    // GH #338-#342: `ws.cellProtection = { unlocked, hidden }` (opt-in) is the per-cell xf state, independent of the sheet protection --
+    // the real read's own shape: a cell is listed when it holds a value OR an explicit xf (a style-only cell is walked too)
+    const cellsFor = legacy => (range === undefined ? null : ws.cellProtection ? xfCells(ws, range, ws.cellProtection) : rangeCells(ws, range, legacy));
+    if (!p) return { protected: false, forbids: null, cells: cellsFor(null) };
+    // a protection written by the product carries every flag (`full`); a fixture's own opt-in names only the forbidden ones
+    const forbids = p.full ? { ...p.forbids } : Object.fromEntries(FLAGS.map(f => [f, !!(p.forbids && p.forbids[f])]));
+    return { protected: true, forbids, cells: cellsFor(p.unlocked || []) };
+  };
+  const xfCells = (ws, range, cp) => {
+    const inRange = cellsOf(parseRange(range));
+    const listed = inRange.filter(a => (ws.cells && ws.cells[a] !== undefined) || cp.unlocked.includes(a) || cp.hidden.includes(a));
+    return { range, nonEmpty: listed.length, unlocked: listed.filter(a => cp.unlocked.includes(a)), hidden: listed.filter(a => cp.hidden.includes(a)) };
   };
   // `unlocked === null` (the sheet is NOT protected): every non-empty cell reads as unlocked (no restriction
   // applies either way); otherwise ONLY the named addresses do -- the Excel locked-by-default direction.
@@ -1666,19 +2027,23 @@ function createFakeXlsxDriver(store, script = {}) {
    * formula2 }] } and public conditional formats { sheet: [{ type, appliesTo, formula1, formula2 }] }
    * from each sheet's `rules`. Faults: script.dependencyBuild false ('UNOBSERVABLE:PATCH_VERSION_MISMATCH', the bridge's own identity refusal),
    * script.namesFault / validationsFault / conditionalFault (that axis a reason string).
+   * GH #362 2nd unit: `hiddenNames` [{ name, scopeSheet }], the real driver's SEPARATE unfiltered hidden-name list
+   * (dependentsBridgeBody) -- `script.hiddenNames` supplies the fixture (default none), `script.hiddenNamesFault`
+   * forces that axis to a reason string (the names family's own hidden-collision gate's unobservable branch).
    */
   function dependents() {
     const bare = t => String(t || '').replace(/^=/, '');
     const rect = a => { const g = parseRange(a); return { r1: g.r1 - 1, c1: g.c1 - 1, r2: g.r2 - 1, c2: g.c2 - 1 }; };
     const names = [...liveNames.concat(sideNames).map(n => ({ name: n.name, ref: n.ref, scopeSheet: null })),
       ...live.flatMap(x => ((x.objects && x.objects.names) || []).map(n => ({ name: n.name, ref: bare(n.refersTo), scopeSheet: x.name })))];
+    const hiddenNames = (script.hiddenNames || []).map(n => ({ name: n.name, scopeSheet: n.scopeSheet === undefined ? null : n.scopeSheet }));
     // L-22d v2: the bridge projects the rule's OWN raw serial (r.bridgeFormula/2) when the rule carries one
     // (date) -- never the public locale text (r.formula/2), which is what every OTHER type still projects.
     const validations = Object.fromEntries(live.map(x => [x.name, (x.rules || []).filter(r => r.kind === 'validation').map(r => ({ type: 4, ranges: [rect(r.range)], formula1: bare('bridgeFormula' in r ? r.bridgeFormula : r.formula), formula2: ('bridgeFormula2' in r ? r.bridgeFormula2 : r.formula2) ? bare('bridgeFormula2' in r ? r.bridgeFormula2 : r.formula2) : null }))]));
     const conditional = Object.fromEntries(live.map(x => [x.name, (x.rules || []).filter(r => r.kind === 'conditional').map(r => ({ type: r.type || 'xlExpression', ...(r.type === 'xlCellValue' ? { operator: r.operator } : {}), appliesTo: `${x.name}!$${r.range.replace(/(\d)/, '$$$1')}`, formula1: bare(r.formula), formula2: r.formula2 ? bare(r.formula2) : '' }))]));
     if (script.conditionalFault) conditional[live[0].name] = script.conditionalFault;
     if (script.dependencyBuild === false) return { dependents: 'UNOBSERVABLE:PATCH_VERSION_MISMATCH', conditional };
-    return { dependents: { names: script.namesFault || names, validations: script.validationsFault || validations }, conditional };
+    return { dependents: { names: script.namesFault || names, validations: script.validationsFault || validations, hiddenNames: script.hiddenNamesFault || hiddenNames }, conditional };
   }
 
   return {
@@ -1687,7 +2052,7 @@ function createFakeXlsxDriver(store, script = {}) {
     reads,
     liveState: () => clone(live || []),
     // M8 cross-format: the engine's open / close failure branches through the adapter (fake-session shape)
-    async open(args) { calls.open += 1; if (script.openFails) return { ok: false, detail: 'fake xlsx open refused' }; openedFileId = args && typeof args.fileId === 'string' ? args.fileId : null; live = clone(store.durable); liveNames = clone(store.names || script.workbookNames || []); active = store.active || live[0].name; dirty = false; return { ok: true, id: `fake-xlsx-${calls.open}` }; },
+    async open(args) { calls.open += 1; if (script.openFails) return { ok: false, detail: 'fake xlsx open refused' }; openedFileId = args && typeof args.fileId === 'string' ? args.fileId : null; live = clone(store.durable); liveNames = clone(store.names || script.workbookNames || []); active = store.active || live[0].name; workbookLocked = store.workbookLocked === true; dirty = false; return { ok: true, id: `fake-xlsx-${calls.open}` }; },
     // M7 save contract: like the real XLSX driver, forceSave returns its own paired confirmation, and close
     // re-evaluates it -- a dispatch after the confirmation supersedes it. script.forceSaveUnconfirmed models a refused one.
     async close() {
@@ -1698,7 +2063,7 @@ function createFakeXlsxDriver(store, script = {}) {
       return { ok: true, confirmation: script.closeConfirmation || confirmation };
     },
     async forceSave() {
-      calls.forceSave += 1; store.durable = clone(live); for (const [k, lit] of Object.entries(literalOnSave)) { const [sh, a] = k.split('\u0000'); const ws = store.durable.find(x => x.name === sh); if (ws && ws.cells[a] && ws.cells[a].f === lit.shown) ws.cells[a] = { ...ws.cells[a], f: lit.f, v: lit.v }; } store.names = clone(liveNames); store.active = active; store.saves += 1; dirty = false;
+      calls.forceSave += 1; store.durable = clone(live); for (const [k, lit] of Object.entries(literalOnSave)) { const [sh, a] = k.split('\u0000'); const ws = store.durable.find(x => x.name === sh); if (ws && ws.cells[a] && ws.cells[a].f === lit.shown) ws.cells[a] = { ...ws.cells[a], f: lit.f, v: lit.v }; } store.names = clone(liveNames); store.active = active; store.workbookLocked = workbookLocked; store.saves += 1; dirty = false;
       if (script.forceSaveUnconfirmed) return { ok: true, confirmed: false, forceSave: { state: 'unconfirmed', reason: script.forceSaveUnconfirmed } };
       confirmedAt = calls.dispatch;
       return { ok: true, confirmed: true, forceSave: { state: 'confirmed', reason: 'forcesave-confirmed' } };
@@ -1742,14 +2107,21 @@ function createFakeXlsxDriver(store, script = {}) {
           ...(request && request.runCells ? { runReads: runReadsOf(request.runCells) } : {}),
           ...(request && request.arrayCells ? { arrayReads: arrayReadsOf(request.arrayCells) } : {}),
           ...(request && request.commentSheets ? { commentReads: commentReadsOf(request.commentSheets) } : {}),
+          ...(request && request.hyperlinkSheets ? { hyperlinkReads: hyperlinkReadsOf(request.hyperlinkSheets) } : {}),
+          ...(request && request.tableSheets ? { tableReads: tableReadsOf(request.tableSheets) } : {}),
           ...(request && request.sessionUser ? { sessionUser: sessionUserOf() || 'UNOBSERVABLE:no-session-user' } : {}),
           ...(request && request.filterSheets ? { filterReads: filterReadsOf(request.filterSheets) } : {}),
-          ...(request && request.chartSheets ? { chartReads: chartReadsOf(request.chartSheets) } : {}),
+          ...(request && request.chartSheets ? { chartReads: chartReadsOf(request.chartSheets, !!request.chartStyle) } : {}),
           ...(request && request.drawingSheets ? { drawingReads: (anchorAsked = !!request.drawingAnchor && script.anchorBuild !== false, drawingReadsOf(request.drawingSheets)) } : {}),
           ...(request && request.pageSheets ? { pageReads: pageReadsOf(request.pageSheets) } : {}),
-          ...(request && request.printSheets ? { printReads: printReadsOf(request.printSheets, request.colBreaks === true) } : {}),
+          ...(request && request.printSheets ? { printReads: printReadsOf(request.printSheets, request.colBreaks === true, request.printLayout === true) } : {}),
           ...(request && request.protectionSheets ? { protectionReads: protectionReadsOf(request.protectionSheets) } : {}),
           ...(request && request.protectionRanges ? { protectionRangeReads: protectionRangeReadsOf(request.protectionRanges) } : {}),
+          // GH #338-#342 remainder (W2 review fix, #ref): `script.workbookProtectionMalformed` names a
+          // DIRECT override of the read's own object shape (e.g. `{}` / `{ lockStructure: null }`), for the
+          // fail-CLOSED branch's own test -- distinct from `workbookProtectionUnobservable` (a string, the
+          // axis never answered at all). Checked first so a test can set either but not both by accident.
+          ...(request && request.workbookProtection ? { workbookProtectionRead: script.workbookProtectionMalformed !== undefined ? script.workbookProtectionMalformed : (script.workbookProtectionUnobservable ? 'UNOBSERVABLE:' + script.workbookProtectionUnobservable : { lockStructure: workbookLocked }) } : {}),
           runtime: { identity: script.runtime === undefined ? XLSX_RUNTIME_ID : script.runtime, cacheKey: '9.3.4-fakecachekey00', ...(script.fileIdUnobservable ? {} : { fileId: openedFileId }) } },
       };
     },
@@ -1791,6 +2163,11 @@ function createFakeXlsxDriver(store, script = {}) {
       if (command.meta.family === 'filter') applyFilter(command.meta);
       if (command.meta.family === 'array-formula') applyArrayFormula(command.meta);
       if (command.meta.family === 'comments') applyComment(command.meta);
+      if (command.meta.family === 'table-props' && command.meta.bridgeTableWrite === true) return tablePropsWrite(command.meta);
+      if (command.meta.family === 'protection' && typeof command.meta.bridgeProtectionWrite === 'string') return protectionWrite(command.meta);
+      if (command.meta.family === 'workbook-protection' && command.meta.bridgeWorkbookProtectionWrite === true) return workbookProtectionWrite(command.meta);
+      if (command.meta.family === 'table-structure') applyTableStructure(command.meta);
+      if (command.meta.family === 'hyperlinks') applyHyperlink(command.meta);
       // X-O04/1+2 (1bafc2ca): set_chart_style has NO getter -- the real engine's own setter
       // return value (checked inside lower()'s callCommand body, fail-closed) is the ONLY
       // failure signal; the fake has no JS body to execute, so a rejection is simulated at THIS

@@ -144,7 +144,11 @@ test('planning refusals: shape, unknown keys, table intents, header/footer under
   assert.match(detail({ steps: [rw({ sectionHeading: H1, paragraphOrdinal: 2 }, 'y'), { intent: 'delete_paragraph', selector: { text: P1 } }] }), /ordinal-selector-with-count-changing-step/);
   assert.match(detail({ steps: [rw({ sectionHeading: H1, paragraphOrdinal: 2 }, '')] }), /ordinal-selector-on-count-changing-step/);
   // not migrated on these intents / fields: still refused, named (never dropped)
-  assert.match(detail({ steps: [{ intent: 'delete_paragraph', selector: { sectionHeading: H1, paragraphOrdinal: 1 } }] }), /field-not-enforced-yet: .*selector\.sectionHeading/);
+  // GH #320: sectionHeading + paragraphOrdinal IS now migrated for delete_paragraph at the field-contract
+  // layer (unlike before) -- but it is STILL always refused, one layer further in, by this SAME
+  // ordinalAfterStructuralStep (a delete changes its own section's paragraph count, so its own ordinal
+  // selector is never retry-safe; insert_paragraph_* is the one count-changing intent exempted from this).
+  assert.match(detail({ steps: [{ intent: 'delete_paragraph', selector: { sectionHeading: H1, paragraphOrdinal: 1 } }] }), /ordinal-selector-on-count-changing-step/);
   assert.match(detail({ steps: [{ intent: 'move_paragraph_after', selector: { text: P1 }, destinationSelector: { text: P2, precondition: { text: P2 } } }] }), /field-not-enforced-yet: .*selector\.precondition/);
   assert.match(detail({ steps: [rw({ sectionHeading: H1, paragraphOrdinal: 1, text: P1 }, 'y')] }), /text would be ignored beside the sectionHeading selector/);
 });
@@ -186,7 +190,10 @@ test('gate 3: ordinal insert BEFORE / AFTER lands at the terminal ordinal; retry
 
 test('gate 3 NEGATIVE: precondition mismatch / out of range -> refused before dispatch; the text already elsewhere -> never SATISFIED', async () => {
   await refusedBeforeDispatch(store(), { id: 't', steps: [ins('insert_paragraph_before', 2, 'Új.', 'Nem ez.')] }, 'PRECONDITION_TEXT_MISMATCH');
-  await refusedBeforeDispatch(store(), { id: 't', steps: [ins('insert_paragraph_after', 9, 'Új.')] }, 'insert-anchor-paragraph_not_found');
+  // GH #320: the reason is now kebab-case throughout (insert-anchor-${ambiguity}.replace(/_/g,'-')) --
+  // consistent with every other named reason in this codebase, now that a fingerprint anchor (whose own
+  // ambiguity values are already kebab-case: AMBIGUOUS/NOT_FOUND) is reachable through this SAME branch.
+  await refusedBeforeDispatch(store(), { id: 't', steps: [ins('insert_paragraph_after', 9, 'Új.')] }, 'insert-anchor-paragraph-not-found');
   // the produced text exists, but NOT at the terminal ordinal -> fail closed, no write
   await refusedBeforeDispatch(store(), { id: 't', steps: [ins('insert_paragraph_before', 1, OUT)] }, 'insert-produced-text-in-wrong-position');
   // the terminal position holds the text but the anchor's precondition does not -> not SATISFIED

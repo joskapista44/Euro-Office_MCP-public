@@ -1,0 +1,1 @@
+case EVisibleType.visibleHidden:case EVisibleType.visibleVeryHidden:oWorksheet.bHidden=!0;break;

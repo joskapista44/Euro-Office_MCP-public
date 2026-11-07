@@ -51,7 +51,21 @@ const { UNRESOLVED } = require('./text.cjs');
 // GH #292 S1 / S2 (LIVE, docs/evidence/gh292-style-definition-probe-20261021.json): italic / underline / strike / fontFamily and
 // spacingBefore / indentRight / indentFirstLine / keepNext / keepLines / pageBreakBefore persist on a style; the booleans only as
 // true (false was not measured on a style -- a named refusal, not field-unsupported).
-const TEXT_FIELDS = Object.freeze(['bold', 'size', 'color', 'italic', 'underline', 'strike', 'fontFamily']);
+// GH #324 (LIVE, probe2.json): ApiTextPr.SetLanguage persists on BOTH the built-in 'Normal' style
+// and a fresh custom one, the SAME as on a run (formatting.cjs); read back through ToJSON()
+// rPr.lang.val (docx-driver.cjs styleOf), the ONE reliable style-read surface (W-10). The setter
+// does NOT validate: an unrecognized string returns undefined and writes NOTHING (measured: no
+// rPr.lang key at all afterwards) -- a silent no-op the ENGINE would otherwise make indistinguishable
+// from "this style's language was never set", so LANGUAGE_PATTERN below refuses it ourselves,
+// pre-dispatch, rather than let a requested write silently do nothing.
+const TEXT_FIELDS = Object.freeze(['bold', 'size', 'color', 'italic', 'underline', 'strike', 'fontFamily', 'language']);
+// A simplified BCP-47 shape: a 2-3 letter primary subtag, then zero or more hyphenated 2-8
+// alphanumeric subtags (region/script/variant) -- covers every form this codebase already uses
+// ('hu-HU', 'en-GB', 'de-DE', 'en-US', 'en') and rejects the measured invalid example ('not-a-
+// lang-code': its second subtag 'a' is only 1 character). Not a full BCP-47 validator (no
+// private-use/extension subtags) -- a GUARD, not a measurement, the same discipline fontSize's
+// 1638pt ceiling and STYLE_NAME's control-character exclusion already use.
+const LANGUAGE_PATTERN = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 const PARAGRAPH_FIELDS = Object.freeze(['align', 'indentLeft', 'spacingAfter', 'spacingBefore', 'indentRight', 'indentFirstLine', 'keepNext', 'keepLines', 'pageBreakBefore']);
 // GH #292 S8 (LIVE, docs/evidence/gh292s8-style-unset-probe-20261022.json): false persists too -- an EXPLICIT off (saved w:i w:val="0",
 // w:u w:val="none", w:keepNext w:val="false"; ToJSON false), on a fresh style and after a true. It is NOT a removal: the style's
@@ -102,6 +116,13 @@ function validateText(text, index) {
   if (text.fontFamily !== undefined) {
     if (typeof text.fontFamily !== 'string' || !text.fontFamily.trim() || text.fontFamily.length > 64) return { ok: false, detail: `step ${index}: text.fontFamily must be a non-empty font name (at most 64 characters)` };
     fields.fontFamily = text.fontFamily;
+  }
+  if (text.language !== undefined) {
+    // GH #324 (LIVE, probe2.json): the editor's own SetLanguage silently drops an unrecognized
+    // string (no throw, nothing written) -- refused HERE, named, pre-dispatch, rather than let
+    // the write dispatch and do nothing.
+    if (typeof text.language !== 'string' || !LANGUAGE_PATTERN.test(text.language)) return { ok: false, detail: `step ${index}: text.language must be a BCP-47-ish language tag (e.g. 'hu-HU', 'en')` };
+    fields.language = text.language;
   }
   return { ok: true, fields };
 }
@@ -400,6 +421,9 @@ try {
       if (m.fields.text.underline !== undefined && typeof tp.SetUnderline === 'function') tp.SetUnderline(m.fields.text.underline);
       if (m.fields.text.strike !== undefined && typeof tp.SetStrikeout === 'function') tp.SetStrikeout(m.fields.text.strike);
       if (m.fields.text.fontFamily !== undefined && typeof tp.SetFontFamily === 'function') tp.SetFontFamily(m.fields.text.fontFamily);
+      // GH #324 (LIVE, probe2.json): the SAME ApiTextPr.SetLanguage a run uses (formatting.cjs);
+      // on a style it persists identically (rPr.lang.val), measured on BOTH 'Normal' and a fresh custom style.
+      if (m.fields.text.language !== undefined && typeof tp.SetLanguage === 'function') tp.SetLanguage(m.fields.text.language);
     }
   }
   if (m.fields.paragraph) {
@@ -510,7 +534,7 @@ function styleNamesOf(task) {
 }
 
 module.exports = {
-  TEXT_FIELDS, PARAGRAPH_FIELDS, ALIGNMENTS, STEP_KEYS, STYLE_TYPES,
+  TEXT_FIELDS, PARAGRAPH_FIELDS, ALIGNMENTS, STEP_KEYS, STYLE_TYPES, LANGUAGE_PATTERN,
   plan, classify, resolve, preDispatchCheck, lower, commandBody,
   verifyPrimitive, verifyPreservation, wholeTaskChecks, producedText,
   styleAt, fieldMatches, groupMatches, allRequestedMatch, basedOnMatches, typeMatches, unobservableRequestedFields, otherStylesKey, bodyKey,

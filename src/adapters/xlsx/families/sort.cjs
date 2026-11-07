@@ -1,5 +1,6 @@
 'use strict';
 
+const { tableOverlap } = require('../table-guard.cjs');
 const { parseRange, cellsOf, rangeText, colNum, colName, addr } = require('../a1.cjs');
 const { cellAt } = require('../inventory.cjs');
 const cells = require('./cells.cjs');
@@ -186,6 +187,10 @@ function classify(p, op) {
   const g = gate(p, op);
   if (!g.ok) return { state: 'FAIL_CLOSED', evidence: g };
   const where = { sheet: op.selector.sheet, range: op.selector.range, keyColumn: colName(op.keyColumn), order: op.order, ...(op.keys.length > 1 ? { keys: keysText(op) } : {}) };
+  // GH #331 (T06): a sort of a range only PARTLY over an Excel Table is applied by the engine (Excel refuses it); a sort
+  // of exactly the table's range sorts the table and keeps it (measured) -- table-guard.cjs
+  const t = tableOverlap(p, op.selector.sheet, op.selector.range);
+  if (t.table && !t.exact) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-sort-overlaps-table', ...where, table: t.table } };
   if (ordered(g.rows, g.cmps)) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-key-already-ordered' } };
   return { state: 'APPLY', evidence: where };
 }
@@ -253,4 +258,7 @@ function wholeTaskChecks(op, finalObservation) {
 
 const windowsOf = op => [{ sheet: op.selector.sheet, range: op.selector.range }];
 
-module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf };
+// GH #331: the sheet's tables (read_tables' axis) for the table guard
+const liveExtras = op => ({ tableSheets: [op.selector.sheet] });
+
+module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };

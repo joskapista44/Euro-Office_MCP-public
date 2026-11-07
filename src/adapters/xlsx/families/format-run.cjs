@@ -47,7 +47,7 @@ const cells = require('./cells.cjs');
 
 const INTENTS = Object.freeze(['format_run']);
 const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'cell', 'runs']);
-const RUN_MAP_CHAR_CEILING = 256; // TEMPORARY, pending a LIVE timing measurement (see the harness's timing row)
+const RUN_MAP_CHAR_CEILING = 1024; // GH #364 LIVE timing measurement raised this from the prior TEMPORARY 256 (docs/GH364-RUN-FORMAT-CHAR-CEILING-SOURCE-CONTRACT-20261105.md) -- MUST match xlsx-driver.cjs's own copy of this value
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 const FONT_KEYS = Object.freeze(['bold', 'italic', 'name', 'size', 'color']);
 

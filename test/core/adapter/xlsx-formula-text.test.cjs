@@ -65,3 +65,32 @@ test('sheet references: bare, quoted (with escaped quote), literals ignored, ext
   assert.equal(f.sheetRefs("='[Book2.xlsx]Data'!A1").external, true);
   assert.equal(f.sheetRefs('=SUM(A1:A3)').names.length, 0);
 });
+
+// GH #332/#333 (owner decision A): tableRenameRewrite -- a structured (table) reference renamed outside
+// string literals, string literals/quoted sheet names kept verbatim (so an INDIRECT(...) text reference
+// is detected, never silently rewritten).
+test('tableRenameRewrite: a plain structured reference is renamed, case-insensitively, word-boundary on the left', () => {
+  assert.deepEqual(f.tableRenameRewrite('=SUM(Table1[Qty])', 'Table1', 'Sales'), { formula: '=SUM(Sales[Qty])', changed: true, sawInLiteral: false });
+  assert.deepEqual(f.tableRenameRewrite('=sum(table1[Qty])', 'Table1', 'Sales'), { formula: '=sum(Sales[Qty])', changed: true, sawInLiteral: false });
+  assert.deepEqual(f.tableRenameRewrite('=MyTable1[Qty]', 'Table1', 'Sales'), { formula: '=MyTable1[Qty]', changed: false, sawInLiteral: false }, 'word-boundary: MyTable1 is not Table1');
+});
+
+test('tableRenameRewrite: two occurrences on different sheets/formulas each rewrite; a reference to another table is untouched', () => {
+  assert.deepEqual(f.tableRenameRewrite('=SUM(Table1[Qty])+SUM(Table1[Note]="x")', 'Table1', 'Sales'), { formula: '=SUM(Sales[Qty])+SUM(Sales[Note]="x")', changed: true, sawInLiteral: false });
+  assert.deepEqual(f.tableRenameRewrite('=SUM(Other[Qty])', 'Table1', 'Sales'), { formula: '=SUM(Other[Qty])', changed: false, sawInLiteral: false });
+});
+
+test('tableRenameRewrite: a relative [@Qty] reference never names the table -- nothing to rewrite', () => {
+  assert.deepEqual(f.tableRenameRewrite('=[@Qty]*2', 'Table1', 'Sales'), { formula: '=[@Qty]*2', changed: false, sawInLiteral: false });
+});
+
+test('tableRenameRewrite: a string literal or quoted sheet name is NEVER touched -- sawInLiteral flags the unsafe case, not a silent rewrite', () => {
+  assert.deepEqual(f.tableRenameRewrite('=INDIRECT("Table1[Qty]")', 'Table1', 'Sales'), { formula: '=INDIRECT("Table1[Qty]")', changed: false, sawInLiteral: true });
+  // a literal that merely LOOKS like the pattern, with a real reference ALSO present outside it: both facts hold
+  assert.deepEqual(f.tableRenameRewrite('=SUM(Table1[Qty])&"Table1[x]"', 'Table1', 'Sales'), { formula: '=SUM(Sales[Qty])&"Table1[x]"', changed: true, sawInLiteral: true });
+});
+
+test('tableRenameRewrite: a non-formula string or an unterminated literal is null (fail closed, same convention as canonical())', () => {
+  assert.equal(f.tableRenameRewrite('Table1[Qty]', 'Table1', 'Sales'), null, 'no leading =');
+  assert.equal(f.tableRenameRewrite('="abc', 'Table1', 'Sales'), null, 'unterminated literal');
+});

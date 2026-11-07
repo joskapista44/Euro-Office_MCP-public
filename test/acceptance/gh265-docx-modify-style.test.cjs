@@ -124,6 +124,46 @@ test('RETRY IS IDEMPOTENT (measured MODIFY_RETRY, unlike define_style): the SAME
   assert.equal(p.writes(), saves, 'no write on the retry');
 });
 
+// GH #324 (LIVE, probe2.json): the SAME ApiTextPr.SetLanguage style write, now on an EXISTING
+// style -- including the BUILT-IN 'Normal' (define_style can never target it; modify_style is the
+// only way). The engine's own silent no-op on an invalid tag (measured) is refused here instead.
+test('SCHEMA: modify_style.text.language accepts a BCP-47-ish tag and refuses the measured invalid example, pre-dispatch', () => {
+  for (const language of ['hu-HU', 'en-GB', 'en']) {
+    assert.equal(verdict([ms(NAME, { text: { language } })]).ok, true, language);
+  }
+  for (const language of ['not-a-lang-code', '', 123]) {
+    const v = verdict([ms(NAME, { text: { language } })]);
+    assert.equal(v.code, 'REFUSED_SHAPE', `${JSON.stringify(language)} -> ${v.code} ${v.reason}`);
+    assert.equal(v.dispatched, false);
+  }
+});
+
+test('WRITE + READ-BACK (GH #324): language is written on the BUILT-IN \'Normal\' style (modify_style is the only way to reach it -- define_style can never target an existing name) and on the existing custom style; L1/L3 PASS, read_styles confirms both', async () => {
+  const p = product({ [NAME]: RAW(), [OTHER]: OTHER_RAW(), Normal: { text: {}, paragraph: {} } });
+  const r1 = await p.tool.handler(req([ms('Normal', { text: { language: 'hu-HU' } })]));
+  assert.equal(r1.ok, true, JSON.stringify(r1));
+  assert.deepEqual(r1.operations.map(o => o.status), ['APPLIED']);
+  assert.equal(r1.operations[0].l1, 'PASS');
+  assert.equal(r1.operations[0].l3, 'PASS');
+  assert.equal(p.store.durableDoc.styles.Normal.text.language, 'hu-HU');
+  const r2 = await p.tool.handler(req([ms(NAME, { text: { language: 'en-GB' } })]));
+  assert.equal(r2.ok, true, JSON.stringify(r2));
+  assert.equal(p.store.durableDoc.styles[NAME].text.language, 'en-GB');
+  assert.deepEqual(p.store.durableDoc.styles[NAME], { ...RAW(), text: { ...RAW().text, language: 'en-GB' } }, 'the pre-existing text fields survive alongside the new one');
+  const styles = await p.readStyles();
+  assert.equal(styles.find(s => s.name === 'Normal').text.language, 'hu-HU');
+  assert.equal(styles.find(s => s.name === NAME).text.language, 'en-GB');
+});
+
+test('RETRY (GH #324): the style already carries the requested language -- SATISFIED, zero writes', async () => {
+  const p = product({ [NAME]: { ...RAW(), text: { ...RAW().text, language: 'hu-HU' } }, [OTHER]: OTHER_RAW() });
+  const r = await p.tool.handler(req([ms(NAME, { text: { language: 'hu-HU' } })]));
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.noOp, true);
+  assert.deepEqual(r.operations.map(o => o.status), ['SATISFIED']);
+  assert.equal(p.writes(), 0);
+});
+
 test('A MISSING NAME fails CLOSED (modify_style-name-does-not-exist) with no write and NO style created -- modify never turns into define', async () => {
   const p = product();
   const before = snapshot(p.store);

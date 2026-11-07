@@ -1,5 +1,6 @@
 'use strict';
 
+const { tableOverlap } = require('../table-guard.cjs');
 const { parseRange, parseCell, cellsOf, rangeText } = require('../a1.cjs');
 const { cellAt, key, isBlank } = require('../inventory.cjs');
 const cells = require('./cells.cjs');
@@ -125,6 +126,9 @@ function classify(primary, op) {
   const range = op.selector.range;
   const areas = op.cells.map(({ a }) => g.cells[a].merge);
   if (op.intent === 'merge_range') {
+    // GH #331 (T06): a merge overlapping an Excel Table is applied by the engine, Excel refuses it -- refused here (table-guard.cjs)
+    const t = tableOverlap(primary, op.selector.sheet, range);
+    if (t.table) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-merge-overlaps-table', sheet: op.selector.sheet, range, table: t.table } };
     if (op.across) return classifyAcross(g.cells, op, areas);
     if (areas.every(x => x === range)) return { state: 'SATISFIED', evidence: { sheet: op.selector.sheet, range, proof: 'fresh-live-every-cell-in-the-target-area' } };
     // the content guard: the engine empties every non-top-left cell silently (W4b)
@@ -236,4 +240,7 @@ function wholeTaskChecks(op, finalObservation) {
 /** The target window (a merge may cover cells outside every used range). */
 const windowsOf = op => [{ sheet: op.selector.sheet, range: op.selector.range }];
 
-module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, inside };
+// GH #331: the sheet's tables (read_tables' axis) for the table guard
+const liveExtras = op => (op && op.intent === 'merge_range' ? { tableSheets: [op.selector.sheet] } : {});
+
+module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, inside, liveExtras };

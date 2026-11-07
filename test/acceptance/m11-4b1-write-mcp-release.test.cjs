@@ -28,11 +28,12 @@ const { BROKER } = require('../fakes/read-editors.cjs');
 const EVIDENCE = {};
 test.after(() => { if (process.env.M11_4B1_EVIDENCE) fs.writeFileSync(process.env.M11_4B1_EVIDENCE, `${JSON.stringify(EVIDENCE, null, 1)}\n`); });
 
-const EXACT = ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task'];  // GH #228 (PROPOSED): + docx_execute_task
+const EXACT = ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create'];  // GH #228 (PROPOSED): + docx_execute_task
 const STEP = Object.freeze({
   write_range: { intent: 'write_range', sheet: 'Budget', range: 'F1:G2', values: [['x', 1], ['y', 2]] },
   insert_rows: { intent: 'insert_rows', sheet: 'Budget', at: 3, count: 2, anchor: { column: 'A', value: 'pear' } },
-  delete_rows: { intent: 'delete_rows', sheet: 'Budget', at: 2, count: 1, anchor: { column: 'A', value: 'pear' } },
+  // owner decision B (2026-11-02): the witness is the first REMOVED row (A2 'apple'), the anchor the first surviving one
+  delete_rows: { intent: 'delete_rows', sheet: 'Budget', at: 2, count: 1, anchor: { column: 'A', value: 'pear' }, witness: { column: 'A', value: 'apple' } },
   rename_sheet: { intent: 'rename_sheet', sheet: 'Budget', name: 'Budget_2026' },
   unmerge_range: { intent: 'unmerge_range', sheet: 'Budget', range: 'C1:D1' },
   set_chart_title: { intent: 'set_chart_title', sheet: 'K', name: 'R1', title: 'Revenue' },
@@ -112,7 +113,7 @@ test('initialize + tools/list: EXACTLY product_status, xlsx_read, docx_read, xls
   EVIDENCE.surface = { INITIALIZE: 'PASS', TOOLS_LIST: list.result.tools.map(t => t.name), DOCX_EXECUTE_TASK: 'served; xlsx step refused REFUSED_CROSS_FORMAT pre-dispatch' };
 });
 
-test('WRITE_6_OF_6 + RETRY_6_OF_6 via tools/call: APPLIED / FORCESAVE_CONFIRMED, then a new call SATISFIED with dispatch and forceSave 0', async () => {
+test('WRITE_6_OF_6 + RETRY_6_OF_6 via tools/call: APPLIED / FORCESAVE_CONFIRMED, then a new call SATISFIED (delete_rows: refused as unprovable) with dispatch and forceSave 0', async () => {
   EVIDENCE.intents = {};
   for (const [intent, step] of Object.entries(STEP)) {
     const store = await fresh();
@@ -128,13 +129,22 @@ test('WRITE_6_OF_6 + RETRY_6_OF_6 via tools/call: APPLIED / FORCESAVE_CONFIRMED,
     assert.notEqual(r1.operations[0].l3, 'FAIL', intent);
     assert.equal(r1.persistence.state, 'FORCESAVE_CONFIRMED', intent);
     assert.deepEqual([c1.runtime, c1.drivers, c1.open, c1.dispatch, c1.forceSave, c1.close], [1, 1, 1, 1, 1, 1], intent);
+    const settled = JSON.stringify(store.durable);
     const p2 = served(store);
     const s2 = mcp(p2.tools);
     const r2 = sc(await s2.call('xlsx_execute_task', req([step])));
     await s2.end();
     const c2 = p2.calls();
-    assert.equal(r2.ok, true, `${intent} retry: ${JSON.stringify(r2)}`);
-    assert.deepEqual(statuses(r2), ['SATISFIED'], intent);
+    if (intent === 'delete_rows') {
+      // owner decision B (2026-11-02): a delete has no SATISFIED path -- the already-deleted shape is refused, named
+      assert.equal(r2.ok, false, `${intent} retry: ${JSON.stringify(r2)}`);
+      assert.deepEqual(statuses(r2), ['FAILED'], intent);
+      assert.ok(JSON.stringify(r2).includes('xlsx-structure-delete-prior-execution-unprovable'), JSON.stringify(r2).slice(0, 500));
+      assert.equal(JSON.stringify(store.durable), settled, `${intent}: the refused retry changed nothing`);
+    } else {
+      assert.equal(r2.ok, true, `${intent} retry: ${JSON.stringify(r2)}`);
+      assert.deepEqual(statuses(r2), ['SATISFIED'], intent);
+    }
     assert.equal(r2.persistence.state, 'NOT_REQUIRED', intent);
     assert.deepEqual([c2.open, c2.dispatch, c2.forceSave], [1, 0, 0], `${intent}: the retry is a new session with no write and no save`);
     EVIDENCE.intents[intent] = { FIRST: statuses(r1)[0], PERSISTENCE: r1.persistence.state, FIRST_DISPATCH: c1.dispatch, FIRST_FORCESAVE: c1.forceSave,

@@ -1,0 +1,146 @@
+"sheet.protection.write/v1": function (args) {
+if (!args || typeof args !== "object" || typeof args.sheet !== "string" || args.sheet === "" || typeof args.protect !== "boolean") return { ok: false, reason: "bad-args" };
+var FLAGS = ["objects", "scenarios", "formatCells", "formatColumns", "formatRows", "insertColumns", "insertRows", "insertHyperlinks", "deleteColumns", "deleteRows", "selectLockedCells", "sort", "autoFilter", "pivotTables", "selectUnlockedCells"];
+var DEF = [true, true, true, true, true, true, true, true, true, true, false, true, true, true, false];
+var fb = args.forbids;
+if (fb !== void 0 && (fb === null || typeof fb !== "object")) return { ok: false, reason: "bad-args" };
+if (!args.protect && fb !== void 0) return { ok: false, reason: "bad-args" };
+var want = {};
+var canon = {};
+for (var i = 0; i < FLAGS.length; i += 1) {
+want[FLAGS[i]] = DEF[i];
+if (fb !== void 0 && Object.prototype.hasOwnProperty.call(fb, FLAGS[i])) {
+if (typeof fb[FLAGS[i]] !== "boolean") return { ok: false, reason: "flag-not-boolean:" + FLAGS[i] };
+want[FLAGS[i]] = fb[FLAGS[i]];
+canon[FLAGS[i]] = fb[FLAGS[i]];
+}
+}
+if (fb !== void 0 && JSON.stringify(fb) !== JSON.stringify(canon)) return { ok: false, reason: "forbids-not-canonical" };
+var w = Api.GetSheet(args.sheet);
+if (!w) return { ok: false, reason: "sheet-not-found" };
+var m;
+try { m = w.worksheet; } catch (e) { return { ok: false, reason: "model-missing" }; }
+if (!m || typeof m.setProtectedSheet !== "function") return { ok: false, reason: "model-missing" };
+var A = typeof window !== "undefined" && window ? window.Asc : null;
+if (!A || typeof A.CSheetProtection !== "function") return { ok: false, reason: "protection-api-missing" };
+var H = typeof AscCommon !== "undefined" && AscCommon ? AscCommon.History : null;
+if (!(H && typeof H.Create_NewPoint === "function" && typeof H.StartTransaction === "function" && typeof H.EndTransaction === "function")) return { ok: false, reason: "history-missing" };
+if (typeof H.Is_On === "function" && !H.Is_On()) return { ok: false, reason: "history-off" };
+var state = function () {
+var sp = m.sheetProtection;
+var st = { on: false, f: {} };
+for (var k = 0; k < FLAGS.length; k += 1) st.f[FLAGS[k]] = DEF[k];
+if (sp === null || sp === void 0) return st;
+if (typeof sp !== "object" || typeof sp.sheet !== "boolean") return null;
+st.on = sp.sheet;
+for (var q = 0; q < FLAGS.length; q += 1) { if (typeof sp[FLAGS[q]] !== "boolean") return null; st.f[FLAGS[q]] = sp[FLAGS[q]]; }
+return st;
+};
+var cur0 = m.sheetProtection;
+if (cur0 !== null && cur0 !== void 0) {
+if (typeof cur0.asc_isPassword !== "function") return { ok: false, reason: "protection-api-missing" };
+if (cur0.asc_isPassword()) return { ok: false, reason: "credential-protected" };
+}
+var cur = state();
+if (!cur) return { ok: false, reason: "protection-unreadable" };
+var same = function (st) {
+if (!st) return false;
+if (st.on !== args.protect) return false;
+if (!args.protect) return true;
+for (var r = 0; r < FLAGS.length; r += 1) if (st.f[FLAGS[r]] !== want[FLAGS[r]]) return false;
+return true;
+};
+if (same(cur)) return { ok: true, value: { applied: [], satisfied: true } };
+var build = function (on, flags) {
+var pr = new A.CSheetProtection();
+if (typeof pr.setDefaultInterface !== "function" || typeof pr.setSheet !== "function") return null;
+pr.setDefaultInterface();
+pr.setSheet(on);
+for (var s = 0; s < FLAGS.length; s += 1) {
+var nm = "set" + FLAGS[s].charAt(0).toUpperCase() + FLAGS[s].slice(1);
+if (typeof pr[nm] !== "function") return null;
+pr[nm](on ? flags[FLAGS[s]] : DEF[s]);
+}
+return pr;
+};
+var props = build(args.protect, want);
+if (!props) return { ok: false, reason: "protection-api-missing" };
+var bad = null;
+H.Create_NewPoint();
+H.StartTransaction();
+try {
+m.setProtectedSheet(props, true);
+} catch (e) {
+bad = { ok: false, reason: "setter-threw" };
+try { var back = build(cur.on, cur.f); if (back) m.setProtectedSheet(back, true); } catch (e2) { }
+} finally {
+H.EndTransaction();
+}
+if (bad) return bad;
+if (!same(state())) return { ok: false, reason: "no-effect" };
+try {
+var E = A.editor;
+var wv = E && E.wb && typeof E.wb.getWorksheet === "function" ? E.wb.getWorksheet() : null;
+if (wv && wv.model === m && typeof wv.updateAfterChangeSheetProtection === "function") wv.updateAfterChangeSheetProtection();
+} catch (e) { }
+return { ok: true, value: { applied: [args.protect ? "protect" : "unprotect"] } };
+},
+"sheet.cellProtection.write/v1": function (args) {
+if (!args || typeof args !== "object" || typeof args.sheet !== "string" || args.sheet === "" || typeof args.range !== "string" || args.range === "") return { ok: false, reason: "bad-args" };
+var hasL = Object.prototype.hasOwnProperty.call(args, "locked");
+var hasH = Object.prototype.hasOwnProperty.call(args, "hidden");
+if (!hasL && !hasH) return { ok: false, reason: "bad-args" };
+if ((hasL && typeof args.locked !== "boolean") || (hasH && typeof args.hidden !== "boolean")) return { ok: false, reason: "invalid-value" };
+if (/^\$?[A-Za-z]+(:\$?[A-Za-z]+)?$/.test(args.range) || /^\$?[0-9]+(:\$?[0-9]+)?$/.test(args.range)) return { ok: false, reason: "range-shape-not-supported" };
+var w = Api.GetSheet(args.sheet);
+if (!w) return { ok: false, reason: "sheet-not-found" };
+var m;
+try { m = w.worksheet; } catch (e) { return { ok: false, reason: "model-missing" }; }
+if (!m || typeof m.getRange3 !== "function" || typeof m.getCell3 !== "function") return { ok: false, reason: "model-missing" };
+var sp = m.sheetProtection;
+if (sp !== null && sp !== void 0 && sp.sheet === true) return { ok: false, reason: "sheet-protected" };
+var b;
+try { var rr = w.GetRange(args.range); b = rr && rr.range && rr.range.bbox; } catch (e) { b = null; }
+if (!b || typeof b.r1 !== "number" || typeof b.c1 !== "number" || typeof b.r2 !== "number" || typeof b.c2 !== "number") return { ok: false, reason: "range-invalid" };
+if ((b.r2 - b.r1 + 1) * (b.c2 - b.c1 + 1) > 10000) return { ok: false, reason: "range-over-cap:10000" };
+var H = typeof AscCommon !== "undefined" && AscCommon ? AscCommon.History : null;
+if (!(H && typeof H.Create_NewPoint === "function" && typeof H.StartTransaction === "function" && typeof H.EndTransaction === "function")) return { ok: false, reason: "history-missing" };
+if (typeof H.Is_On === "function" && !H.Is_On()) return { ok: false, reason: "history-off" };
+var rng = m.getRange3(b.r1, b.c1, b.r2, b.c2);
+if (!rng || (hasL && typeof rng.setLocked !== "function") || (hasH && typeof rng.setHiddenFormulas !== "function")) return { ok: false, reason: "model-missing" };
+var holds = function () {
+for (var r = b.r1; r <= b.r2; r += 1) {
+for (var c = b.c1; c <= b.c2; c += 1) {
+var cl = m.getCell3(r, c);
+var x = cl && typeof cl.getXfs === "function" ? cl.getXfs() : null;
+var lk = !(x && x.locked === false);
+var hd = !!(x && x.hidden === true);
+if (hasL && lk !== args.locked) return false;
+if (hasH && hd !== args.hidden) return false;
+}
+}
+return true;
+};
+var pre;
+try { pre = holds(); } catch (e) { return { ok: false, reason: "cells-walk-threw" }; }
+if (pre) return { ok: true, value: { applied: [], satisfied: true } };
+var bad = null;
+H.Create_NewPoint();
+H.StartTransaction();
+try {
+if (hasL) rng.setLocked(args.locked);
+if (hasH) rng.setHiddenFormulas(args.hidden);
+} catch (e) {
+bad = { ok: false, reason: "setter-threw" };
+} finally {
+H.EndTransaction();
+}
+if (bad) return bad;
+var post;
+try { post = holds(); } catch (e) { return { ok: false, reason: "cells-walk-threw" }; }
+if (!post) return { ok: false, reason: "no-effect" };
+var ap = [];
+if (hasL) ap.push("locked");
+if (hasH) ap.push("hidden");
+return { ok: true, value: { applied: ap } };
+},

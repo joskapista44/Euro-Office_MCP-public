@@ -96,7 +96,7 @@ test('MCP initialize + tools/list: the READ tools keep their schema next to xlsx
   const init = await s.send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   assert.equal(init.result.serverInfo.name, 'euro-office-product');
   const list = await s.send('tools/list', {});
-  assert.deepEqual(list.result.tools.map(t => t.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task']);
+  assert.deepEqual(list.result.tools.map(t => t.name), ['product_status', 'xlsx_read', 'docx_read', 'xlsx_execute_task', 'docx_execute_task', 'document_create']);
   for (const t of list.result.tools.filter(x => x.name === 'xlsx_read' || x.name === 'docx_read')) {
     assert.equal(t.inputSchema.additionalProperties, false);
     assert.deepEqual(t.inputSchema.required, ['fileId', 'operation']);
@@ -122,7 +122,9 @@ test('ACCEPTED_INTENTS: the allowlist is exactly xlsx 5 + docx 5 and the MCP sch
   // GH #224: read_styles (new, dedicated) -> ACCEPTED (style definitions by name, GetAllStyles scope).
   // GH #225: read_numbering -> ACCEPTED (present/type/numId/level/levelFormats + ToJSON format fields).
   // GH #227: read_section_flags -> ACCEPTED (titlePage/evenAndOdd through the B21 Bridge READ, runtime-gated).
-  assert.deepEqual(acc('xlsx'), ['workbook_overview', 'read_range', 'read_validations', 'read_charts', 'read_pivots', 'read_drawings', 'read_conditional_formats', 'read_layout', 'read_freeze_panes', 'read_sheet_state', 'read_page_setup', 'read_filter', 'read_comments', 'read_print_area', 'read_defined_names', 'read_runs']);
+  // GH #363 2nd unit: read_effective_fill -> ACCEPTED (per-cell CF-evaluated fill, bounded to 200 cells,
+  // through the DS Bridge candidate sheet.cells.compiledStyle.read/v1, NOT installed anywhere).
+  assert.deepEqual(acc('xlsx'), ['workbook_overview', 'read_range', 'read_validations', 'read_charts', 'read_pivots', 'read_drawings', 'read_conditional_formats', 'read_effective_fill', 'read_layout', 'read_freeze_panes', 'read_sheet_state', 'read_page_setup', 'read_filter', 'read_comments', 'read_tables', 'read_hyperlinks', 'read_protection', 'read_print_area', 'read_defined_names', 'read_runs', 'read_array_formulas', 'read_print_rendering']);
   assert.deepEqual(acc('docx'), ['read_text', 'read_formatting', 'read_tables', 'read_headers_footers', 'read_page_setup', 'read_bookmarks', 'read_numbering', 'read_styles', 'read_notes', 'read_images', 'read_comments', 'read_section_flags']);
   assert.deepEqual(inputSchema('xlsx').properties.operation.enum, acc('xlsx'));
   assert.deepEqual(inputSchema('docx').properties.operation.enum, acc('docx'));
@@ -169,7 +171,7 @@ const REFUSALS = [
   // X-O08 (/14) + L-08: read_drawings and read_conditional_formats moved to ACCEPTED too (SAME section).
   // GH #140 U2: read_pivots ALSO moved to ACCEPTED -- xlsx has no PARTIAL operation left; the
   // REFUSED_PARTIAL path is covered by the docx rows below.
-  ['xlsx_read', { operation: 'read_print_rendering' }, 'REFUSED_NOT_MEASURED'],
+  // GH #356/#357: read_print_rendering moved NOT_MEASURED -> ACCEPTED (Bridge /23 G1 LIVE PASS) -- it was the LAST NOT_MEASURED operation, so no live REFUSED_NOT_MEASURED example remains; the generic `REFUSED_${op.status}` mechanism (checkOperation) is unchanged and would fire again the moment any operation is next marked NOT_MEASURED.
   // GH #225: read_numbering moved to ACCEPTED too -- read_table_grid is the PARTIAL row left (GH #226 3: read_notes moved to ACCEPTED).
   ['docx_read', { operation: 'read_table_grid' }, 'REFUSED_PARTIAL'],
   // GH #227: read_section_flags moved to ACCEPTED too -- it was the last docx:INTERNAL operation,

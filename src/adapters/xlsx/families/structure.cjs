@@ -17,7 +17,13 @@ const drawings = require('../drawings.cjs');
  * AGAIN. Here the retry is decided from a fresh read, as the DOCX table-row precedent (M4 W4b): the caller names
  * a content ANCHOR (a unique value in one column / row) and where it is now; the terminal position follows:
  *   insert at N, count k: anchor at N -> APPLY | anchor at N + k and the k new rows blank -> SATISFIED
- *   delete at N, count k: the anchor is the FIRST SURVIVING row: at N + k -> APPLY | at N -> SATISFIED
+ *   delete at N, count k (owner decision B, 2026-11-02, owner channel): TWO witnesses, both read before the first write --
+ *     the anchor names the FIRST SURVIVING row (now at N + k), the witness the FIRST REMOVED row (now at N); together they
+ *     bracket the block. Anchor at N + k AND witness at N -> APPLY. Anchor at N with the witness gone reads like an
+ *     already-run delete, but no fresh read can tell that from a wrong anchor / witness (the defect this decision closes:
+ *     an anchor given as the first REMOVED row's value sat at N and read SATISFIED, 0 rows deleted) -- so it is REFUSED,
+ *     named `xlsx-structure-delete-prior-execution-unprovable`, never SATISFIED: a delete has no SATISFIED path until a
+ *     prior execution can be proven by something other than matching data. A retry still never deletes twice.
  *   anything else -> refused (neither the before nor the after state)
  * Refused before the write, too: a formula anywhere the delete would BREAK (a reference into the block, a range
  * entirely inside it -> #REF!; a range spanning the block shrinks and is fine); a merge
@@ -40,6 +46,16 @@ const drawings = require('../drawings.cjs');
  * not BEFORE the cut on the step's axis, and any unreadable axis on any sheet (incl. a split / unknown pane and the
  * column breaks until their READ is bound). L3: all of them unchanged on every sheet.
  *
+ * fa7244ac/5 (Q4 MEASURED, c19b1065; sheet-layout.cjs autofilterRowInsertWithinData / filterExtendedAsExpected):
+ * insert_rows is the ONE exception to the paragraph above's "not BEFORE the cut" refusal -- when the cut lies
+ * strictly within the shifted sheet's OWN AutoFilter DATA rows (after its header, at or before its last data row),
+ * the engine itself grows the filter's ref by the inserted count and leaves the header and every criterion alone
+ * (MEASURED, not assumed), so the step is no longer refused there. L3 then expects EXACTLY that growth on that one
+ * sheet; any other difference to it, or any difference on another sheet, still fails. Everything else from the
+ * paragraph above is unchanged: a cut at or through the header row, a cut past the last data row (there the ref's
+ * own fate is NOT MEASURED), delete_rows, insert_columns, delete_columns and a Table's own AutoFilter all remain
+ * refused exactly as before.
+ *
  * M7 E R2 / R3a (owner M7 GO 2026-10-03; tier E probe m7-e-probe1-20261003.json, session = reopen): a validation or a
  * conditional format HOSTED on the shifted sheet no longer refuses when it is entirely BEFORE the cut -- its range ends
  * before the first inserted / deleted row (column), and its formulas are constants, strings or references on that sheet
@@ -57,11 +73,30 @@ const drawings = require('../drawings.cjs');
 
 const INTENTS = Object.freeze(['insert_rows', 'delete_rows', 'insert_columns', 'delete_columns']);
 const FIELDS = Object.freeze(['intent', 'id', 'sheet', 'at', 'count', 'anchor']);
+const DELETE_FIELDS = Object.freeze([...FIELDS, 'witness']);
 const MAX_COUNT = 100;
+
+/** The lane (a column number for rows, a row number for columns) of an anchor / witness, or null. */
+const laneOf = (x, rows) => (rows ? (typeof x.column === 'string' && /^[A-Z]{1,3}$/.test(x.column) ? colNum(x.column) : null) : (Number.isInteger(x.row) && x.row >= 1 ? x.row : null));
+const valueOk = v => (typeof v === 'string' && v !== '') || Number.isFinite(v);
+
+/** Owner decision B: the delete's second witness -- the value of the FIRST REMOVED row / column, read where it is NOW (at). */
+function witnessOf(step, at, rows, anchorLane, pos) {
+  const w = step.witness;
+  const along = rows ? 'column' : 'row';
+  const what = rows ? 'row' : 'column';
+  if (!w || typeof w !== 'object' || Array.isArray(w) || Object.keys(w).some(k => ![along, 'value'].includes(k))) return { detail: `${at}: witness must be { ${along}, value } -- the value of the FIRST ${what} the delete removes (the ${what} at \`at\`) NOW; required: with the anchor (the first SURVIVING ${what}) it brackets the block` };
+  const lane = laneOf(w, rows);
+  if (lane === null) return { detail: `${at}: witness.${along} must be ${rows ? 'a column letter' : 'a row number'}` };
+  if (!valueOk(w.value)) return { detail: `${at}: witness.value must be a non-empty text or a number` };
+  if (lane === anchorLane && String(w.value) === String(step.anchor.value)) return { detail: `${at}: the witness and the anchor name the same value in the same ${along} -- the witness is the first REMOVED ${what} (at), the anchor the first SURVIVING one (at + count)` };
+  return { witness: Object.freeze({ lane, value: String(w.value), now: pos }) };
+}
 
 function plan(step, index) {
   const at = `step ${index}: ${step.intent}`;
-  const unknown = Object.keys(step).filter(k => !FIELDS.includes(k));
+  const insert = step.intent.startsWith('insert');
+  const unknown = Object.keys(step).filter(k => !(insert ? FIELDS : DELETE_FIELDS).includes(k));
   if (unknown.length) return { ok: false, detail: `${at} does not support field(s): ${unknown.join(', ')}` };
   if (typeof step.sheet !== 'string' || step.sheet === '') return { ok: false, detail: `${at} requires a sheet name` };
   const rows = step.intent.endsWith('_rows');
@@ -72,10 +107,11 @@ function plan(step, index) {
   const a = step.anchor;
   const along = rows ? 'column' : 'row';
   if (!a || typeof a !== 'object' || Array.isArray(a) || Object.keys(a).some(k => ![along, 'value'].includes(k))) return { ok: false, detail: `${at}: anchor must be { ${along}, value } -- the value of the ${rows ? 'row' : 'column'} that is at ${step.intent.startsWith('insert') ? 'at' : 'at + count'} NOW` };
-  const lane = rows ? (typeof a.column === 'string' && /^[A-Z]{1,3}$/.test(a.column) ? colNum(a.column) : null) : (Number.isInteger(a.row) && a.row >= 1 ? a.row : null);
+  const lane = laneOf(a, rows);
   if (lane === null) return { ok: false, detail: `${at}: anchor.${along} must be ${rows ? 'a column letter' : 'a row number'}` };
-  if (!((typeof a.value === 'string' && a.value !== '') || Number.isFinite(a.value))) return { ok: false, detail: `${at}: anchor.value must be a non-empty text or a number` };
-  const insert = step.intent.startsWith('insert');
+  if (!valueOk(a.value)) return { ok: false, detail: `${at}: anchor.value must be a non-empty text or a number` };
+  const w = insert ? { witness: null } : witnessOf(step, at, rows, lane, pos);
+  if (w.detail) return { ok: false, detail: w.detail };
   const count = insert ? step.count : -step.count;
   return {
     ok: true,
@@ -86,6 +122,7 @@ function plan(step, index) {
       selector: Object.freeze({ sheet: step.sheet, range: rows ? `A${pos}:${colName(MAX_COL)}${pos + step.count - 1}` : `${colName(pos)}1:${colName(pos + step.count - 1)}${MAX_ROW}` }),
       shift: Object.freeze({ sheet: step.sheet, axis: rows ? 'rows' : 'cols', at: pos, count }),
       anchor: Object.freeze({ lane, value: String(a.value), now: insert ? pos : pos + step.count, terminal: pos + (insert ? step.count : 0) }),
+      ...(w.witness ? { witness: w.witness } : {}),
       cells: Object.freeze([]),
       preservationMode: 'PRIMITIVE_INTEGRAL',
     },
@@ -96,11 +133,12 @@ const rowOf = a => Number(/\d+$/.exec(a)[0]);
 const colOf = a => colNum(/^[A-Z]+/.exec(a)[0]);
 const cellsOfSheet = (p, sheet) => Object.entries(p.cells).filter(([k]) => k.startsWith(key(sheet, ''))).map(([k, c]) => [k.slice(key(sheet, '').length), c]);
 
-/** Where the anchor value is now: every literal cell in the anchor's column (rows) / row (cols). */
-function anchorHits(p, op) {
+/** Where a mark's value (the anchor, the delete's witness) is now: every literal cell in its column (rows) / row (cols). */
+function laneHits(p, op, mark) {
   const rows = op.shift.axis === 'rows';
-  return cellsOfSheet(p, op.shift.sheet).filter(([a, c]) => c.f === '' && String(c.v) === op.anchor.value && (rows ? colOf(a) === op.anchor.lane : rowOf(a) === op.anchor.lane)).map(([a]) => (rows ? rowOf(a) : colOf(a)));
+  return cellsOfSheet(p, op.shift.sheet).filter(([a, c]) => c.f === '' && String(c.v) === mark.value && (rows ? colOf(a) === mark.lane : rowOf(a) === mark.lane)).map(([a]) => (rows ? rowOf(a) : colOf(a)));
 }
+const anchorHits = (p, op) => laneHits(p, op, op.anchor);
 
 /** The k new rows / columns at N: every READ cell there blank. */
 function gapBlank(p, op) {
@@ -142,13 +180,43 @@ function expectedNameRef(op, ref) {
 /** The definition behind one dependency entry of kind 'name' (same name, same scope). */
 const definitionOf = (p, r) => p.definedNames.find(x => x.name === r.name && (x.scopeSheet === null ? r.host === null : r.host !== null && sameSheet(x.scopeSheet, r.host)));
 
+/**
+ * GH #331 (T06): an Excel Table of the shifted sheet is read as a defined name over its range, so every structural write
+ * on a sheet holding a table was refused as a range-shaped name (baseline LIVE, installed 1.1.0-03cbc20c3e5e, through the
+ * table AND outside it: test/live/xlsx-gh331-t06-table-aware-baseline-probe.live.cjs). The table itself is told by
+ * read_tables (`tableReads`, cell Bridge /18): a table ENTIRELY BEFORE the cut on the step's axis does not move -- the
+ * same rule this family already applies to charts and drawings -- so its name is supported; a table at or after the cut
+ * (the write would shift it or cut through it, not measured) is refused, named. A name that is not a readable table of
+ * the sheet keeps the range-shape refusal.
+ */
+function tableOfName(p, sheet, d) {
+  const read = p.tableReads ? p.tableReads[sheet] : undefined;
+  if (!read || typeof read !== 'object' || !Array.isArray(read.tables)) return null;
+  const t = read.tables.find(x => String(x.name).toUpperCase() === String(d.name).toUpperCase());
+  const g = t ? parseRange(String(t.ref)) : null;
+  if (!g) return null;
+  // the table's name refers to its DATA BODY -- the ref without the header row (and the totals row): measured LIVE,
+  // table A1:C4 with a header -> name =Sheet!$A$2:$C$4 (xlsx-gh331-t06-table-aware-baseline-probe)
+  const body = rangeText({ ...g, r1: g.r1 + (t.headerRow === true ? 1 : 0), r2: g.r2 - (t.totalsRow === true ? 1 : 0), count: 2 });
+  const range = String(d.ref || '').replace(/^.*!/, '').replace(/\$/g, '').toUpperCase();
+  return range === body ? t : null;
+}
+
+function tableRefusal(op, t) {
+  const g = parseRange(String(t.ref));
+  const before = g && (op.shift.axis === 'rows' ? g.r2 < op.shift.at : g.c2 < op.shift.at);
+  return before ? null : { reason: 'xlsx-structure-overlaps-table', table: t.name, ref: t.ref, axis: op.shift.axis, at: op.shift.at };
+}
+
 /** One name reaching the shifted sheet: null when supported, else the refusal. */
-function nameRefusal(op, d, r) {
+function nameRefusal(op, d, r, p) {
   const sheet = op.shift.sheet;
   const at = { name: d.name, scope: d.scopeSheet, ref: d.ref };
   if (!NAME_SCOPES_MEASURED[d.scopeSheet === null ? 'workbook' : 'sheet']) return { reason: 'xlsx-structure-name-scope-not-measured', ...at };
   // a sheet-level name of the shifted sheet naming another sheet: its text does not move
   if (!r.sheets.some(x => sameSheet(x, sheet))) return null;
+  const table = tableOfName(p, sheet, d);
+  if (table) return tableRefusal(op, table);
   const cell = absoluteCellOf(d.ref);
   if (!cell || !sameSheet(cell.sheet, sheet)) return { reason: 'xlsx-structure-name-shape-unsupported', ...at };
   return expectedNameRef(op, d.ref).broken ? { reason: 'xlsx-structure-name-would-break', ...at } : null;
@@ -162,7 +230,7 @@ function nameGuard(p, op) {
   if (!Array.isArray(p.definedNames)) return { reason: 'xlsx-structure-names-unobservable' };
   for (const r of reach) {
     const d = definitionOf(p, r);
-    const bad = d ? nameRefusal(op, d, r) : { reason: 'xlsx-structure-names-unobservable', name: r.name };
+    const bad = d ? nameRefusal(op, d, r, p) : { reason: 'xlsx-structure-names-unobservable', name: r.name };
     if (bad) return bad;
   }
   return null;
@@ -348,19 +416,43 @@ function gate(p, op) {
   if (s.length !== 1) return { ok: false, reason: s.length > 1 ? 'xlsx-sheet-ambiguous' : 'xlsx-sheet-not-found', available: p.sheets.map(x => x.name) };
   const hits = anchorHits(p, op);
   if (hits.length !== 1) return { ok: false, reason: hits.length ? 'xlsx-structure-anchor-not-unique' : 'xlsx-structure-anchor-not-found', anchor: op.anchor.value, at: hits.slice(0, 20) };
-  return { ok: true, pos: hits[0] };
+  // a delete's witness: present once (before the delete) or gone (after it) -- twice is no witness at all
+  const witnessAt = op.witness ? laneHits(p, op, op.witness) : null;
+  if (witnessAt && witnessAt.length > 1) return { ok: false, reason: 'xlsx-structure-witness-not-unique', witness: op.witness.value, at: witnessAt.slice(0, 20) };
+  return { ok: true, pos: hits[0], witnessAt };
+}
+
+/**
+ * Owner decision B: a delete APPLIES only when BOTH witnesses stand where the step says they are now; the after-shape
+ * (anchor at `at`, witness gone) is refused as unprovable -- matching data is not a proof that this delete ever ran.
+ */
+function classifyDelete(op, g, where) {
+  const at = { ...where, witnessAt: g.witnessAt, expectedNow: { anchor: op.anchor.now, witness: op.witness.now } };
+  const anchorNow = g.pos === op.anchor.now;
+  const anchorAfter = g.pos === op.anchor.terminal;
+  if (!anchorNow && !anchorAfter) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-structure-anchor-state-conflict', ...where, expectedNow: op.anchor.now, expectedAfter: op.anchor.terminal } };
+  if (anchorNow && g.witnessAt.length === 1 && g.witnessAt[0] === op.witness.now) return null;
+  if (anchorAfter && g.witnessAt.length === 0) {
+    return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-structure-delete-prior-execution-unprovable', ...at, readsAsAlreadyApplied: true, written: 0,
+      detail: 'the sheet reads as if this delete had already run (the anchor at `at`, the witness gone), but no read can prove THIS delete produced it -- a wrong anchor or witness reads the same; nothing was written. Re-read the sheet; re-plan with the witnesses as they are now if rows still need deleting.' } };
+  }
+  return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-structure-delete-witnesses-disagree', ...at, detail: 'the anchor (first SURVIVING row/column, now at at + count) and the witness (first REMOVED row/column, now at at) do not both stand where the step says -- the block the step names is not the block on the sheet; nothing was written' } };
 }
 
 function classify(p, op) {
   const g = gate(p, op);
   if (!g.ok) return { state: 'FAIL_CLOSED', evidence: g };
   const where = { sheet: op.shift.sheet, axis: op.shift.axis, at: op.shift.at, count: op.shift.count, anchorAt: g.pos };
-  const insert = op.shift.count > 0;
-  if (g.pos === op.anchor.terminal && (!insert || gapBlank(p, op))) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-anchor-at-its-terminal-position' } };
-  if (g.pos !== op.anchor.now) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-structure-anchor-state-conflict', ...where, expectedNow: op.anchor.now, expectedAfter: op.anchor.terminal } };
+  if (op.witness) {
+    const refused = classifyDelete(op, g, where);
+    if (refused) return refused;
+  } else {
+    if (g.pos === op.anchor.terminal && gapBlank(p, op)) return { state: 'SATISFIED', evidence: { ...where, proof: 'fresh-live-anchor-at-its-terminal-position' } };
+    if (g.pos !== op.anchor.now) return { state: 'FAIL_CLOSED', evidence: { reason: 'xlsx-structure-anchor-state-conflict', ...where, expectedNow: op.anchor.now, expectedAfter: op.anchor.terminal } };
+  }
   const bad = guards(p, op) || layoutGuard(p, op.shift) || drawingGuard(p, op) || seriesGuard(p, op);
   if (bad) return { state: 'FAIL_CLOSED', evidence: bad };
-  return { state: 'APPLY', evidence: where };
+  return { state: 'APPLY', evidence: op.witness ? { ...where, witnessAt: op.witness.now } : where };
 }
 
 function resolve(p, selector, ctx = {}) {
@@ -433,7 +525,9 @@ function verifyPrimitive(op, before, after) {
   const hits = anchorHits(a, op);
   const anchorOk = hits.length === 1 && hits[0] === op.anchor.terminal;
   const gapOk = op.shift.count < 0 || gapBlank(a, op);
-  return { ok: wrong.length === 0 && anchorOk && gapOk, evidence: { sheet, axis: op.shift.axis, at: op.shift.at, count: op.shift.count, wrong: wrong.slice(0, 20), wrongCount: wrong.length, anchorAt: hits, gapBlank: gapOk, proof: 'fresh-live-every-cell-at-its-shifted-position' } };
+  // owner decision B: the delete's witness (unique before it, in the removed block) is gone after it
+  const witnessGone = !op.witness || laneHits(a, op, op.witness).length === 0;
+  return { ok: wrong.length === 0 && anchorOk && gapOk && witnessGone, evidence: { sheet, axis: op.shift.axis, at: op.shift.at, count: op.shift.count, wrong: wrong.slice(0, 20), wrongCount: wrong.length, anchorAt: hits, gapBlank: gapOk, ...(op.witness ? { witnessGone } : {}), proof: 'fresh-live-every-cell-at-its-shifted-position' } };
 }
 
 /** L3: every OTHER sheet -- values kept, formulas re-pointed exactly as the shift implies. */
@@ -456,7 +550,7 @@ function verifyPreservation(op, before, after) {
     if (k.split('\u0000')[0] === op.shift.sheet || b.cells[k]) continue;
     if (now.f !== '' || (now.v !== null && now.v !== '')) changed.push({ cell: k.replace('\u0000', '!'), change: 'appeared' });
   }
-  const layout = layoutDiffs(b, a);
+  const layout = layoutDiffs(b, a, op.shift);
   const sheetsOf = x => x.sheets.map(s => s.name);
   const draw = drawings.drawingDiffs(drawings.observe(b.drawingReads, sheetsOf(b)), drawings.observe(a.drawingReads, sheetsOf(a)));
   const named = nameDiffs(op, b, a);
@@ -464,19 +558,24 @@ function verifyPreservation(op, before, after) {
   const anchors = anchorDiffs(b, a);
   // M7 E R2 / R3a: every sheet's rules unchanged (a rule kept on the shifted sheet is entirely before the cut)
   const rulesKept = !!b.rules && !!a.rules && !!b.rules.bySheet && JSON.stringify(b.rules.bySheet) === JSON.stringify(a.rules.bySheet);
-  return { ok: changed.length === 0 && layout.length === 0 && draw.length === 0 && named.length === 0 && rulesKept && series.length === 0 && anchors.length === 0, evidence: { compared, rulesKept, seriesKept: series.length === 0, seriesDiffs: series.slice(0, 10), anchorsKept: anchors.length === 0, anchorDiffs: anchors.slice(0, 10), changed: changed.slice(0, 20), changedCount: changed.length, layoutKept: layout.length === 0, layoutDiffs: layout.slice(0, 20), drawingsKept: draw.length === 0, drawingDiffs: draw, namesCompared: Array.isArray(b.definedNames) ? b.definedNames.length : null, namesKept: named.length === 0, nameDiffs: named.slice(0, 20) } };
+  // GH #331: the shifted sheet's tables unchanged (a table is kept only when it lies entirely before the cut)
+  const tablesOf = x => JSON.stringify(x.tableReads ? x.tableReads[op.shift.sheet] : null);
+  const tablesKept = tablesOf(b) === tablesOf(a);
+  return { ok: changed.length === 0 && layout.length === 0 && draw.length === 0 && named.length === 0 && rulesKept && tablesKept && series.length === 0 && anchors.length === 0, evidence: { compared, rulesKept, tablesKept, seriesKept: series.length === 0, seriesDiffs: series.slice(0, 10), anchorsKept: anchors.length === 0, anchorDiffs: anchors.slice(0, 10), changed: changed.slice(0, 20), changedCount: changed.length, layoutKept: layout.length === 0, layoutDiffs: layout.slice(0, 20), drawingsKept: draw.length === 0, drawingDiffs: draw, namesCompared: Array.isArray(b.definedNames) ? b.definedNames.length : null, namesKept: named.length === 0, nameDiffs: named.slice(0, 20) } };
 }
 
 function wholeTaskChecks(op, finalObservation) {
   const p = finalObservation && finalObservation.primary;
   const hits = p ? anchorHits(p, op) : [];
-  const ok = hits.length === 1 && hits[0] === op.anchor.terminal && (op.shift.count < 0 || gapBlank(p, op));
-  return [{ name: `${op.shift.sheet}: the anchor '${op.anchor.value}' at ${op.shift.axis === 'rows' ? 'row' : 'column'} ${op.shift.axis === 'rows' ? op.anchor.terminal : colName(op.anchor.terminal)}${op.shift.count > 0 ? ', the new span blank' : ''}`, ok, detail: ok ? null : { anchorAt: hits } }];
+  const witnessAt = p && op.witness ? laneHits(p, op, op.witness) : [];
+  const ok = hits.length === 1 && hits[0] === op.anchor.terminal && (op.shift.count < 0 || gapBlank(p, op)) && witnessAt.length === 0;
+  return [{ name: `${op.shift.sheet}: the anchor '${op.anchor.value}' at ${op.shift.axis === 'rows' ? 'row' : 'column'} ${op.shift.axis === 'rows' ? op.anchor.terminal : colName(op.anchor.terminal)}${op.shift.count > 0 ? ', the new span blank' : ''}${op.witness ? `, the witness '${op.witness.value}' gone` : ''}`, ok, detail: ok ? null : { anchorAt: hits, ...(op.witness ? { witnessAt } : {}) } }];
 }
 
 const windowsOf = () => [];
 // M7 S2a: every sheet's AutoFilter, print READ (row / column breaks) and pane
 // M7 D-B: the build-gated anchor read of every drawing
-const liveExtras = () => ({ dependents: true, filterSheets: ['*'], printSheets: ['*'], colBreaks: true, panes: true, drawingSheets: ['*'], drawingAnchor: true });
+// GH #331: the shifted sheet's tables (read_tables' axis), for the table-name rule and its L3
+const liveExtras = op => ({ dependents: true, filterSheets: ['*'], printSheets: ['*'], colBreaks: true, panes: true, drawingSheets: ['*'], drawingAnchor: true, ...(op && op.shift ? { tableSheets: [op.shift.sheet] } : {}) });
 
 module.exports = { INTENTS, plan, classify, resolve, lower, verifyPrimitive, verifyPreservation, wholeTaskChecks, windowsOf, liveExtras };

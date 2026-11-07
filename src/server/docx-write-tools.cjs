@@ -27,6 +27,13 @@ const { docxAdapter } = require('../adapters/docx/adapter.cjs');
 const { INTENTS } = require('../adapters/docx/intents.cjs');
 const { NEW_INTENTS } = require('../adapters/docx/capabilities.cjs');
 const { textRunDiffs, productParagraphOf } = require('../adapters/docx/stored-content.cjs');
+// GH #324 follow-up: the schema `pattern` string for every `language` field is DERIVED from this
+// ONE regex (families/style-definition.cjs's own guard), the same way write-tools.cjs already
+// reuses COMMENT_MAX_TEXT/PIVOT_FUNCTIONS from their owning family -- not a second, hand-kept copy.
+const LANGUAGE_PATTERN_SOURCE = require('../adapters/docx/families/style-definition.cjs').LANGUAGE_PATTERN.source;
+// GH #314: the border `space` allowlist is DERIVED from formatting.cjs's own write-side table (not
+// a second, hand-kept copy) -- the same reuse convention LANGUAGE_PATTERN_SOURCE above already has.
+const { BORDER_SPACE_POINTS } = require('../adapters/docx/families/formatting.cjs');
 const { validatePlan } = require('../core/execution/plan.cjs');
 const { withSession } = require('../core/session/lifecycle.cjs');
 const { createExecutor } = require('../core/execution/executor.cjs');
@@ -64,32 +71,47 @@ function docxIntentRefusal(intent, index) {
 // (exact targeting; the planner would refuse them later with its own named reason). expectedPreservation is the OPTIONAL
 // caller contract (families/text.cjs PRESERVED_PROPERTIES), nothing else.
 const SEL_TEXT = Object.freeze({ type: 'string', minLength: 1, maxLength: 4096 });
+// GH #320: the fingerprint / sectionHeading+paragraphOrdinal selector shapes are shared verbatim by
+// rewrite_paragraph, insert_paragraph_before/after and delete_paragraph -- one definition, reused.
+const FINGERPRINT = Object.freeze({ type: 'string', minLength: 1, maxLength: 256 });
+const PARAGRAPH_ORDINAL = Object.freeze({ type: 'integer', minimum: 1, maximum: 100000 });
+const PRECONDITION = Object.freeze({ type: 'object', properties: Object.freeze({ text: SEL_TEXT }), required: ['text'], additionalProperties: false });
+// GH #307: a document reduced to its single, empty first paragraph has no text to name it by (every
+// branch above keys off a TEXT); `emptyDocument` is a boolean sentinel, not a text anchor. ONLY
+// `true` is accepted (`false` would just be a confusing way of saying "nothing"). Schema-shared with
+// format_text (REWRITE_SELECTOR below), but scoped to rewrite_paragraph ONLY by field-contract.cjs
+// SELECTOR_KEYS -- a format_text step naming it is refused there, named, pre-dispatch, 0 writes.
+const EMPTY_DOCUMENT = Object.freeze({ const: true });
 const REWRITE_SELECTOR = Object.freeze({
   type: 'object',
   properties: Object.freeze({
-    fingerprint: Object.freeze({ type: 'string', minLength: 1, maxLength: 256 }),
+    fingerprint: FINGERPRINT,
     heading: SEL_TEXT, level: Object.freeze({ type: 'integer', minimum: 1, maximum: 9 }),
     text: SEL_TEXT, contains: Object.freeze({ type: 'boolean' }), kind: Object.freeze({ enum: ['paragraph', 'heading'] }),
     headingPath: Object.freeze({ type: 'array', minItems: 1, maxItems: 9, items: Object.freeze({ type: 'object',
       properties: Object.freeze({ level: Object.freeze({ type: 'integer', minimum: 1, maximum: 9 }), text: SEL_TEXT }), required: ['level', 'text'], additionalProperties: false }) }),
     before: SEL_TEXT, after: SEL_TEXT,
-    sectionHeading: SEL_TEXT, paragraphOrdinal: Object.freeze({ type: 'integer', minimum: 1, maximum: 100000 }),
-    precondition: Object.freeze({ type: 'object', properties: Object.freeze({ text: SEL_TEXT }), required: ['text'], additionalProperties: false }),
+    sectionHeading: SEL_TEXT, paragraphOrdinal: PARAGRAPH_ORDINAL,
+    emptyDocument: EMPTY_DOCUMENT,
+    precondition: PRECONDITION,
   }),
   additionalProperties: false,
 });
 // GH #233: insert_paragraph_before / _after. The anchor selector is NARROWER than rewrite's, each omission measured (docs/GH233-PARAGRAPH-
-// INSERT-PRODUCT-DECISION.md section 2): `text` is REQUIRED (the L2 whole-task check reads the anchor by its text; a heading / fingerprint /
-// headingPath / contains anchor APPLIES and then reports ok:false -- a failing receipt over a persisted change), `before` / `after` would be
-// silently dropped by the insert resolver (the duplicate stays ambiguous), `headingPath` resolves but the editor command finds its anchor by
-// exact text (a duplicate -> UNCERTAIN), `sectionHeading` + `paragraphOrdinal` is the LIVE-proven M5 path but not released here, `ref` needs dependsOn.
+// INSERT-PRODUCT-DECISION.md section 2): a heading / headingPath / contains anchor APPLIES and then reports ok:false -- a failing receipt
+// over a persisted change, so they stay out; `before` / `after` would be silently dropped by the insert resolver (the duplicate stays
+// ambiguous); `ref` needs dependsOn.
+// GH #320: `fingerprint` and `sectionHeading` + `paragraphOrdinal` are released here -- the SAME two extra branches rewrite_paragraph
+// already has, alongside the existing `text` anchor (paragraphSelectorBranch below requires exactly one of the three). Both were
+// ALREADY migrated at the field-contract layer (field-contract.cjs SELECTOR_KEYS) and already resolve through the shared resolver
+// (resolver.cjs) and paragraph.cjs's own ordinalTerminal -- this is schema widening onto an existing, reused path, not a new resolver.
 const INSERT_SELECTOR = Object.freeze({
   type: 'object',
   properties: Object.freeze({
     text: SEL_TEXT, kind: Object.freeze({ enum: ['paragraph', 'heading'] }),
-    precondition: Object.freeze({ type: 'object', properties: Object.freeze({ text: SEL_TEXT }), required: ['text'], additionalProperties: false }),
+    fingerprint: FINGERPRINT, sectionHeading: SEL_TEXT, paragraphOrdinal: PARAGRAPH_ORDINAL,
+    precondition: PRECONDITION,
   }),
-  required: Object.freeze(['text']),
   additionalProperties: false,
 });
 const insertStepSchema = intent => Object.freeze({
@@ -101,26 +123,53 @@ const insertStepSchema = intent => Object.freeze({
   required: Object.freeze(['intent', 'selector', 'text']),
   additionalProperties: false,
 });
-// GH #234: delete_paragraph. A deletion is proven by what SURVIVES it, so the selector names the target by its exact text AND both
-// neighbours: `before` / `after` are REQUIRED, non-empty, at most 80 characters (a PREFIX of the neighbour's text -- the adapter compares a
-// neighbour's first 80 characters; a longer value finds nothing: fail-closed, 0 writes, measured). Without both, an already-deleted target
-// cannot be told from a typo (the adapter answers FAILED delete-terminal-identity-insufficient-selector, so a lost reply could never be
-// retried). An empty `before` / `after` ('' = the document edge) is NOT released: a wrong '' APPLIES and saves, then reports ok:false, and
-// the only paragraph of a document would be emptied the same way. Everything else is as narrow as the insert anchor (docs/GH234-...).
-const NEIGHBOUR_TEXT = Object.freeze({ type: 'string', minLength: 1, maxLength: 80 });
+// GH #234: delete_paragraph. A deletion is proven by what SURVIVES it, so the TEXT-anchored form names the target by its exact text
+// AND both neighbours: `before` / `after`, at most 80 characters (a PREFIX of the neighbour's text -- the adapter compares a
+// neighbour's first 80 characters; a longer value finds nothing: fail-closed, 0 writes, measured). Without both, an already-deleted
+// target cannot be told from a typo (the adapter answers FAILED delete-terminal-identity-insufficient-selector, so a lost reply could
+// never be retried). GH #321: an empty `before` / `after` ('' = the document edge) names the first / last paragraph; the adapter
+// proves the edge BEFORE dispatch (families/paragraph.cjs classifyDelete), so a wrong '' is refused with 0 writes -- and both empty
+// (the document's only paragraph) stays refused.
+// GH #320: `fingerprint` and `sectionHeading` + `paragraphOrdinal` are released as ALTERNATIVE branches to `text` -- NOT alongside it:
+// `before` / `after` narrow the resolver's OWN text-branch matching (resolver.cjs) and are otherwise ignored by it, so field-contract.cjs
+// refuses them beside a fingerprint/ordinal selector (the SAME exclusivity rewrite_paragraph already has -- "text would be ignored beside
+// the fingerprint selector"); they are therefore required ONLY on the text branch (paragraphConstraintProblem below), never on the other
+// two. `fingerprint` resolves and retries exactly like `text` (NOT_FOUND on a retry falls back to field-contract's own surviving-context
+// proof when before/after are given on the text branch; a fingerprint-only retry is never SATISFIED -- safe, not idempotent, documented in
+// paragraph.cjs). `sectionHeading` + `paragraphOrdinal` is accepted at THIS layer and at field-contract.cjs, and is ALWAYS refused one
+// layer further in, by adapter.cjs's own ordinalAfterStructuralStep (named `ordinal-selector-on-count-changing-step`): a delete changes
+// how many paragraphs its section holds, so an ordinal would not name the same paragraph on a retry -- the SAME reason insert_paragraph_*
+// is the ONE count-changing intent exempted from that guard, and delete_paragraph deliberately is not. Widening the schema here still
+// matters: the caller now gets that one, named, correct-layer reason instead of a pre-dispatch UNKNOWN_FIELD that looks like a typo.
+const NEIGHBOUR_TEXT = Object.freeze({ type: 'string', minLength: 0, maxLength: 80 });
 const DELETE_SELECTOR = Object.freeze({
   type: 'object',
   properties: Object.freeze({
     text: SEL_TEXT, before: NEIGHBOUR_TEXT, after: NEIGHBOUR_TEXT, kind: Object.freeze({ enum: ['paragraph', 'heading'] }),
-    precondition: Object.freeze({ type: 'object', properties: Object.freeze({ text: SEL_TEXT }), required: ['text'], additionalProperties: false }),
+    fingerprint: FINGERPRINT, sectionHeading: SEL_TEXT, paragraphOrdinal: PARAGRAPH_ORDINAL,
+    precondition: PRECONDITION,
   }),
-  required: Object.freeze(['text', 'before', 'after']),
   additionalProperties: false,
 });
-// GH #235: move_paragraph_before / _after. The moved paragraph is selected exactly like an insert anchor (INSERT_SELECTOR: text required, kind,
-// precondition -- the same L2 defect for a heading / fingerprint / contains selector, measured on BOTH selectors of a move) and the destination
-// is { text (required), kind? } (the contract has no precondition on a destination; before / after / headingPath are not honoured by the move
-// resolver either).
+// GH #235: move_paragraph_before / _after. The moved paragraph is selected like the PRE-#320 insert anchor
+// (text required, kind, precondition -- the same L2 defect for a heading / fingerprint / contains selector,
+// measured on BOTH selectors of a move) and the destination is { text (required), kind? } (the contract has
+// no precondition on a destination; before / after / headingPath are not honoured by the move resolver
+// either). Kept as its OWN schema object, separate from insert_paragraph_*'s INSERT_SELECTOR: GH #320 is
+// scoped to insert_paragraph_before/after and delete_paragraph only -- move was never asked for a fingerprint
+// / sectionHeading+paragraphOrdinal source selector, and adapter.cjs's ordinalAfterStructuralStep refuses an
+// ordinal on move_paragraph_* anyway (it is COUNT_CHANGING, not in ORDINAL_INSERT), so widening would only
+// ever reach the SAME "refused, named" outcome delete_paragraph's ordinal branch does -- not worth sharing a
+// mutable schema object across two intents outside this release's own stated scope.
+const MOVE_SOURCE_SELECTOR = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({
+    text: SEL_TEXT, kind: Object.freeze({ enum: ['paragraph', 'heading'] }),
+    precondition: PRECONDITION,
+  }),
+  required: Object.freeze(['text']),
+  additionalProperties: false,
+});
 const MOVE_DESTINATION = Object.freeze({
   type: 'object',
   properties: Object.freeze({ text: SEL_TEXT, kind: Object.freeze({ enum: ['paragraph', 'heading'] }) }),
@@ -129,7 +178,7 @@ const MOVE_DESTINATION = Object.freeze({
 });
 const moveStepSchema = intent => Object.freeze({
   type: 'object',
-  properties: Object.freeze({ intent: Object.freeze({ const: intent }), id: ID, selector: INSERT_SELECTOR, destinationSelector: MOVE_DESTINATION }),
+  properties: Object.freeze({ intent: Object.freeze({ const: intent }), id: ID, selector: MOVE_SOURCE_SELECTOR, destinationSelector: MOVE_DESTINATION }),
   required: Object.freeze(['intent', 'selector', 'destinationSelector']),
   additionalProperties: false,
 });
@@ -344,6 +393,13 @@ const BORDER_SIDE = Object.freeze({ anyOf: Object.freeze([
       style: Object.freeze({ const: 'single' }),
       size: Object.freeze({ type: 'number', minimum: 0.125, maximum: 12 }),
       color: Object.freeze({ type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }),
+      // GH #314 (LIVE-measured): optional, points -- deliberately NO
+      // enum/range HERE -- measured: a bound at this schema layer is caught FIRST, with a generic
+      // "unsupported value" that never reaches formatGridProblem's own, enumerated message below.
+      // formatGridProblem is the SOLE authority on which numbers are acceptable (0..31 would be
+      // just as wrong a bound as an enum: it would steal -1/32 from the same enumerated message).
+      // The SAME split size/tabs already use (GH #232): a loose schema, a precise constraint fn.
+      space: Object.freeze({ type: 'number' }),
     }),
     required: Object.freeze(['style', 'size', 'color']),
     additionalProperties: false,
@@ -357,7 +413,12 @@ const FORMAT_TEXT_VALUE = Object.freeze({
   underline: Object.freeze({ type: 'boolean' }), strike: Object.freeze({ type: 'boolean' }),
   fontFamily: Object.freeze({ type: 'string', minLength: 1, maxLength: 128 }),
   fontSize: Object.freeze({ type: 'number', minimum: 1, maximum: 1638 }),
-  language: Object.freeze({ type: 'string', minLength: 1, maxLength: 35 }),
+  // GH #324 follow-up: `SetLanguage` on an invalid-looking tag is a silent no-op at the engine
+  // level (measured at the style layer, families/style-definition.cjs -- the run-level setter is
+  // the SAME ApiTextPr call, families/formatting.cjs), so this field was previously unvalidated
+  // and could look APPLIED while writing nothing. Pattern = LANGUAGE_PATTERN_SOURCE (imported
+  // above), the SAME shape STYLE_TEXT.language uses, not a second copy.
+  language: Object.freeze({ type: 'string', minLength: 1, maxLength: 35, pattern: LANGUAGE_PATTERN_SOURCE }),
   color: Object.freeze({ type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }),
   highlight: Object.freeze({ enum: ['none', 'black', 'blue', 'cyan', 'darkBlue', 'darkCyan', 'darkGray', 'darkGreen', 'darkMagenta', 'darkRed', 'darkYellow', 'green', 'lightGray', 'magenta', 'red', 'white', 'yellow'] }),
   vertAlign: Object.freeze({ enum: ['baseline', 'subscript', 'superscript'] }),
@@ -376,6 +437,17 @@ const FORMAT_TEXT_VALUE = Object.freeze({
   // conversion), now fixed. Bounds are NOT independently LIVE-measured -- same, not-yet-measured-
   // bounds convention as fontSize's 1638pt ceiling above.
   lineSpacing: Object.freeze({ type: 'number', minimum: 0.1, maximum: 10 }),
+  // GH #315 (LIVE-MEASURED -- the twips hypothesis AND the GetSpacingLineRule() getter both
+  // confirmed, see docs/GH315-GH318-LINE-HEIGHT-CHARACTER-SPACING-PLAN.md section 3). lineSpacingRule +
+  // lineHeight are a PAIR -- the family's own normalizeWanted() (families/formatting.cjs) enforces
+  // "both or neither" and the mutual exclusion with `lineSpacing` above (same underlying property,
+  // different rule); this schema only gates each field's own shape. Bounds NOT independently
+  // LIVE-measured, same not-yet-measured-bounds convention as `lineSpacing`'s own ceiling above.
+  lineSpacingRule: Object.freeze({ enum: ['exact', 'atLeast'] }),
+  lineHeight: Object.freeze({ type: 'number', minimum: 1, maximum: 1000 }),
+  // GH #318 (LIVE-MEASURED, same evidence as above): run-level, signed (OOXML allows condensed
+  // text), no pairing requirement.
+  characterSpacing: Object.freeze({ type: 'number', minimum: -1000, maximum: 1000 }),
 });
 const FORMAT_TEXT_FORMAT = Object.freeze({ type: 'object', properties: FORMAT_TEXT_VALUE, additionalProperties: false });
 // GH #256 (PREPARATION, owner decision pending alongside #228..#232 -- docs/GH256-FORMAT-TABLE-BORDERS-SHADING-DECISION.md): format_table
@@ -426,8 +498,9 @@ const TABLE_BORDERS = Object.freeze({
 // GH #264 (PREPARATION, owner decision pending alongside #228..#257b -- docs/GH264-DOCX-DEFINE-STYLE-DECISION.md): define_style (families/style-definition.cjs) creates a
 // NEW paragraph style by name -- the adapter's own intent name (the GitHub issue calls it define_paragraph_style). EXACTLY the six fields the family measured end to end
 // (docs/evidence/docx-w10-style-definition-live-rebased-PASS-20261012.json): text { bold, size (points), color } and paragraph { align, indentLeft (points), spacingAfter (points) }.
-// NOT the whole #229..#232 property set: italic / underline / fontFamily / language / highlight / spaceBefore / indentRight / tabs / borders / pagination have NO setter in the
-// family and no measurement -- they, `basedOn` (accepted-then-refused by the adapter: UNMEASURED) and a theme colour are UNKNOWN_FIELD. `color` is a BARE 6-hex string (no '#',
+// NOT the whole #229..#232 property set: highlight / spaceBefore / indentRight / tabs / borders / pagination have NO setter in the
+// family and no measurement (italic / underline / fontFamily joined via GH #292, language via GH #324 -- see STYLE_TEXT.language below) -- they, `basedOn`
+// (accepted-then-refused by the adapter: UNMEASURED) and a theme colour are UNKNOWN_FIELD. `color` is a BARE 6-hex string (no '#',
 // the OPPOSITE of format_text's color, like shading). A name that already exists is decided by its CONTENT (GH #264): every requested field reads back as requested -> SATISFIED,
 // nothing written (so a retry is our own retry, like every other intent's); a DIFFERENT field -> FAIL_CLOSED, OPERATION_FAILED, reason define_style-name-already-exists-with-different-fields:<name>:
 // <differing group.key list>, never an overwrite (the adapter's classify, families/style-definition.cjs). READ-BACK: GH #224b gave read_styles a `names` argument -- the name-targeted
@@ -449,6 +522,13 @@ const STYLE_TEXT = Object.freeze({
     underline: Object.freeze({ type: 'boolean' }),
     strike: Object.freeze({ type: 'boolean' }),
     fontFamily: Object.freeze({ type: 'string', minLength: 1, maxLength: 64, pattern: '^[^\\u0000-\\u001f\\u007f]+$' }),
+    // GH #324 (LIVE, probe2.json): ApiTextPr.SetLanguage persists on a style (Normal + a fresh
+    // custom one), read back via ToJSON() rPr.lang.val. The engine itself does NOT validate the
+    // string (an unrecognized one silently writes nothing) -- this pattern is OUR OWN guard,
+    // refusing pre-dispatch rather than letting a requested write silently do nothing. The pattern
+    // itself is LANGUAGE_PATTERN_SOURCE (imported above from families/style-definition.cjs) -- the
+    // SAME simplified BCP-47 shape format_text's own `language` field uses below.
+    language: Object.freeze({ type: 'string', minLength: 1, maxLength: 35, pattern: LANGUAGE_PATTERN_SOURCE }),
   }),
   additionalProperties: false,
 });
@@ -474,12 +554,13 @@ const STYLE_PARAGRAPH = Object.freeze({
 // relative path, a bare host) is refused pre-dispatch, because the editor stores whatever string it is given. The bookmark name is the editor's identifier shape (the adapter's BOOKMARK_NAME).
 const LINK_TARGET_TEXT = Object.freeze({ type: 'object', properties: Object.freeze({ text: SEL_TEXT }), required: Object.freeze(['text']), additionalProperties: false });
 const LINK_URL = Object.freeze({ type: 'string', minLength: 8, maxLength: 2048,
-  pattern: '^(https?://[^\\s/?#\\u0000-\\u001f]+[^\\s\\u0000-\\u001f]*|mailto:[^\\s\\u0000-\\u001f]+)$',
+  pattern: W.LINK_URL_PATTERN,
   description: 'absolute http:// or https:// URL, or a mailto: address (lower-case scheme); no whitespace or control characters; every other scheme is refused' });
 const BOOKMARK_NAME_SCHEMA = Object.freeze({ type: 'string', pattern: '^[A-Za-z_][A-Za-z0-9_]{0,39}$', description: 'letters, digits, underscore; must not start with a digit; at most 40 characters' });
 // GH #248: set_numbering fine-tunes the numbering a list item ALREADY sits on (it never makes a list). Released: `code` (the six templates), `start`, `suffix`; `custom` and `symbol` stay
 // UNKNOWN_FIELD (open-ended format strings, not measured). The product step carries a POLICY the adapter's own default does not: a definition other items sit on (same numbering, same level)
 // is NEVER written -- the step fails closed before dispatch with a named reason (toAdapterStep sets sharedDefinition: 'refuse'). `start` is bounded by the schema (1..9999), not by a measurement.
+// GH #319: `bulletColor`/`bulletFont` released additively -- the bullet glyph's own colour/typeface, CODE:'bullet' required in the SAME step (families/numbering.cjs's plan(), same reasoning `symbol`'s own gate already applies).
 const NUMBERING_START = Object.freeze({ type: 'integer', minimum: 1, maximum: 9999 });
 // GH #293 L7 (owner GO B, 2026-10-22): `scope` -- 'item' (the default: the released semantics above, unchanged) or 'list' (EXPLICIT: every
 // item of the target's list at its level changes, and the result names them in affectedItems). Both scopes take the affected set from the
@@ -487,6 +568,15 @@ const NUMBERING_START = Object.freeze({ type: 'integer', minimum: 1, maximum: 99
 // not provable, the step fails closed before any write. A definition another list shares is detached first (scope 'list' only, only
 // when no count can flow between the lists).
 const NUMBERING_SCOPE = Object.freeze({ enum: ['item', 'list'] });
+// GH #319 (LIVE-measured, gh319-bulletcolorfont-probe-20261028): the bullet GLYPH's own colour
+// and typeface -- through `level.GetTextPr()` (no direct setter on the level object). Schema-level
+// this is type/shape only (the HEX_RE-equivalent pattern families/numbering.cjs's own plan() also
+// re-checks); the CODE:'bullet'-in-the-same-step requirement is a cross-field rule this `anyOf`-
+// free object schema cannot express, so it is enforced where `symbol`'s own identical requirement
+// already is -- families/numbering.cjs's plan(), which this product schema dispatches into
+// unchanged (a non-bullet code + either field is refused there, named, before any write).
+const NUMBERING_BULLET_COLOR = Object.freeze({ type: 'string', pattern: '^#[0-9A-Fa-f]{6}$', description: '#RRGGBB -- the bullet glyph\'s own colour, CODE: \'bullet\' required in the same step' });
+const NUMBERING_BULLET_FONT = Object.freeze({ type: 'string', minLength: 1, maxLength: 128, description: 'a font family name -- the bullet glyph\'s own typeface, CODE: \'bullet\' required in the same step. The glyph is a character code in THIS font: a symbol font (Symbol, Wingdings) draws a different shape for the same character, so set `symbol` together with `bulletFont`' });
 // GH #262 (page setup margins + portrait size, product release, docs/GH262-PAGE-SETUP-WRITE-DECISION.md):
 // the ONE-step product narrowing of families/page-setup.cjs's set_page_setup. The adapter's own `plan()`
 // (page-setup.cjs) already accepts ANY positive-integer portrait size and ANY non-negative-integer margin
@@ -560,6 +650,11 @@ const HF_PARAGRAPH = Object.freeze({
 // GH #289 H-07a: the later sections that INHERIT the written part (they show it without one of their own), named by the
 // caller exactly as the refusal / read lists them -- a write that changes what other sections show is never implicit.
 const HF_INHERITED_BY = Object.freeze({ type: 'array', items: Object.freeze({ type: 'integer', minimum: 1 }), uniqueItems: true, maxItems: 1000 });
+// GH #317 "lines" (step 3): an alternative to `text` -- a full-part write of N paragraphs.
+// maxItems 200 is a SCHEMA bound (a header/footer realistically holds a handful of lines), not a
+// measured limit -- header-footer.cjs's own plan() is the authority for the per-line text rules
+// (non-empty, no tab/line break).
+const HF_LINES = Object.freeze({ type: 'array', minItems: 1, maxItems: 200, items: Object.freeze({ type: 'string', minLength: 1, maxLength: 32767 }) });
 const notesStepSchema = intent => Object.freeze({
   type: 'object',
   properties: Object.freeze({ intent: Object.freeze({ const: intent }), id: ID, selector: LIST_TARGET, text: Object.freeze({ type: 'string', minLength: 1, maxLength: 32767 }) }),
@@ -585,6 +680,186 @@ const IMAGE_TARGET = Object.freeze({
     ordinal: Object.freeze({ type: 'integer', minimum: 1, maximum: 1000 }),
     index: Object.freeze({ type: 'integer', minimum: 0, maximum: 100000 }),
   }),
+  additionalProperties: false,
+});
+// GH #296: delete_image / replace_image -- IMAGE_TARGET plus an optional `part` assertion (the
+// read_images row's own part label); the family's own plan() (image.cjs) re-checks the shape and
+// fails closed on a mismatch, never re-targeting.
+const IMAGE_EDIT_TARGET = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({
+    ...IMAGE_TARGET.properties,
+    part: Object.freeze({ type: 'string', pattern: '^(body|(header|footer):[0-9]+:(default|title|even))$', maxLength: 64 }),
+  }),
+  additionalProperties: false,
+});
+// GH #308: insert_table. The anchor is the unique body-level paragraph/heading the new table goes
+// right after (table-insert.cjs's own resolveAnchor -- a table/list, or a text that only occurs
+// inside a table cell, is refused the same way every other family's resolveStableTarget call
+// already refuses it). rows/cols 1..50 mirrors the family's own MAX_DIM (a schema sanity cap, not a
+// measured limit -- Api.CreateTable(0 or negative) returns null, measured). `cells`, when given,
+// must be an array of exactly `rows` rows of exactly `cols` strings (the family's own plan() is the
+// authority for the exact-size cross-check; this schema states only the per-dimension bound).
+const TABLE_INSERT_TARGET = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({ afterParagraph: SEL_TEXT }),
+  required: Object.freeze(['afterParagraph']),
+  additionalProperties: false,
+});
+const TABLE_INSERT_DIM = Object.freeze({ type: 'integer', minimum: 1, maximum: 50 });
+const TABLE_INSERT_CELLS = Object.freeze({
+  type: 'array', minItems: 1, maxItems: 50,
+  items: Object.freeze({ type: 'array', minItems: 1, maxItems: 50, items: Object.freeze({ type: 'string', maxLength: 32767 }) }),
+});
+// GH #313: insert_section_break. The anchor is the unique body-level paragraph/heading the new
+// section boundary closes (section-break-insert.cjs's own resolveAnchor -- same contract as
+// TABLE_INSERT_TARGET above). type is required: only nextPage/continuous were LIVE-measured
+// (test/live/docx-gh313-section-break-probe.live.cjs) -- evenPage/oddPage/nextColumn are refused
+// here rather than guessed, the same NEM-MÉRT discipline set_image_wrap's `tight` value uses.
+const SECTION_BREAK_TARGET = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({ afterParagraph: SEL_TEXT }),
+  required: Object.freeze(['afterParagraph']),
+  additionalProperties: false,
+});
+const SECTION_BREAK_TYPE = Object.freeze({ enum: ['nextPage', 'continuous'] });
+// GH #306: insert_image. The anchor is the unique body-level paragraph/heading the new image goes
+// relative to (image-insert.cjs's own resolveAnchor -- same contract as TABLE_INSERT_TARGET
+// above). `source` is `data:image/png;base64,...` OR `data:image/jpeg;base64,...` ONLY -- an
+// external URL is refused by the pattern itself, never fetched; maxLength 1,400,000 is the SAME
+// 1 MiB margin the XLSX insert_image schema already uses (a 1 MiB PNG base64-encodes to exactly
+// 1,398,126 characters with this prefix). widthEmu/heightEmu mirror set_image_size's own positive-
+// integer convention. `position` ('after' default | 'end') is image-insert.cjs's own field --
+// see that family's header comment for the measured difference and the RETRY IDENTITY limit.
+//
+// GH #306b 2. resz: the header/footer alternative shape, mutually exclusive with the body shape
+// above by `additionalProperties: false` on both (check() supports `anyOf`, not `oneOf` -- same
+// discipline PAGE_SETUP_SIZE above already uses, and "at least one matches" = "exactly one
+// matches" here for the SAME reason: the two shapes require disjoint key sets). `section` reuses
+// PAGE_SETUP_SECTION (the SAME { index, of } contract edit_header/edit_footer already use);
+// `part` is header | footer; `variant` is default | title | even -- GH #296 part 3: title/even
+// only on an ALREADY-EXISTING, ALREADY-ACTIVE part, never activated (image-insert.cjs's own header
+// comment, LIVE-measured via docx-gh296-hf-title-even-image-insert-probe.live.cjs). `position` (below) picks
+// 'end' (the part's own last/named paragraph's existing run flow, append -- the ORIGINAL, still the
+// default) or 'start' (a fresh run inserted at index 0 of that SAME paragraph).
+// GH #317 (step 3): optional `paragraph` -- the SAME HF_PARAGRAPH descriptor
+// edit_header/edit_footer's own paragraph mode already uses, reused as-is; absent keeps the
+// pre-existing last-paragraph behaviour.
+// GH #317 (step 4): optional `position` -- `'start'|'end'` (default `'end'` = the pre-existing,
+// unchanged behaviour), LIVE-measured via docx-gh317-image-start-of-paragraph-probe.live.cjs.
+// Its OWN named enum, a DIFFERENT schema node from the body target's step-level `position`
+// (IMAGE_INSERT_POSITION, 'after'|'end' -- a different contract entirely) -- the two never share a
+// property, so this never widens the body shape.
+const IMAGE_INSERT_HF_POSITION = Object.freeze({ enum: ['start', 'end'] });
+const IMAGE_INSERT_HEADER_FOOTER_TARGET = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({ section: PAGE_SETUP_SECTION, part: Object.freeze({ enum: ['header', 'footer'] }), variant: Object.freeze({ enum: ['default', 'title', 'even'] }), paragraph: HF_PARAGRAPH, position: IMAGE_INSERT_HF_POSITION }),
+  required: Object.freeze(['section', 'part']),
+  additionalProperties: false,
+});
+const IMAGE_INSERT_TARGET = Object.freeze({
+  anyOf: Object.freeze([
+    Object.freeze({ type: 'object', properties: Object.freeze({ afterParagraph: SEL_TEXT }), required: Object.freeze(['afterParagraph']), additionalProperties: false }),
+    IMAGE_INSERT_HEADER_FOOTER_TARGET,
+    // GH #306 part 4: the table-cell target -- replace_table_cell's own { tableCell: { text, tableAnchor? } } cell identity (image-insert.cjs planCell)
+    Object.freeze({ type: 'object', properties: Object.freeze({ tableCell: Object.freeze({ type: 'object', properties: Object.freeze({ text: SEL_TEXT, tableAnchor: SEL_TEXT }), required: Object.freeze(['text']), additionalProperties: false }) }), required: Object.freeze(['tableCell']), additionalProperties: false }),
+  ]),
+});
+const IMAGE_INSERT_SOURCE = Object.freeze({ type: 'string', pattern: '^data:image/(png|jpeg);base64,[A-Za-z0-9+/]+=*$', maxLength: 1400000 });
+const IMAGE_INSERT_EMU = Object.freeze({ type: 'integer', minimum: 1 });
+const IMAGE_INSERT_POSITION = Object.freeze({ enum: ['after', 'end'] });
+// GH #322: insert_paragraphs. The anchor is the SAME { afterParagraph } contract as
+// IMAGE_INSERT_TARGET/TABLE_INSERT_TARGET above (paragraphs-insert.cjs's own resolveAnchor).
+// `paragraphs` is 1..200 items (the LIVE-measured ceiling, docx-gh322-bulk-insert-probe.live.cjs:
+// 200 in one callCommand still lands in 36 ms); `format` reuses FORMAT_TEXT_FORMAT as-is (ONE
+// constant, not a second copy) -- paragraphs-insert.cjs's own plan() is the authority that narrows
+// the accepted keys to its subset (PARAGRAPHS_FORMAT_KEYS), the SAME split edit_header/edit_footer
+// already use for their own `format` field above.
+const PARAGRAPHS_INSERT_TARGET = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({ afterParagraph: SEL_TEXT }),
+  required: Object.freeze(['afterParagraph']),
+  additionalProperties: false,
+});
+// GH #309: insert_shape. The anchor is the unique body-level paragraph/heading the new shape goes after (shape-insert.cjs's own resolveAnchor -- same contract as IMAGE_INSERT_TARGET above).
+// `shape.type` is the two LIVE-measured presets only; widthMm/heightMm are integers (the measured sizes were whole millimetres, EMU = mm * 36000); fill/stroke are 6-digit hex; text is one plain
+// line (no control characters) -- shape-insert.cjs plan() re-checks every one of these, the schema refuses the same shapes up front.
+const SHAPE_INSERT_TARGET = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({ afterParagraph: SEL_TEXT }),
+  required: Object.freeze(['afterParagraph']),
+  additionalProperties: false,
+});
+// GH #323: insert_chart. The anchor is the unique body-level paragraph/heading the new chart goes after (chart-insert.cjs REUSES insert_shape's own resolveAnchor). `chart.type` is the
+// LIVE-measured set only; series values are finite numbers, one per category; chart-insert.cjs plan() re-checks every one of these (and the pie/doughnut single-series rule, the one-value-per-
+// category rule and unique series names, which a JSON schema cannot express), the schema refuses the same shapes up front.
+const CHART_INSERT_TARGET = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({ afterParagraph: SEL_TEXT }),
+  required: Object.freeze(['afterParagraph']),
+  additionalProperties: false,
+});
+const CHART_LABEL = Object.freeze({ type: 'string', minLength: 1, maxLength: 100, pattern: '^[^\\u0000-\\u001f\\u007f]+$' });
+const CHART_INSERT_CHART = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({
+    type: Object.freeze({ enum: ['bar', 'barStacked', 'barStackedPercent', 'horizontalBar', 'horizontalBarStacked', 'area', 'areaStacked', 'pie', 'doughnut'] }),
+    categories: Object.freeze({ type: 'array', minItems: 1, maxItems: 100, items: CHART_LABEL }),
+    series: Object.freeze({
+      type: 'array', minItems: 1, maxItems: 10,
+      items: Object.freeze({
+        type: 'object',
+        properties: Object.freeze({ name: CHART_LABEL, values: Object.freeze({ type: 'array', minItems: 1, maxItems: 100, items: Object.freeze({ type: 'number' }) }) }),
+        required: Object.freeze(['name', 'values']),
+        additionalProperties: false,
+      }),
+    }),
+    widthMm: Object.freeze({ type: 'integer', minimum: 10, maximum: 400 }),
+    heightMm: Object.freeze({ type: 'integer', minimum: 10, maximum: 400 }),
+    title: Object.freeze({ type: 'string', minLength: 1, maxLength: 200, pattern: '^[^\\u0000-\\u001f\\u007f]+$' }),
+    legend: Object.freeze({ enum: ['bottom'] }),
+  }),
+  required: Object.freeze(['type', 'categories', 'series', 'widthMm', 'heightMm']),
+  additionalProperties: false,
+});
+const PARAGRAPHS_INSERT_ITEM = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({
+    text: Object.freeze({ type: 'string', minLength: 1, maxLength: 32767 }),
+    style: Object.freeze({ type: 'string', minLength: 1, maxLength: 255 }),
+    format: FORMAT_TEXT_FORMAT,
+  }),
+  required: Object.freeze(['text']),
+  additionalProperties: false,
+});
+const PARAGRAPHS_INSERT_LIST = Object.freeze({ type: 'array', minItems: 1, maxItems: 200, items: PARAGRAPHS_INSERT_ITEM });
+// GH #309 part 3: the optional FLOATING placement -- exactly the measured combinations (shape-insert.cjs planPlacement re-checks every one; 'tight' is not offered, see there)
+const SHAPE_OFFSET_MM = Object.freeze({ type: 'integer', minimum: 0, maximum: 400 });
+const SHAPE_INSERT_PLACEMENT = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({
+    wrap: Object.freeze({ enum: ['square', 'topAndBottom', 'inFront', 'behind'] }),
+    horizontal: Object.freeze({ anyOf: Object.freeze([
+      Object.freeze({ type: 'object', properties: Object.freeze({ relativeTo: Object.freeze({ const: 'margin' }), align: Object.freeze({ enum: ['left', 'center', 'right'] }) }), required: Object.freeze(['relativeTo', 'align']), additionalProperties: false }),
+      Object.freeze({ type: 'object', properties: Object.freeze({ relativeTo: Object.freeze({ const: 'page' }), offsetMm: SHAPE_OFFSET_MM }), required: Object.freeze(['relativeTo', 'offsetMm']), additionalProperties: false }),
+    ]) }),
+    vertical: Object.freeze({ type: 'object', properties: Object.freeze({ relativeTo: Object.freeze({ enum: ['paragraph', 'page'] }), offsetMm: SHAPE_OFFSET_MM }), required: Object.freeze(['relativeTo', 'offsetMm']), additionalProperties: false }),
+  }),
+  required: Object.freeze(['wrap', 'horizontal', 'vertical']),
+  additionalProperties: false,
+});
+const SHAPE_INSERT_SHAPE = Object.freeze({
+  type: 'object',
+  properties: Object.freeze({
+    type: Object.freeze({ enum: ['rect', 'flowChartProcess', 'roundRect', 'ellipse', 'triangle', 'trapezoid', 'flowChartDecision', 'flowChartTerminator', 'rightArrow', 'chevron', 'homePlate'] }),
+    widthMm: Object.freeze({ type: 'integer', minimum: 1, maximum: 400 }),
+    heightMm: Object.freeze({ type: 'integer', minimum: 1, maximum: 400 }),
+    fill: Object.freeze({ type: 'string', pattern: '^[0-9A-Fa-f]{6}$' }),
+    stroke: Object.freeze({ type: 'string', pattern: '^[0-9A-Fa-f]{6}$' }),
+    text: Object.freeze({ type: 'string', minLength: 1, maxLength: 500, pattern: '^[^\\u0000-\\u001f\\u007f]+$' }),
+    placement: SHAPE_INSERT_PLACEMENT,
+  }),
+  required: Object.freeze(['type', 'widthMm', 'heightMm', 'fill', 'stroke', 'text']),
   additionalProperties: false,
 });
 const DOCX_STEP_SCHEMAS_ALL = Object.freeze({
@@ -704,7 +979,8 @@ const DOCX_STEP_SCHEMAS_ALL = Object.freeze({
   set_numbering: Object.freeze({
     type: 'object',
     properties: Object.freeze({ intent: Object.freeze({ const: 'set_numbering' }), id: ID, selector: LINK_TARGET_TEXT,
-      code: Object.freeze({ enum: ['1.', '1)', 'a.', 'I.', 'bullet', 'none'] }), start: NUMBERING_START, suffix: Object.freeze({ enum: ['tab', 'space', 'none'] }), scope: NUMBERING_SCOPE }),
+      code: Object.freeze({ enum: ['1.', '1)', 'a.', 'I.', 'bullet', 'none'] }), start: NUMBERING_START, suffix: Object.freeze({ enum: ['tab', 'space', 'none'] }), scope: NUMBERING_SCOPE,
+      bulletColor: NUMBERING_BULLET_COLOR, bulletFont: NUMBERING_BULLET_FONT }),
     required: Object.freeze(['intent', 'selector']),
     additionalProperties: false,
   }),
@@ -738,18 +1014,26 @@ const DOCX_STEP_SCHEMAS_ALL = Object.freeze({
   // writing to an INACTIVE title/even variant now ACTIVATES it (the adapter's own public-API
   // SetTitlePage/SetEvenAndOddHdrFtr path, stored LIVE evidence #261b) -- not gated here either
   // way: the schema only names the two shapes this release knows about.
+  // GH #316: `format` reuses the format_text schema object as-is (ONE constant, not a second copy)
+  // -- header-footer.cjs's own plan() is the authority that narrows the accepted keys to its subset.
   edit_header: Object.freeze({
     type: 'object',
     properties: Object.freeze({
       intent: Object.freeze({ const: 'edit_header' }), id: ID,
       section: PAGE_SETUP_SECTION,
       text: Object.freeze({ type: 'string', minLength: 1, maxLength: 32767 }),
+      lines: HF_LINES,
       variant: Object.freeze({ enum: ['title', 'even'] }),
       paragraph: HF_PARAGRAPH,
       inheritedBy: HF_INHERITED_BY,
       pageNumber: Object.freeze({ type: 'boolean' }),
+      format: FORMAT_TEXT_FORMAT,
     }),
-    required: Object.freeze(['intent', 'section', 'text']),
+    // GH #317: neither `text` nor `lines` is schema-required -- exactly one of the two is
+    // header-footer.cjs's own plan() rule (a schema anyOf would need to duplicate every OTHER
+    // property into two branches; the cross-field check belongs with the family's other
+    // mutual-exclusion rules, e.g. lines+paragraph, the SAME place they already live).
+    required: Object.freeze(['intent', 'section']),
     additionalProperties: false,
   }),
   // GH #260: the SAME shape and the SAME reasoning as edit_header above (docs/GH259-DOCX-EDIT-
@@ -762,12 +1046,14 @@ const DOCX_STEP_SCHEMAS_ALL = Object.freeze({
       intent: Object.freeze({ const: 'edit_footer' }), id: ID,
       section: PAGE_SETUP_SECTION,
       text: Object.freeze({ type: 'string', minLength: 1, maxLength: 32767 }),
+      lines: HF_LINES,
       variant: Object.freeze({ enum: ['title', 'even'] }),
       paragraph: HF_PARAGRAPH,
       inheritedBy: HF_INHERITED_BY,
       pageNumber: Object.freeze({ type: 'boolean' }),
+      format: FORMAT_TEXT_FORMAT,
     }),
-    required: Object.freeze(['intent', 'section', 'text']),
+    required: Object.freeze(['intent', 'section']),
     additionalProperties: false,
   }),
   // GH #267 B (docs/GH267-DOCX-NOTES-WRITE-DECISION.md; LIVE g267v1 PASS R1-R3): add_footnote / add_endnote. The target is the LIVE-measured { text } shape (ONE paragraph that
@@ -843,20 +1129,123 @@ const DOCX_STEP_SCHEMAS_ALL = Object.freeze({
     required: Object.freeze(['intent', 'matchText', 'text']),
     additionalProperties: false,
   }),
+  // GH #308 (routed + coded; LIVE-measured, test/live/docx-gh308-create-table-probe.live.cjs;
+  // table-insert.cjs's own plan() is the authority for the rows/cols vs cells exact-size cross-check): insert_table.
+  insert_table: Object.freeze({
+    type: 'object',
+    description: 'Inserts a new table right after afterParagraph. If afterParagraph is the document\'s last body paragraph, the engine cannot end the body on a table and writes one empty paragraph after the new table (measured; this is not an error).',
+    properties: Object.freeze({
+      intent: Object.freeze({ const: 'insert_table' }), id: ID, selector: TABLE_INSERT_TARGET,
+      rows: TABLE_INSERT_DIM, cols: TABLE_INSERT_DIM, cells: TABLE_INSERT_CELLS,
+    }),
+    required: Object.freeze(['intent', 'selector', 'rows', 'cols']),
+    additionalProperties: false,
+  }),
+  // GH #313 (routed + coded; LIVE-measured, test/live/docx-gh313-section-break-probe.live.cjs):
+  // insert_section_break. Columns are NOT a field here -- set_page_setup addresses the new
+  // section by {index, of} once the break exists.
+  insert_section_break: Object.freeze({
+    type: 'object',
+    description: 'Inserts a new section break right after afterParagraph (nextPage starts the following content on a new page; continuous does not). To set columns or other page-setup fields for the new section, use set_page_setup afterward, addressing it by its new section index.',
+    properties: Object.freeze({
+      intent: Object.freeze({ const: 'insert_section_break' }), id: ID, selector: SECTION_BREAK_TARGET,
+      type: SECTION_BREAK_TYPE,
+    }),
+    required: Object.freeze(['intent', 'selector', 'type']),
+    additionalProperties: false,
+  }),
+  // GH #306 (routed + coded; LIVE-measured, test/live/docx-gh306-insert-image-probe.live.cjs,
+  // commit 749a4f607): insert_image. GH #306b 2. resz adds the header/footer selector shape below.
+  insert_image: Object.freeze({
+    type: 'object',
+    description: 'Inserts a new image. selector is { afterParagraph } (position \'after\' default puts it in a new paragraph right after afterParagraph; position \'end\' appends it to the end of afterParagraph\'s own paragraph) OR { section: {index, of}, part: \'header\'|\'footer\', variant?: \'default\'|\'title\'|\'even\', paragraph?: {index, of}, position?: \'start\'|\'end\' } (targets the part\'s own last paragraph, or the named one -- the part must already exist; a title/even part must also already be active (titlePage / evenAndOdd on), it is never activated; selector.position \'end\' [default] appends to that paragraph\'s existing runs, \'start\' inserts a fresh run with the image BEFORE them) OR { tableCell: { text, tableAnchor? } } (the top-level table cell whose full text is text, unique -- inside the one table that has a cell with exactly tableAnchor, if given; the image is appended inline to the cell\'s last paragraph; only a cell of plain paragraphs). source is a data:image/png or data:image/jpeg base64 URI (no external URL). widthEmu/heightEmu may round-trip ±1 EMU off the requested value (measured engine rounding). Optional placement (body target with position \'after\' only) makes the image floating: wrap square | topAndBottom | inFront | behind, horizontal { relativeTo: margin, align: left | center | right } or { relativeTo: page, offsetMm }, vertical { relativeTo: paragraph | page, offsetMm } (whole millimetres 0..400); without it the image is inline.',
+    properties: Object.freeze({
+      intent: Object.freeze({ const: 'insert_image' }), id: ID, selector: IMAGE_INSERT_TARGET,
+      source: IMAGE_INSERT_SOURCE, widthEmu: IMAGE_INSERT_EMU, heightEmu: IMAGE_INSERT_EMU, position: IMAGE_INSERT_POSITION,
+      // GH #306 part 4: the SAME floating placement insert_shape takes (image-insert.cjs reuses shape-insert.cjs planPlacement); the planner allows it only with the body target, position 'after'
+      placement: SHAPE_INSERT_PLACEMENT,
+    }),
+    required: Object.freeze(['intent', 'selector', 'source', 'widthEmu', 'heightEmu']),
+    additionalProperties: false,
+  }),
+  // GH #322 (routed + coded; LIVE-measured, test/live/docx-gh322-bulk-insert-probe.live.cjs,
+  // commit 48afe5074): insert_paragraphs.
+  insert_paragraphs: Object.freeze({
+    type: 'object',
+    description: 'Inserts N paragraphs (1..200) right after afterParagraph, in ONE call, in the given order. Each item may name an existing paragraph style and/or a format (a subset of format_text\'s own keys: bold, italic, underline, strike, fontFamily, fontSize, color, alignment, spaceBefore, spaceAfter). All-or-nothing: an unknown style name refuses the whole batch, nothing written.',
+    properties: Object.freeze({
+      intent: Object.freeze({ const: 'insert_paragraphs' }), id: ID, selector: PARAGRAPHS_INSERT_TARGET,
+      paragraphs: PARAGRAPHS_INSERT_LIST,
+    }),
+    required: Object.freeze(['intent', 'selector', 'paragraphs']),
+    additionalProperties: false,
+  }),
+  // GH #309 (routed + coded; LIVE-measured, test/live/docx-gh309-shape-probe.live.cjs + docx-gh309-shape-read-probe.live.cjs): insert_shape.
+  insert_shape: Object.freeze({
+    type: 'object',
+    description: 'Inserts a new inline shape with its own text in a new paragraph right after afterParagraph. shape.type is one of rect, flowChartProcess, roundRect, ellipse, triangle, trapezoid, flowChartDecision, flowChartTerminator, rightArrow, chevron, homePlate (the measured presets); widthMm / heightMm are whole millimetres (1..400); fill / stroke are 6-digit hex colours (RRGGBB); text is one plain line of at most 500 characters. The stroke width is fixed (1.5 pt). Optional shape.placement makes it floating: wrap square | topAndBottom | inFront | behind, horizontal { relativeTo: margin, align: left | center | right } or { relativeTo: page, offsetMm }, vertical { relativeTo: paragraph | page, offsetMm } (whole millimetres 0..400); without it the shape is inline. Not offered: tight / through wrap, header / footer / table-cell targets, multi-paragraph shape text.',
+    properties: Object.freeze({ intent: Object.freeze({ const: 'insert_shape' }), id: ID, selector: SHAPE_INSERT_TARGET, shape: SHAPE_INSERT_SHAPE }),
+    required: Object.freeze(['intent', 'selector', 'shape']),
+    additionalProperties: false,
+  }),
+  // GH #323 (routed + coded; LIVE-measured, test/live/docx-gh323-native-chart-probe.live.cjs + -chart-readback-and-types-probe + -chart-tojson-series-probe): insert_chart.
+  insert_chart: Object.freeze({
+    type: 'object',
+    description: 'Inserts a new inline native chart, carrying its own data, in a new paragraph right after afterParagraph. chart.type is bar, barStacked, barStackedPercent, horizontalBar, horizontalBarStacked, area, areaStacked, pie or doughnut (the measured set; pie and doughnut take exactly one series); categories are the category labels; series is a list of { name, values } with one number per category; widthMm / heightMm are whole millimetres (10..400); title is optional; legend may be bottom. Not offered: line, scatter, stock and 3D charts, editing an existing chart, table-cell / header / footer targets, floating placement, number formats, colours.',
+    properties: Object.freeze({ intent: Object.freeze({ const: 'insert_chart' }), id: ID, selector: CHART_INSERT_TARGET, chart: CHART_INSERT_CHART }),
+    required: Object.freeze(['intent', 'selector', 'chart']),
+    additionalProperties: false,
+  }),
+  // GH #296 (routed + coded; LIVE-measured, test/live/docx-gh296-image-replace-delete-probe.live.cjs, run p296-r1 6/6): delete_image / replace_image.
+  delete_image: Object.freeze({
+    type: 'object',
+    description: 'Deletes one existing image -- body, header or footer (default / title / even). selector is { paragraph, ordinal? } or { index } (the index read_images returns, valid for one read only), plus an optional part (\'body\' or \'header|footer:<section>:<default|title|even>\', the read_images row\'s own part label) that must match or the step is refused. The paragraph text around the image stays.',
+    properties: Object.freeze({ intent: Object.freeze({ const: 'delete_image' }), id: ID, selector: IMAGE_EDIT_TARGET }),
+    required: Object.freeze(['intent', 'selector']),
+    additionalProperties: false,
+  }),
+  replace_image: Object.freeze({
+    type: 'object',
+    description: 'Replaces the picture of one existing image -- body, header or footer (default / title / even) -- keeping its position and placement (inline, or floating with its wrap). selector as delete_image. source is a data:image/png or data:image/jpeg base64 URI (no external URL). widthEmu / heightEmu together set a new size; omit both to keep the current size (a requested size may round-trip ±1 EMU).',
+    properties: Object.freeze({ intent: Object.freeze({ const: 'replace_image' }), id: ID, selector: IMAGE_EDIT_TARGET, source: IMAGE_INSERT_SOURCE, widthEmu: IMAGE_INSERT_EMU, heightEmu: IMAGE_INSERT_EMU }),
+    required: Object.freeze(['intent', 'selector', 'source']),
+    additionalProperties: false,
+  }),
 });
 const releasedOnly = (all, what) => Object.freeze(Object.fromEntries(DOCX_WRITE_ALLOWLIST.map(i => {
   if (!(i in all)) throw new TypeError(`${what}: no entry for the allowlisted intent ${i}`);
   return [i, all[i]];
 })));
 const DOCX_STEP_SCHEMAS = releasedOnly(DOCX_STEP_SCHEMAS_ALL, 'DOCX_STEP_SCHEMAS');
-// the selector must name ONE resolvable branch (fingerprint | heading | text | sectionHeading + paragraphOrdinal); a selector with only
-// qualifiers (kind / before / precondition ...) would resolve to UNSUPPORTED_SELECTOR at execution -- refused here instead, pre-dispatch.
+// the selector must name ONE resolvable branch (fingerprint | heading | text | sectionHeading + paragraphOrdinal | GH #307 emptyDocument);
+// a selector with only qualifiers (kind / before / precondition ...) would resolve to UNSUPPORTED_SELECTOR at execution -- refused here
+// instead, pre-dispatch. Shared with format_text (below); field-contract.cjs's SELECTOR_KEYS is what actually keeps emptyDocument out of
+// format_text's reach (its own selector names there would be refused field-unsupported, one step later, still 0 writes).
 const rewriteSelectorBranch = sel => (sel.fingerprint !== undefined || sel.heading !== undefined || sel.text !== undefined
+  || sel.emptyDocument === true || (sel.sectionHeading !== undefined && sel.paragraphOrdinal !== undefined));
+// GH #320: insert_paragraph_before/after / delete_paragraph -- the selector must name ONE of fingerprint, text or
+// sectionHeading + paragraphOrdinal (the same "at least one" contract rewriteSelectorBranch enforces, minus `heading`:
+// out of scope for this release, GH #233's own measured anchor omissions above still apply to it here).
+const paragraphSelectorBranch = sel => (sel.fingerprint !== undefined || sel.text !== undefined
   || (sel.sectionHeading !== undefined && sel.paragraphOrdinal !== undefined));
+// GH #320: delete_paragraph's `before` / `after` are the surviving-context proof (GH #234) -- meaningful, and therefore
+// required, ONLY on the `text` branch: the resolver ignores them on a fingerprint / sectionHeading+paragraphOrdinal
+// selector (field-contract.cjs refuses them there as "would be ignored beside" that branch), so requiring them
+// unconditionally would make those two branches impossible to ever satisfy (required by this schema, then refused
+// by field-contract for being present).
+const usesTextAnchor = sel => sel.fingerprint === undefined && !(sel.sectionHeading !== undefined && sel.paragraphOrdinal !== undefined);
+function deleteSelectorProblem(s) {
+  if (!paragraphSelectorBranch(s.selector)) return 'selector must name fingerprint, text or sectionHeading + paragraphOrdinal';
+  if (usesTextAnchor(s.selector) && (typeof s.selector.before !== 'string' || typeof s.selector.after !== 'string')) {
+    return 'selector requires before and after (the surviving-context proof) when it names text';
+  }
+  return null;
+}
 // GH #233: the inserted text is ONE paragraph with something visible in it -- a blank text is refused by the planner anyway; a line break is
 // NOT measured on the real editor (AddText of '\n' may split, drop or keep it), so it is refused here rather than guessed.
-const insertTextProblem = s => (!/\S/.test(s.text) ? 'text must contain a non-whitespace character'
-  : (/[\r\n]/.test(s.text) ? 'text must be a single paragraph (no line break)' : null));
+const insertTextProblem = s => (!paragraphSelectorBranch(s.selector) ? 'selector must name fingerprint, text or sectionHeading + paragraphOrdinal'
+  : (!/\S/.test(s.text) ? 'text must contain a non-whitespace character'
+  : (/[\r\n]/.test(s.text) ? 'text must be a single paragraph (no line break)' : null)));
 const listTargetProblem = s => (/\S/.test(s.selector.text) ? null : 'selector.text must contain a non-whitespace character');
 const moveSameParagraph = s => (s.selector.text === s.destinationSelector.text ? 'the moved paragraph and its destination are the same paragraph' : null);
 // GH #232: a tab position and a border size are written on an integer grid -- twips (pos * 20) and eighth-points (size * 8), each
@@ -875,6 +1264,13 @@ function formatGridProblem(format) {
   }
   for (const k of ['borderTop', 'borderBottom', 'borderLeft', 'borderRight']) {
     if (format[k] !== undefined && gridProblem(format[k].size, 8, 0.01)) return `format.${k}.size ${format[k].size} is not on the 1/8-point grid the editor stores (it would be written rounded and read back different)`;
+    // GH #314: space is NOT a grid (no tolerance makes sense) -- only 12 discrete point-values are
+    // exactly reachable (the DS's own silent mm-rounding, formatting.cjs's own header comment); the
+    // write side already translates through BORDER_SPACE_WRITE_INPUT, so anything outside this list
+    // is refused here, enumerated, rather than silently landing on an unrequested value.
+    if (format[k] !== undefined && format[k].space !== undefined && !BORDER_SPACE_POINTS.includes(format[k].space)) {
+      return `format.${k}.space ${format[k].space} is not one of the only point-values the editor can store exactly: ${BORDER_SPACE_POINTS.join(', ')}`;
+    }
   }
   return null;
 }
@@ -888,7 +1284,7 @@ function styleProblem(s) {
   for (const f of ['next', 'link']) if (s[f] !== undefined && !/\S/.test(s[f])) return `${f} must contain a non-whitespace character`;
   if (s.link !== undefined && s.link === s.name) return 'link names the style itself';
   if (s.text === undefined && s.paragraph === undefined && s.basedOn === undefined && s.next === undefined && s.link === undefined) return s.intent === 'define_style' ? 'define_style must name at least one of text, paragraph, basedOn' : 'modify_style must name at least one of text, paragraph, next, link';
-  if (s.text !== undefined && Object.keys(s.text).length === 0) return 'text must name at least one of bold, size, color, italic, underline, strike, fontFamily';
+  if (s.text !== undefined && Object.keys(s.text).length === 0) return 'text must name at least one of bold, size, color, italic, underline, strike, fontFamily, language';
   if (s.paragraph !== undefined && Object.keys(s.paragraph).length === 0) return 'paragraph must name at least one of align, indentLeft, spacingAfter, spacingBefore, indentRight, indentFirstLine, keepNext, keepLines, pageBreakBefore';
   if (s.text && s.text.fontFamily !== undefined && !/\S/.test(s.text.fontFamily)) return 'text.fontFamily must contain a non-whitespace character';
   if (s.text && s.text.size !== undefined && !Number.isInteger(s.text.size * 2)) return `text.size ${s.text.size} is not on the 0.5-point grid`;
@@ -900,11 +1296,11 @@ function styleProblem(s) {
 /** add_link / add_bookmark: the parent text and a matchText must carry something visible. */
 const richProblem = s => (!s.selector.text.trim() ? 'selector.text must not be blank' : (s.matchText !== undefined && !s.matchText.trim() ? 'matchText must not be blank' : null));
 const DOCX_CONSTRAINTS_ALL = Object.freeze({
-  rewrite_paragraph: s => (!rewriteSelectorBranch(s.selector) ? 'selector must name fingerprint, heading, text or sectionHeading + paragraphOrdinal'
+  rewrite_paragraph: s => (!rewriteSelectorBranch(s.selector) ? 'selector must name fingerprint, heading, text, sectionHeading + paragraphOrdinal or emptyDocument'
     : (s.expectedPreservation !== undefined && Object.keys(s.expectedPreservation).length === 0 ? 'expectedPreservation must name at least one property' : null)),
   insert_paragraph_before: insertTextProblem,
   insert_paragraph_after: insertTextProblem,
-  delete_paragraph: () => null,
+  delete_paragraph: deleteSelectorProblem,
   move_paragraph_before: moveSameParagraph,
   move_paragraph_after: moveSameParagraph,
   apply_list: listTargetProblem,
@@ -953,7 +1349,8 @@ const DOCX_CONSTRAINTS_ALL = Object.freeze({
     ? 'set_page_setup requires at least one of size, margins, columns, startPageNumber' : null),
   // GH #259: the planner (header-footer.cjs plan(), run on the step alone right after this) is the
   // authority for the tab/line-break shape check (measured, docs/GH259-DOCX-EDIT-HEADER-COMMON-DECISION.md)
-  // -- same discipline as replace_table_cell above.
+  // -- same discipline as replace_table_cell above. GH #316: the same planner is also the authority
+  // for `format`'s accepted-key subset and its validation (normalizeWanted, reused from formatting.cjs).
   edit_header: () => null,
   // GH #260: same discipline, mirrored onto footer.
   edit_footer: () => null,
@@ -970,6 +1367,28 @@ const DOCX_CONSTRAINTS_ALL = Object.freeze({
   resolve_comment: s => (!s.text.trim() ? 'text must not be blank' : (!s.author.trim() ? 'author must not be blank' : null)),
   reply_comment: s => (!s.text.trim() ? 'text must not be blank' : (!s.target.text.trim() ? 'target.text must not be blank' : (!s.target.author.trim() ? 'target.author must not be blank' : null))),
   add_comment_on_match: s => (!s.matchText.trim() ? 'matchText must not be blank' : (!s.text.trim() ? 'text must not be blank' : null)),
+  // GH #308: the planner (table-insert.cjs plan(), run on the step alone right after this) is the
+  // authority for the blank-anchor and the cells-exact-size-match checks -- same discipline as
+  // replace_table_cell/edit_header above.
+  insert_table: () => null,
+  // GH #313: the planner (section-break-insert.cjs plan(), run on the step alone right after
+  // this) is the authority for the blank-anchor check; the schema's enum already refuses an
+  // unmeasured type -- same discipline as insert_table above.
+  insert_section_break: () => null,
+  // GH #306: the planner (image-insert.cjs plan(), run on the step alone right after this) is the
+  // authority for the blank-anchor check; the schema's pattern/enum already refuse a malformed
+  // source and an unmeasured position -- same discipline as insert_table/insert_section_break above.
+  insert_image: () => null,
+  insert_paragraphs: () => null,
+  // GH #309: the planner (shape-insert.cjs plan(), run on the step alone right after this) is the authority for the blank-anchor / text checks; the schema already refuses an unmeasured preset,
+  // a non-integer size and a malformed colour -- same discipline as insert_image above.
+  insert_shape: () => null,
+  // GH #323: the planner (chart-insert.cjs plan()) is the authority for the blank-anchor, one-value-per-category, single-series and unique-name checks; the schema already refuses an
+  // unmeasured type, a non-integer size and a non-number value -- same discipline as insert_shape above.
+  insert_chart: () => null,
+  // GH #296: the planner (image.cjs plan()) is the authority for the index/paragraph XOR and the widthEmu+heightEmu pairing; the schema already refuses a malformed part and a non-data: source.
+  delete_image: () => null,
+  replace_image: () => null,
 });
 const DOCX_CONSTRAINTS = releasedOnly(DOCX_CONSTRAINTS_ALL, 'DOCX_CONSTRAINTS');
 const INSERT_INTENTS = Object.freeze(['insert_paragraph_before', 'insert_paragraph_after']);
@@ -1126,7 +1545,7 @@ function expectedParagraphsFromSteps(task) {
  * (docx) instead of `read_range` (xlsx). Same rule, same bound (`awaitKeyRotation`, imported unchanged), same
  * "never while held" sequencing -- see `createDocxWriteExecution`'s own call site for why.
  */
-async function runDocxStoredContentVerify({ v, r, preKey, configSource, createDriver, loadPlaywright, gate, now = Date.now, keyRotation = {} }) {
+async function runDocxStoredContentVerify({ v, r, preKey, configSource, createDriver, loadPlaywright, gate, now = Date.now, keyRotation = {}, timeoutMs, commandTimeoutMs }) {
   if (v.task.verifyStoredContent !== true) return null;
   const preservationScope = (r.preservation && r.preservation.scope) || null;
   const inheritedNotProven = (r.preservation && r.preservation.notProven) || [];
@@ -1143,7 +1562,7 @@ async function runDocxStoredContentVerify({ v, r, preKey, configSource, createDr
   if (!lease) return unresolved('UNCERTAIN', 'open-failed', now() - t0, skipped);
   let units = null; let incomplete = false;
   try {
-    const driver = createDriver('docx', { configSource, loadPlaywright });
+    const driver = createDriver('docx', { configSource, loadPlaywright, timeoutMs, commandTimeoutMs });
     lease.track(driver);
     const opened = (await driver.open({ fileId: v.fileId, operation: 'READ' })) || {};
     if (!opened.ok) return unresolved('UNCERTAIN', 'open-failed', now() - t0, skipped);
@@ -1205,7 +1624,7 @@ async function runDocxStoredContentVerify({ v, r, preKey, configSource, createDr
  * is a THIRD object a future wiring unit may or may not share across formats -- see the design doc's own
  * section on the reuse-key safety of doing so.
  */
-function createDocxWriteExecution({ configSource, browsersPath, gate = createSessionGate(), runtime = null, loadPlaywright = null, createDriver = productDriver, reuse = null, keyRotation = {} } = {}) {
+function createDocxWriteExecution({ configSource, browsersPath, gate = createSessionGate(), runtime = null, loadPlaywright = null, createDriver = productDriver, reuse = null, keyRotation = {}, timeoutMs, commandTimeoutMs } = {}) {
   const rt = runtime || (loadPlaywright ? { check: () => ({ ok: true }), load: loadPlaywright } : createBrowserRuntime({ browsersPath }));
   return async function execute(v) {
     const verifying = v.task.verifyStoredContent === true;
@@ -1218,7 +1637,7 @@ function createDocxWriteExecution({ configSource, browsersPath, gate = createSes
       if (verifying && configSource && typeof configSource.getEditorConfig === 'function') {
         try { const cfg = await configSource.getEditorConfig({ fileId: v.fileId, operation: 'WRITE' }); preKey = cfg && cfg.document ? cfg.document.key : null; } catch { preKey = null; }
       }
-      const driver = productWriteDriver(createDriver('docx', { configSource, loadPlaywright: rt.load }));
+      const driver = productWriteDriver(createDriver('docx', { configSource, loadPlaywright: rt.load, timeoutMs, commandTimeoutMs }));
       lease.track(driver);
       const warm = verifying ? null : warmSessionOptions(reuse, configSource, v.fileId, lease);
       const options = { driver, fileId: v.fileId, ...(warm ? { reuse: warm } : {}) };
@@ -1227,7 +1646,7 @@ function createDocxWriteExecution({ configSource, browsersPath, gate = createSes
     } finally {
       lease.release();
     }
-    const sv = await runDocxStoredContentVerify({ v, r, preKey, configSource, createDriver, loadPlaywright: rt.load, gate, keyRotation });
+    const sv = await runDocxStoredContentVerify({ v, r, preKey, configSource, createDriver, loadPlaywright: rt.load, gate, keyRotation, timeoutMs, commandTimeoutMs });
     return applyStoredContentVerify(r, sv);
   };
 }

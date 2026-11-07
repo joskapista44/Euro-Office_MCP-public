@@ -1,5 +1,6 @@
 'use strict';
 
+const { EXACT_PARAGRAPH_LOOKUP } = require('./paragraph-lookup.cjs');
 const { norm, countExact, resolveTextUnit } = require('../inventory.cjs');
 const { resolveStableTarget } = require('../resolver.cjs');
 
@@ -30,6 +31,27 @@ const ANCHOR_FIELDS = Object.freeze(['kind', 'before', 'after', 'headingPath']);
 const REWRITABLE_KINDS = Object.freeze(['paragraph', 'heading']);
 // Set by the adapter planner from an EXPLICIT task.recovery (adapter.cjs); never from stored state.
 const UNRESOLVED = 'UNRESOLVED_UNCERTAINTY';
+
+/**
+ * GH #359 (1): `commandBody`'s named returns, for every guard that fires BEFORE the command's first
+ * mutating engine call. No edit was ever ATTEMPTED on this path, so a driver reading one of these
+ * back may safely treat it as "no write" (docx-driver.cjs's dispatch()).
+ *
+ * `rewrite-live-addtext-failed` (review feedback, point 2) is deliberately NOT in this list, even
+ * though it fires before any OTHER mutating call succeeds: `AddText` IS the mutating call, and a
+ * `!== true` return does not prove the engine's own change log stayed empty (a partial insert is
+ * not ruled out). The same reasoning already excludes the post-AddText rollback branches
+ * (text.cjs 290-301) -- `AddText` failing keeps the unconditional "write attempted" default, it
+ * just never gets a name added to the no-write set.
+ */
+const REWRITE_NO_WRITE_REASONS = Object.freeze([
+  'rewrite-live-no-document-or-empty-target',
+  'rewrite-live-paragraph-not-found',
+  'rewrite-live-range-text-mismatch',
+  'rewrite-live-hyperlink-refused',
+  'rewrite-live-not-paragraph',
+  'rewrite-live-paragraph-text-not-unique',
+]);
 
 /**
  * `step.expectedPreservation` (OPTIONAL, owner decision R2 point 6): an explicit expected property
@@ -71,9 +93,41 @@ function anchorsOf(selector) {
   });
 }
 
-/** The derived preservation expectation: the seven properties of the FRESH pre-mutation target. */
+/**
+ * The derived preservation expectation: the seven properties of the FRESH pre-mutation target.
+ *
+ * GH #359 (3/3), measured LIVE (three run-count shapes -- MULTIRUN, MULTIRUN_PB, MULTIRUN3):
+ * a property the source paragraph's runs disagree on is ABSENT
+ * from target.props (the engine's own multi-run TextPr read returns undefined for a mixed value,
+ * the same measured behaviour comparable()'s caller already documents for the whole-paragraph
+ * formatting family), and on all three measured shapes the rewrite's new, single run
+ * DETERMINISTICALLY takes on the FIRST source run's own value for that property. So a property
+ * missing here, when the source paragraph's runs are readable and there is more than one of them,
+ * falls back to the first run's own format -- every other property (present in target.props, or
+ * missing for any OTHER reason: runs unreadable, a single run, or the first run's own value for
+ * that property also unset) is left UNCHANGED, so verifyPreservation's fail-closed comparison
+ * below still fires exactly as before this change.
+ *
+ * GH #359 kovetes, MERT LIVE (prod DS cell /26, egy vegyes betumeretu bekezdesen): a fenti fallback
+ * 11-et (run-format, PONT) adott a tarolt/tarsitott target.props 22 (FELPONT) helyett -- a ket mezo
+ * KULONBOZO egysegben jon (docx-driver.cjs: a paragraph-szintu props.fontSize a NYERS GetFontSize()
+ * felpontban, a futasnyi (run) format.fontSize ugyanazt az erteket mar PONTRA osztva adja, / 2-vel).
+ * A fontSize fallback ezert a run-format ertekét *2-vel konvertalja a felpontos target.props-konvenciora,
+ * MIELOTT beirna az expected-be -- csak ezt az EGY propertyt erinti, a tobbi hat valtozatlan marad.
+ */
 function derivedExpectation(target) {
-  return target && target.props ? comparable(target.props) : null;
+  if (!target || !target.props) return null;
+  // Built in PRESERVED_PROPERTIES order directly (not comparable() + a later insertion) so a
+  // collapsed-from-the-first-run key sits where it would if target.props had carried it all
+  // along -- verifyPreservation's JSON.stringify comparison is key-ORDER sensitive, and
+  // `actual` (comparable(now.props) below) is always built in this same canonical order.
+  const first = Array.isArray(target.runs) && target.runs.length > 1 && target.runs[0] ? target.runs[0].format : null;
+  const expected = {};
+  for (const k of PRESERVED_PROPERTIES) {
+    if (target.props[k] !== undefined) expected[k] = target.props[k];
+    else if (first && first[k] !== undefined) expected[k] = k === 'fontSize' ? first[k] * 2 : first[k];
+  }
+  return expected;
 }
 
 function propertiesMatch(actual, expected) {
@@ -127,6 +181,11 @@ function classify(primary, op) {
     if (norm(resolved.target.text) === norm(op.text)) {
       return terminalVerdict(resolved.target, op, 'fresh-live-selector-already-terminal');
     }
+    // the rewrite pattern deletes a hyperlink in its target (measured LIVE, paragraph-lookup-hyperlink-shift-probe W2): refused
+    // here, before any dispatch -- the command's own holdsHyperlink guard would only end in DISPATCHED_OUTCOME_UNKNOWN
+    if (Array.isArray(resolved.target.hyperlinks) && resolved.target.hyperlinks.length > 0) {
+      return { state: 'FAIL_CLOSED', evidence: { reason: 'rewrite-target-holds-hyperlink', hyperlinks: resolved.target.hyperlinks.length } };
+    }
     if (resolveStableTarget(primary, { text: op.text }).ambiguity !== 'NOT_FOUND') {
       return { state: 'FAIL_CLOSED', evidence: { reason: 'rewrite-conflicting-old-and-new-state' } };
     }
@@ -143,6 +202,17 @@ function classify(primary, op) {
   // an unresolved one has no anchor-based terminal fallback -- its own reason, before any dispatch
   if (/^(SECTION|PARAGRAPH)_/.test(String(resolved.ambiguity))) {
     return { state: 'FAIL_CLOSED', evidence: { reason: `rewrite-${String(resolved.ambiguity).toLowerCase().replace(/_/g, '-')}`, available: resolved.available, candidates: resolved.candidates } };
+  }
+  // GH #307: `emptyDocument` no longer resolves once the write has landed -- the retry proof is NOT
+  // anchor-based (there is no text to search by): the document is terminal when it is, again, exactly
+  // one paragraph whose text is the task's OWN text. Anything else (someone else's text, more than one
+  // paragraph) is a NAMED failure, never the generic "insufficient selector" (the selector was fine).
+  if (resolved.ambiguity === 'EMPTY_DOCUMENT_NOT_EMPTY') {
+    const blocks = (primary && primary.blocks) || [];
+    if (blocks.length === 1 && blocks[0].kind === 'paragraph' && norm(blocks[0].text) === norm(op.text)) {
+      return terminalVerdict(blocks[0], op, 'empty-document-retry-already-terminal');
+    }
+    return { state: 'FAIL_CLOSED', evidence: { reason: 'rewrite-empty-document-retry-target-not-terminal' } };
   }
   const anchors = anchorsOf(op.selector);
   if (anchors.length === 0) {
@@ -163,6 +233,13 @@ function classify(primary, op) {
 function terminalSelector(op, anchors = anchorsOf(op.selector)) {
   const s = { text: op.text };
   for (const k of anchors) s[k] = op.selector[k];
+  // GH #359 (v2): beforeAlt/afterAlt (adapter.cjs's attachAnchorAlternates) are planner metadata on
+  // op.selector, not one of ANCHOR_FIELDS -- carry them into the terminal selector too, or
+  // resolveStableTarget's matchesAnchor never sees them and a neighbour rewritten by another
+  // operation of this task fails this check even though classify()'s own top-level resolution
+  // (which reads op.selector directly) already accepts it.
+  if (op.selector && op.selector.beforeAlt !== undefined) s.beforeAlt = op.selector.beforeAlt;
+  if (op.selector && op.selector.afterAlt !== undefined) s.afterAlt = op.selector.afterAlt;
   return s;
 }
 
@@ -187,6 +264,19 @@ function resolve(primary, selector) {
  * editor API. The real driver executes `body`; nothing else.
  */
 function lower(op, target) {
+  // GH #307: `emptyDocument` has no OLD TEXT to search by -- EXACT_PARAGRAPH_LOOKUP's whole premise
+  // (find the paragraph that contains this exact string) does not apply to an empty string, so this
+  // is a DIFFERENT command, not a degenerate case of the text-anchored one (measured live, GH #307
+  // probe: commandBody('', newText) runs the text-anchored command and does nothing at all, via its
+  // own `if (!doc || !targetText) return;`).
+  if (op.selector && op.selector.emptyDocument === true) {
+    const newText = String(op.text == null ? '' : op.text);
+    return {
+      kind: 'callCommand',
+      body: emptyDocumentCommandBody(newText),
+      meta: Object.freeze({ family: 'text', action: 'rewriteEmptyDocument', newText }),
+    };
+  }
   const oldText = String(target.text || '');
   const newText = String(op.text == null ? '' : op.text);
   return {
@@ -203,42 +293,77 @@ try {
   const replacement = ${JSON.stringify(replacement)};
   const textOpts = { Numbering: false, NewLineSeparator: '\\n' };
   const doc = Api.GetDocument();
-  if (!doc || !targetText) return;
-  const ranges = doc.Search(targetText, { MatchCase: true }) || [];
-  if (ranges.length !== 1) return;
-  const range = ranges[0];
-  if (String(range.GetText(textOpts) || '') !== targetText) return;
-  const paragraph = range.GetParagraph(0);
-  if (!paragraph || typeof paragraph.GetRange !== 'function') return;
-  if (typeof paragraph.GetClassType === 'function' && paragraph.GetClassType() !== 'paragraph') return;
+  if (!doc || !targetText) return 'rewrite-live-no-document-or-empty-target';
+${EXACT_PARAGRAPH_LOOKUP}
+  const paragraph = exactParagraphOf(targetText);
+  if (!paragraph || typeof paragraph.GetRange !== 'function') return 'rewrite-live-paragraph-not-found';
+  const range = unitRangeOf(targetText);
+  if (!range || String(range.GetText(textOpts) || '') !== targetText) return 'rewrite-live-range-text-mismatch';
+  // a rewrite over a hyperlink's text deletes the link (measured LIVE, docs/evidence/paragraph-lookup-hyperlink-shift-probe-20261030.json W2):
+  // not decided, so a paragraph holding one is not rewritten -- refused before any insert, as before the lookup mapped link positions
+  if (holdsHyperlink(paragraph)) return 'rewrite-live-hyperlink-refused';
+  if (typeof paragraph.GetClassType === 'function' && paragraph.GetClassType() !== 'paragraph') return 'rewrite-live-not-paragraph';
   const paragraphText = String(paragraph.GetText(textOpts) || '');
   const targetOffset = paragraphText.indexOf(targetText);
-  if (targetOffset < 0 || paragraphText.indexOf(targetText, targetOffset + targetText.length) !== -1) return;
+  if (targetOffset < 0 || paragraphText.indexOf(targetText, targetOffset + targetText.length) !== -1) return 'rewrite-live-paragraph-text-not-unique';
+  // GH #359 (2/2): plainRunPadBudget comes from EXACT_PARAGRAPH_LOOKUP above -- the same run-boundary
+  // widening unitRangeOf uses at the top of this body. A single-run paragraph keeps the original
+  // [-1, 0, +1] window unchanged; a multi-run one widens past +1 as the measured run count demands.
   const exactRange = (p, start, text) => {
     const baseEnd = start + text.length;
-    for (const end of [baseEnd - 1, baseEnd, baseEnd + 1]) {
+    const maxPad = plainRunPadBudget(p);
+    for (let pad = -1; pad <= maxPad + 1; pad += 1) {
+      const end = baseEnd + pad;
       if (end < start) continue;
       try { const c = p.GetRange(start, end); if (c && String(c.GetText(textOpts) || '') === text) return c; } catch (_) {}
     }
     return null;
   };
-  if (!replacement) { range.Delete(); return; }
+  if (!replacement) { range.Delete(); return 'ok'; }
   const oldTextPr = range.GetTextPr();
-  if (range.AddText(replacement, 'before') !== true) return;
+  if (range.AddText(replacement, 'before') !== true) return 'rewrite-live-addtext-failed';
   const rollback = () => { try { const r = exactRange(paragraph, targetOffset, replacement); if (r) r.Delete(); } catch (_) {} };
   const inserted = exactRange(paragraph, targetOffset, replacement);
-  if (!inserted) return rollback();
+  if (!inserted) { rollback(); return 'rewrite-live-rollback-insert-not-found'; }
   if (oldTextPr) {
-    if (typeof inserted.SetTextPr !== 'function' || inserted.SetTextPr(oldTextPr) == null) return rollback();
+    if (typeof inserted.SetTextPr !== 'function' || inserted.SetTextPr(oldTextPr) == null) { rollback(); return 'rewrite-live-rollback-settextpr-failed'; }
   }
-  if (String(inserted.GetText(textOpts) || '') !== replacement) return rollback();
+  if (String(inserted.GetText(textOpts) || '') !== replacement) { rollback(); return 'rewrite-live-rollback-inserted-text-mismatch'; }
   const afterInsert = String(paragraph.GetText(textOpts) || '');
   // GH #228: the old text stands at a KNOWN offset after the insert -- check it THERE (a search would also find the old text inside a replacement that contains it)
   const oldOffset = targetOffset + replacement.length;
-  if (afterInsert.slice(targetOffset, oldOffset) !== replacement || afterInsert.slice(oldOffset, oldOffset + targetText.length) !== targetText) return rollback();
+  if (afterInsert.slice(targetOffset, oldOffset) !== replacement || afterInsert.slice(oldOffset, oldOffset + targetText.length) !== targetText) { rollback(); return 'rewrite-live-rollback-after-insert-mismatch'; }
   const freshOld = exactRange(paragraph, oldOffset, targetText);
-  if (!freshOld || String(freshOld.GetText(textOpts) || '') !== targetText) return rollback();
-  if (freshOld.Delete() !== true) return rollback();
+  if (!freshOld || String(freshOld.GetText(textOpts) || '') !== targetText) { rollback(); return 'rewrite-live-rollback-old-text-not-found'; }
+  if (freshOld.Delete() !== true) { rollback(); return 'rewrite-live-rollback-delete-failed'; }
+  return 'ok';
+} catch (_) { return 'rewrite-live-exception'; }
+`;
+}
+
+/**
+ * GH #307: the `emptyDocument` command. The precondition (exactly one element, a paragraph, trimmed
+ * text empty) is checked INSIDE the command too -- defense in depth, the same discipline
+ * REWRITE_SELECTOR's rewriteSelectorBranch uses at the schema layer: the resolver proved it against
+ * a FRESH pre-dispatch observation, but the live document may have moved by the time this body
+ * actually runs, so the command refuses to write rather than trust a stale proof. A blank
+ * replacement is refused too -- there is no "old text" to delete here, so an empty replacement is
+ * not a meaningful operation (unlike `commandBody`, where it deletes the target).
+ */
+function emptyDocumentCommandBody(replacement) {
+  return `
+try {
+  const replacement = ${JSON.stringify(replacement)};
+  if (!replacement) return;
+  const doc = Api.GetDocument();
+  if (!doc || doc.GetElementsCount() !== 1) return;
+  const paragraph = doc.GetElement(0);
+  if (!paragraph || typeof paragraph.GetClassType !== 'function' || paragraph.GetClassType() !== 'paragraph') return;
+  const textOpts = { Numbering: false };
+  const text = String(typeof paragraph.GetText === 'function' ? paragraph.GetText(textOpts) : '');
+  if (text.trim() !== '') return;
+  if (typeof paragraph.AddText !== 'function') return;
+  paragraph.AddText(replacement);
 } catch (_) {}
 `;
 }
@@ -246,8 +371,14 @@ try {
 /**
  * Pre-dispatch refusal: without a readable property baseline the preservation requirement cannot
  * be proven afterwards, so the write is refused BEFORE dispatch (source BE:47, same rule).
+ *
+ * GH #307: `emptyDocument` is EXEMPT -- its target carries no run by construction (an empty
+ * paragraph has nothing to read a baseline FROM), so an unreadable baseline here is the EXPECTED
+ * shape, not a suspicious one. Requiring `target.props` for this branch would refuse every write
+ * this selector could ever make.
  */
 function preDispatchCheck(op, target) {
+  if (op.selector && op.selector.emptyDocument === true) return { ok: true };
   if (!target.props) return { ok: false, dispatched: false, detail: 'rewrite-property-baseline-unreadable' };
   return { ok: true };
 }
@@ -274,6 +405,15 @@ function comparable(props) {
  * Operation-scoped, never persisted: not a mutation target, not a receipt, not a persistence authority.
  */
 function verifyPreservation(op, before, after) {
+  // GH #307: an empty target has no run property to preserve -- what the write must preserve instead is
+  // the document's SHAPE: before it, exactly one empty paragraph (the resolver's own precondition);
+  // after it, still exactly one block, a paragraph, holding the task's own text. Anything else (an
+  // extra paragraph, a different kind, other text) fails -- not a vacuous pass.
+  if (op.selector && op.selector.emptyDocument === true) {
+    const blocks = (after && after.primary && after.primary.blocks) || [];
+    const ok = blocks.length === 1 && blocks[0].kind === 'paragraph' && norm(blocks[0].text) === norm(op.text);
+    return { ok, evidence: { reason: ok ? 'empty-document: one paragraph, the task text' : 'empty-document: the document is not exactly one paragraph holding the task text', blocks: blocks.length } };
+  }
   const target = before ? resolveStableTarget(before.primary, op.selector).target : null;
   const expected = derivedExpectation(target);
   if (!expected) return { ok: false, evidence: { reason: 'no derived preservation expectation (before-properties unreadable)' } };
@@ -281,9 +421,18 @@ function verifyPreservation(op, before, after) {
   const now = resolveStableTarget(after.primary, { text: op.text }).target;
   if (!now || !now.props) return { ok: false, evidence: { reason: 'after-properties unreadable' } };
   const actual = comparable(now.props);
+  // GH #359 (3/3): name which properties derivedExpectation filled in from the first source run
+  // (target.props itself omitted them) -- so a caller can see that the SECOND run's own
+  // formatting did not survive the rewrite, without re-deriving it from target.props/target.runs.
+  const formattingCollapsedToFirstRun = target && target.props
+    ? PRESERVED_PROPERTIES.filter(k => target.props[k] === undefined && expected[k] !== undefined)
+    : [];
   return {
     ok: JSON.stringify(expected) === JSON.stringify(actual),
-    evidence: { expected, after: actual, expectationSource: 'derived-from-fresh-pre-mutation-observation', properties: PRESERVED_PROPERTIES },
+    evidence: {
+      expected, after: actual, expectationSource: 'derived-from-fresh-pre-mutation-observation', properties: PRESERVED_PROPERTIES,
+      ...(formattingCollapsedToFirstRun.length ? { formattingCollapsedToFirstRun } : {}),
+    },
   };
 }
 
@@ -353,6 +502,6 @@ function producedText(op) {
 }
 
 module.exports = {
-  plan, classify, resolve, lower, commandBody, preDispatchCheck, verifyPrimitive, verifyPreservation,
-  wholeTaskChecks, anchorsOf, derivedExpectation, PRESERVED_PROPERTIES, UNRESOLVED, producedText,
+  plan, classify, resolve, lower, commandBody, emptyDocumentCommandBody, preDispatchCheck, verifyPrimitive, verifyPreservation,
+  wholeTaskChecks, anchorsOf, derivedExpectation, PRESERVED_PROPERTIES, UNRESOLVED, producedText, REWRITE_NO_WRITE_REASONS,
 };

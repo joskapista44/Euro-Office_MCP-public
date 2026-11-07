@@ -52,6 +52,26 @@ test('R1 lower: a hide re-checks another visible sheet in the dispatch; a show d
   assert.match(show, /ws\.SetVisible\(true\)/);
 });
 
+// GH #365 option C U2 (card an internal branch): this family's own `gate()` reads ONLY the public
+// GetVisible() boolean (`p.visibility`), which never distinguishes hidden from veryHidden (both
+// read `false`) -- so a veryHidden sheet is, BY CONSTRUCTION, already APPLY-eligible for 'visible'
+// through the exact same code path the 'A: true, B: false' case above already proves. NOTHING in
+// this family changed for U2: this test NAMES that pre-existing behaviour explicitly, so the card's
+// own stated requirement ("veryHidden lapra 'visible' iras engedett") has a test that fails loudly
+// if a FUTURE change (e.g. gating on veryHiddenReads here too) ever narrows it. Writing 'veryHidden'
+// itself stays refused by the SAME schema check the first test above already covers -- this
+// family's STATES never gained a third entry.
+test('GH #365 C U2: revealing a veryHidden sheet (write visibility:"visible") is NOT blocked -- gate()/classify() cannot tell hidden and veryHidden apart, so both reach APPLY the same way; writing "veryHidden" itself remains refused', () => {
+  const show = opOf(stepOf({ visibility: 'visible' }));
+  // the obs() fixture's `visibility` map is exactly what GetVisible() would report for either a
+  // plain-hidden OR a veryHidden sheet (both `false`) -- there is no third input shape to give it.
+  const veryHiddenLookingObs = obs({ A: true, B: false });
+  assert.equal(fam.classify(veryHiddenLookingObs, show).state, 'APPLY', 'revealing a (possibly veryHidden) hidden sheet must reach APPLY, never a named refusal');
+  const lowered = fam.lower(show).body;
+  assert.match(lowered, /ws\.SetVisible\(true\)/, 'the dispatch still calls the SAME public SetVisible(true) -- no veryHidden-specific engine path exists or is needed here');
+  assert.equal(fam.plan(stepOf({ visibility: 'veryHidden' }), 0).ok, false, 'STATES has no veryHidden entry -- writing it directly stays refused, unchanged by U2');
+});
+
 test('R1 verify: L1 the read state; L3 every other sheet\'s visibility and the sheet list kept', () => {
   const op = opOf(stepOf());
   const before = { primary: obs({ A: true, B: true, C: false }) };

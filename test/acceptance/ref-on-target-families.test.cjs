@@ -19,7 +19,7 @@ const book = brokenOn => [
   { name: 'Other', cells: { A1: { v: 'keep' }, ...(brokenOn === 'Other' ? { F9: BROKEN } : {}) } },
 ];
 const CASES = [
-  ['delete_rows', { intent: 'delete_rows', id: 's', sheet: 'Data', at: 2, count: 1, anchor: { column: 'A', value: 'r3' } }],
+  ['delete_rows', { intent: 'delete_rows', id: 's', sheet: 'Data', at: 2, count: 1, anchor: { column: 'A', value: 'r3' }, witness: { column: 'A', value: 'r2' } }],
   ['move_range', { intent: 'move_range', id: 's', sheet: 'Data', range: 'A1:A3', target: 'D1' }],
   ['rename_sheet', { intent: 'rename_sheet', id: 's', sheet: 'Data', name: 'Data2' }],
   ['set_defined_name (sheet scope)', { intent: 'set_defined_name', id: 's', name: 'Rate', refersTo: '=Data!$A$1', scope: 'Data' }],

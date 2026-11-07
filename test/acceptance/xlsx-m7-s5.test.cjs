@@ -93,26 +93,33 @@ for (const [name, t, merges, want] of [
   // the W5 probe's four shapes, written out from m6-w5-probe-20260929.json S2_READ (not derived by the code under test)
   ['insert 2 rows at 3 inside G2:H3 -> G2:H5', shiftStep('insert_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r3' } }), ['G2:H3'], ['G2:H5']],
   ['insert column B inside A8:C8 -> A8:D8', shiftStep('insert_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'b1' } }), ['A8:C8'], ['A8:D8']],
-  ['delete column B inside A8:C8 -> A8:B8', shiftStep('delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'c1' } }), ['A8:C8'], ['A8:B8']],
-  ['delete rows 3:4 across the bottom of G2:H3 -> G2:H2', shiftStep('delete_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' } }), ['G2:H3'], ['G2:H2']],
+  ['delete column B inside A8:C8 -> A8:B8', shiftStep('delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'c1' }, witness: { row: 1, value: 'b1' } }), ['A8:C8'], ['A8:B8']],
+  ['delete rows 3:4 across the bottom of G2:H3 -> G2:H2', shiftStep('delete_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r5' }, witness: { column: 'A', value: 'r3' } }), ['G2:H3'], ['G2:H2']],
 ]) {
-  test(`R5 APPLIED: ${name}; retry SATISFIED 0/0`, async () => {
+  const del = t.steps[0].intent.startsWith('delete');
+  test(`R5 APPLIED: ${name}; retry ${del ? 'refused as unprovable' : 'SATISFIED'} 0/0`, async () => {
     const store = createStore(mergeBook(merges));
     const { result, m } = await run(store, t);
     assert.equal(result.ok, true, JSON.stringify([result.execution.primitiveVerification, op(result).evidence]));
     assert.equal(m.commands, 1);
     assert.deepEqual(mergesOf(store), want);
+    const settled = JSON.stringify(store.durable);
     const again = await run(store, t);
     assert.equal(again.m.writes, 0);
     assert.equal(again.m.commands, 0);
-    assert.equal(op(again.result).status, OPERATION_STATUS.SATISFIED);
+    if (del) {
+      // owner decision B (2026-11-02): a delete has no SATISFIED path -- the already-deleted shape is refused
+      assert.equal(op(again.result).status, OPERATION_STATUS.FAILED);
+      assert.equal(reason(again.result), 'xlsx-structure-delete-prior-execution-unprovable');
+      assert.equal(JSON.stringify(store.durable), settled, 'the refused retry changed nothing');
+    } else assert.equal(op(again.result).status, OPERATION_STATUS.SATISFIED);
   });
 }
 
 for (const [name, t, merges, why] of [
-  ['a delete removing the merge\'s top-left row', shiftStep('delete_rows', { at: 2, count: 1, anchor: { column: 'A', value: 'r3' } }), ['G2:H3'], 'xlsx-structure-merge-top-left-deleted'],
-  ['a delete removing the merge\'s top-left column', shiftStep('delete_columns', { at: 'A', count: 1, anchor: { row: 1, value: 'b1' } }), ['A8:C8'], 'xlsx-structure-merge-top-left-deleted'],
-  ['a merge clipped to one cell', shiftStep('delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'c1' } }), ['A8:B8'], 'xlsx-structure-merge-collapses-to-one-cell'],
+  ['a delete removing the merge\'s top-left row', shiftStep('delete_rows', { at: 2, count: 1, anchor: { column: 'A', value: 'r3' }, witness: { column: 'A', value: 'r2' } }), ['G2:H3'], 'xlsx-structure-merge-top-left-deleted'],
+  ['a delete removing the merge\'s top-left column', shiftStep('delete_columns', { at: 'A', count: 1, anchor: { row: 1, value: 'b1' }, witness: { row: 1, value: 'r1' } }), ['A8:C8'], 'xlsx-structure-merge-top-left-deleted'],
+  ['a merge clipped to one cell', shiftStep('delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'c1' }, witness: { row: 1, value: 'b1' } }), ['A8:B8'], 'xlsx-structure-merge-collapses-to-one-cell'],
 ]) {
   test(`R5 refused BEFORE dispatch: ${name}`, async () => {
     const { result, driver } = await run(createStore(mergeBook(merges)), t);
@@ -125,7 +132,7 @@ for (const [name, t, merges, why] of [
 test('R5 RED: a merge that only moves (no grow / no clip) -> L1 FAIL, nothing persisted', async () => {
   for (const [t, merges] of [
     [shiftStep('insert_rows', { at: 3, count: 2, anchor: { column: 'A', value: 'r3' } }), ['G2:H3']],
-    [shiftStep('delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'c1' } }), ['A8:C8']],
+    [shiftStep('delete_columns', { at: 'B', count: 1, anchor: { row: 1, value: 'c1' }, witness: { row: 1, value: 'b1' } }), ['A8:C8']],
   ]) {
     const { result } = await run(createStore(mergeBook(merges)), t, { fault: 'merge-keeps-size' });
     assert.equal(result.ok, false);

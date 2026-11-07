@@ -1,0 +1,11 @@
+"workbook.protection.read/v1": function (args) {
+if (args !== undefined && args !== null && typeof args !== "object") return { ok: false, reason: "bad-args" };
+var wb; try { wb = (Asc.editor || {}).wbModel; } catch (e) { wb = undefined; }
+if (!wb || typeof wb.getWorkbookProtection !== "function") return { ok: false, reason: "model-missing" };
+var T; try { T = Asc.c_oAscWorkbookProtectType; } catch (e) { T = undefined; }
+if (!T || typeof T.lockStructure !== "number") return { ok: false, reason: "protection-api-missing" };
+var v; try { v = wb.getWorkbookProtection(T.lockStructure); } catch (e) { return { ok: false, reason: "protection-api-missing" }; }
+if (v === null) return { ok: true, value: { lockStructure: false } };
+if (typeof v !== "boolean") return { ok: false, reason: "protection-flag-not-boolean" };
+return { ok: true, value: { lockStructure: v } };
+},

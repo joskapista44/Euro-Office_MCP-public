@@ -2,6 +2,49 @@
 
 This project follows [Semantic Versioning](https://semver.org/). Versions before 1.0.0 were internal.
 
+## 1.2.0
+
+**Compatibility note:** no Document Server upgrade is required to keep existing capabilities working -- every
+`/16`/`/17`-accepted read and write intent from 1.1.0 is unchanged. `read_tables`, `read_hyperlinks` and the
+table-aware structural writes below need Document Server cell Bridge `euro-office-bridge-v1/9.3.5.0/18` or later;
+on `/16`/`/17` they refuse with `CAPABILITY_MISSING`, never a guessed value.
+
+- new tool `document_create`: see below -- exposed tools: 4 -> 6 (+ `product_status`, `document_create`)
+- `xlsx_execute_task`: 62 -> 87 write intents; `docx_execute_task`: 38 -> 46 write intents
+- the full list of accepted read operations and write intents: [CAPABILITIES.md](CAPABILITIES.md), checked against
+  the tool schemas by a test
+- XLSX, writes on a sheet that holds an Excel Table (read through `read_tables`, Document Server cell Bridge `/18`):
+  `insert_rows` / `delete_rows` / `insert_columns` / `delete_columns` beside the table (the table entirely before the
+  cut) now apply -- they used to be refused on any sheet with a table; one that would cut through or shift the table is
+  refused before the write (`xlsx-structure-overlaps-table`). `merge_range` overlapping a table is refused
+  (`xlsx-merge-overlaps-table`); `sort_range` of a range only partly over a table is refused (`xlsx-sort-overlaps-table`),
+  a sort of exactly the table's range still sorts it. On a runtime without the table read, merge and sort behave as before.
+- XLSX: new write intent `create_table` -- an Excel Table over a range whose first row is the header (public
+  `FormatAsTable`: automatic name, the engine's default style). Refused before any write, each named: a range that
+  overlaps a table or a pivot table, a merge inside the range, a single row, a blank / formula / duplicate header
+  (case-insensitive). Verified through `read_tables`, which needs Document Server cell Bridge `/18`.
+- DOCX `read_formatting`: a paragraph whose text also occurs elsewhere (or holds a tab) could report the properties
+  of its text without its last characters -- on a paragraph holding a hyperlink, and on some multi-run paragraphs --
+  so a mixed paragraph could read as uniformly bold. Its properties now come from a range verified to hold exactly
+  the paragraph's text; when no such range is found the properties are reported unread, never guessed.
+- DOCX: a paragraph with text around a hyperlink (one or more links) can now be formatted (`format_text`) and given a
+  footnote or endnote (`add_footnote`, `add_endnote`) -- the link stays, the note reference goes at the paragraph's end.
+  These used to end in `DISPATCHED_OUTCOME_UNKNOWN` without a write. `rewrite_paragraph` on a paragraph holding a
+  hyperlink is now refused before any write (`FAILED`, `rewrite-target-holds-hyperlink`) instead of the same unknown
+  outcome: a rewrite would delete the link.
+- new tool `document_create`: a new, empty `docx`, `xlsx` or `pptx`, produced by DocBuilder from a structure-only seed
+  and written to a local path or to a path in the requester's Nextcloud files. An existing file is never replaced; a
+  Nextcloud target answers the new `fileId`, which the co-editing tools (`docx_execute_task`, `xlsx_execute_task`) take
+  for every further edit.
+- `xlsx_read` gains `read_tables` (every Excel Table of one sheet: name, range, header/totals rows, column names,
+  style flags, autoFilter presence) and `read_hyperlinks` (every hyperlink of one sheet: target address, internal
+  location, screen tip, kind) -- both require Euro-Office Document Server Bridge `euro-office-bridge-v1/9.3.5.0/18`;
+  on the 1.1.0-accepted `/16` or `/17` Bridge both operations refuse with `CAPABILITY_MISSING`, never a guessed value.
+- The XLSX Bridge-backed writes (alignment indent / shrink, print settings, column-width canonicalization, chart
+  gap/overlap and series order, chart delete, series marker / line style) are accepted on the `/18` Bridge as well:
+  every pre-existing `/17` Bridge handler is byte-identical on `/18`, so switching the Document Server from `/17` to
+  `/18` keeps them working instead of refusing them.
+
 ## 1.1.0
 
 **Upgrade note:** this release requires Euro-Office Document Server **9.3.5.0** with the cell (XLSX) Bridge

@@ -16,7 +16,7 @@ const assert = require('node:assert/strict');
 const rt = require('../../src/server/read-tools.cjs');
 const { createStore, createFakeXlsxDriver } = require('../fakes/fake-xlsx-driver.cjs');
 const { fakeBroker, FILE } = require('../fakes/read-editors.cjs');
-const { projectSheetStateRead } = require('../../src/adapters/xlsx/families/sheet-state-read.cjs');
+const { projectSheetStateRead, HIDDEN_VS_VERYHIDDEN_DETAIL } = require('../../src/adapters/xlsx/families/sheet-state-read.cjs');
 
 const book = () => [
   { name: 'Alpha', cells: { A1: { v: 1 } } },
@@ -55,11 +55,22 @@ test('GH #133: every sheet in order with its visibility, the hidden one NAMED hi
   assert.deepEqual(r.result, {
     sheets: [
       { name: 'Alpha', index: 0, visibility: 'visible' },
-      { name: 'Hidden one', index: 1, visibility: 'hidden' },
+      { name: 'Hidden one', index: 1, visibility: 'hidden', visibilityDetail: HIDDEN_VS_VERYHIDDEN_DETAIL },
       { name: 'Gamma', index: 2, visibility: 'visible' },
     ],
     active: 'Gamma',
   });
+});
+
+test('GH #365 2nd unit: every "hidden" entry carries visibilityDetail naming the veryHidden/hidden limit; "visible" entries get no new field', async () => {
+  const r = await harness({ active: 'Gamma' }).handler({ fileId: FILE, operation: 'read_sheet_state' });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const hidden = r.result.sheets.find(s => s.name === 'Hidden one');
+  assert.equal(hidden.visibility, 'hidden');
+  assert.equal(hidden.visibilityDetail, 'UNOBSERVABLE:hidden-vs-veryhidden-not-distinguished');
+  for (const s of r.result.sheets.filter(s => s.visibility === 'visible')) {
+    assert.equal('visibilityDetail' in s, false, `a visible sheet (${s.name}) must carry no visibilityDetail field at all`);
+  }
 });
 
 test('GH #133: with no saved active tab the first sheet is the active one (what the editor reports); a hidden active sheet is read as it is, never corrected', async () => {
@@ -85,7 +96,7 @@ test('GH #133: the projection never invents a state -- a missing visibility axis
   const out = projectSheetStateRead({ sheets, visibility: { A: true, B: false, C: 'UNOBSERVABLE:visibility-not-boolean' }, active: 'UNOBSERVABLE:threw' });
   assert.deepEqual(out.sheets, [
     { name: 'A', index: 0, visibility: 'visible' },
-    { name: 'B', index: 1, visibility: 'hidden' },
+    { name: 'B', index: 1, visibility: 'hidden', visibilityDetail: HIDDEN_VS_VERYHIDDEN_DETAIL },
     { name: 'C', index: 2, visibility: null, reason: 'UNOBSERVABLE:visibility-not-boolean' },
     { name: 'D', index: 3, visibility: null, reason: 'UNOBSERVABLE:not-read' },
   ]);

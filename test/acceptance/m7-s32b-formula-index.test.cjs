@@ -46,7 +46,9 @@ const run = (body, b) => new Function('Api', body)(apiOf(b));
 function readers(b, request) {
   const sheets = b.sheets.map(s => s.name);
   return {
-    dependents: { names: b.names.map(n => ({ name: n.name, ref: n.ref, scopeSheet: n.scopeSheet || null })), validations: Object.fromEntries(sheets.map(n => [n, []])) },
+    // GH #362 2nd unit: the driver's SEPARATE unfiltered hidden-name axis (hiddenNames) -- this fixture carries no
+    // hidden names, so `[]` (not absent) keeps the names-family hidden-collision gate's "observed, none" branch.
+    dependents: { names: b.names.map(n => ({ name: n.name, ref: n.ref, scopeSheet: n.scopeSheet || null })), hiddenNames: [], validations: Object.fromEntries(sheets.map(n => [n, []])) },
     conditional: Object.fromEntries(sheets.map(n => [n, []])),
     objects: Object.fromEntries(sheets.map(n => [n, { charts: [], pivots: [], names: [] }])),
     filterReads: Object.fromEntries((request.filterSheets || []).map(n => [n, { range: null }])),

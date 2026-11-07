@@ -21,7 +21,7 @@ const { liveScope } = require('../../src/adapters/xlsx/adapter.cjs');
 const J = x => JSON.stringify(x);
 const FILE = '1303626';
 const req = steps => ({ fileId: FILE, task: { id: 't', steps } });
-const del = (extra = {}) => ({ intent: 'delete_rows', id: 's', sheet: 'S', at: 10, count: 100, anchor: { column: 'A', value: 'anchor' }, ...extra });
+const del = (extra = {}) => ({ intent: 'delete_rows', id: 's', sheet: 'S', at: 10, count: 100, anchor: { column: 'A', value: 'anchor' }, witness: { column: 'A', value: 'witness' }, ...extra });
 
 test('count = 100 (the schema\'s own ceiling): validateWriteRequest lets it through', () => {
   const r = validateWriteRequest(req([del()]));

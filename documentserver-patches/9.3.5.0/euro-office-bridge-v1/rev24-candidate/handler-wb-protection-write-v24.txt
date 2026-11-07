@@ -1,0 +1,55 @@
+"workbook.protection.write/v1": function (args) {
+if (!args || typeof args !== "object" || typeof args.protect !== "boolean") return { ok: false, reason: "bad-args" };
+var wb; try { wb = (Asc.editor || {}).wbModel; } catch (e) { wb = undefined; }
+if (!wb || typeof wb.setProtectedWorkbook !== "function" || typeof wb.getWorkbookProtection !== "function") return { ok: false, reason: "model-missing" };
+var A = typeof window !== "undefined" && window ? window.Asc : null;
+if (!A || typeof A.CWorkbookProtection !== "function") return { ok: false, reason: "protection-api-missing" };
+var T; try { T = A.c_oAscWorkbookProtectType; } catch (e) { T = undefined; }
+if (!T || typeof T.lockStructure !== "number") return { ok: false, reason: "protection-api-missing" };
+var cur; try { cur = wb.getWorkbookProtection(T.lockStructure); } catch (e) { return { ok: false, reason: "protection-api-missing" }; }
+if (typeof cur !== "boolean") return { ok: false, reason: "protection-api-missing" };
+if (cur === args.protect) return { ok: true, value: { applied: [], satisfied: true } };
+if (args.protect === false && cur === true) return { ok: false, reason: "credential-unobservable" };
+var H = typeof AscCommon !== "undefined" && AscCommon ? AscCommon.History : null;
+if (!(H && typeof H.Create_NewPoint === "function" && typeof H.StartTransaction === "function" && typeof H.EndTransaction === "function")) return { ok: false, reason: "history-missing" };
+if (typeof H.Is_On === "function" && !H.Is_On()) return { ok: false, reason: "history-off" };
+var props = new A.CWorkbookProtection();
+if (typeof props.asc_setLockStructure !== "function") return { ok: false, reason: "protection-api-missing" };
+if (args.protect === true) {
+if (typeof props.asc_setWorkbookAlgorithmName !== "function" || typeof props.asc_setWorkbookSaltValue !== "function" || typeof props.asc_setWorkbookSpinCount !== "function" || typeof props.asc_setWorkbookHashValue !== "function") return { ok: false, reason: "protection-api-missing" };
+}
+props.asc_setLockStructure(args.protect);
+if (args.protect === true) {
+props.asc_setWorkbookAlgorithmName(null);
+props.asc_setWorkbookSaltValue(null);
+props.asc_setWorkbookSpinCount(null);
+props.asc_setWorkbookHashValue(null);
+}
+var bad = null;
+H.Create_NewPoint();
+H.StartTransaction();
+try {
+wb.setProtectedWorkbook(props, true);
+if (args.protect === true) {
+var wp0; try { wp0 = wb.workbookProtection; } catch (e2) { wp0 = undefined; }
+if (wp0 && typeof wp0.asc_isPassword === "function" && wp0.asc_isPassword()) {
+try {
+var revertProps = new A.CWorkbookProtection();
+if (typeof revertProps.asc_setLockStructure === "function") {
+revertProps.asc_setLockStructure(false);
+wb.setProtectedWorkbook(revertProps, true);
+}
+} catch (e3) {}
+bad = { ok: false, reason: "credential-not-cleared" };
+}
+}
+} catch (e) {
+bad = { ok: false, reason: "setter-threw" };
+} finally {
+H.EndTransaction();
+}
+if (bad) return bad;
+var after; try { after = wb.getWorkbookProtection(T.lockStructure); } catch (e) { after = undefined; }
+if (after !== args.protect) return { ok: false, reason: "no-effect" };
+return { ok: true, value: { applied: ["lockStructure"] } };
+},

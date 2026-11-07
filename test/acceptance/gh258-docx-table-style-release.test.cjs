@@ -93,7 +93,7 @@ test('SCHEMA: a format_table task is that ONE step -- a second step (another tab
 test('ALLOWLIST: every OTHER routed docx intent is still REFUSED_NOT_ALLOWLISTED pre-dispatch, even next to a valid format_table (the other table fields and the styles are not released here)', () => {
   const others = D.docxRoutedIntents();
   for (const i of W.DOCX_WRITE_ALLOWLIST) others.delete(i);
-  assert.equal(others.size, 0); // release 3 trim + GH #266/#269e/#268d: every previously-withheld intent (define_style, modify_style, set_numbering, set_list_type, add_footnote, add_endnote, add_link, add_bookmark, resolve_comment, reply_comment, add_comment_on_match, set_image_size, set_image_wrap) is now released -- the array is current, nothing withheld
+  assert.equal(others.size, 0); // GH #308: insert_table joined the allowlist too -- the array is current, nothing withheld
   assert.deepEqual([...others].sort(), []);
   for (const intent of others) {
     const v = D.validateDocxWriteRequest(req([ft('GH258 r0c0', undefined, 'Table Grid'), { intent }]));
